@@ -27,7 +27,7 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderStatus, OrderActivityLog } from '../../types';
+import { Order, OrderStatus } from '../../types';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -139,22 +139,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setIsLogging(true);
       const workerName = profile?.workerName || profile?.displayName || 'المنفذ';
       const workerId = profile?.workerId || profile?.uid || 'worker';
-      const newLog: OrderActivityLog = {
-        id: 'log_' + Date.now(),
-        workerId,
-        workerName,
-        action,
-        actionText: language === 'ar' 
-          ? `${workerName} قام بتسجيل: ${label}`
-          : `${workerName} marked: ${label}`,
-        timestamp: new Date().toISOString(),
-      };
-
-      const existingLogs = order.activityLogs || [];
-      await updateOrder(order.id, {
-        activityLogs: [...existingLogs, newLog],
-      });
-
+      // Keep activity auditing in its dedicated Firestore collection. This
+      // avoids adding or changing fields on the existing order document.
       await addActivityLog({
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -880,4 +866,3 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     </div>
   );
 };
-

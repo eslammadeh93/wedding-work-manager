@@ -7,6 +7,7 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { useAuth } from './AuthContext';
 import {
   Order,
   Customer,
@@ -110,6 +111,7 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -133,19 +135,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubActivityLogs: () => void = () => {};
 
     try {
-      // Listener for Activity Logs
-      unsubActivityLogs = onSnapshot(collection(db, 'activityLogs'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list: ActivityLogRecord[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            list.push({ id: docSnap.id, logId: docSnap.id, ...data } as ActivityLogRecord);
-          });
+      // Activity logs are an admin-only dataset. Workers never subscribe to
+      // or receive this collection in the client.
+      const canViewActivityLogs = profile?.role === 'super_admin' || profile?.role === 'admin';
+      if (canViewActivityLogs) {
+        unsubActivityLogs = onSnapshot(collection(db, 'activityLogs'), (snapshot) => {
+          const list = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            logId: docSnap.id,
+            ...docSnap.data(),
+          })) as ActivityLogRecord[];
           setActivityLogs(list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-        } else {
-          setActivityLogs([]);
-        }
-      });
+        });
+      } else {
+        setActivityLogs([]);
+      }
       // Listener for Orders
       unsubOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
         if (!snapshot.empty) {
@@ -269,7 +273,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubSettings();
       unsubCategories();
     };
-  }, []);
+  }, [profile?.role]);
 
   // Recalculate inventory reservations based on active orders
   const recalculateInventory = useCallback((allOrders: Order[], currentInventory: InventoryItem[]) => {
@@ -838,4 +842,3 @@ export const useData = () => {
   }
   return context;
 };
-

@@ -16,6 +16,9 @@ import {
   ExternalLink,
   ShieldAlert,
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
@@ -119,118 +122,72 @@ export const ActivityLogModule: React.FC = () => {
     }
   };
 
-  // Export to Excel (CSV with UTF-8 BOM)
+  const getActionLabel = (action: ActivityLogRecord['action']) => {
+    if (action === 'opened') return language === 'ar' ? 'فتح الأوردر' : 'Opened Order';
+    if (action === 'arrived') return language === 'ar' ? 'تم الوصول' : 'Arrived';
+    if (action === 'finished') return language === 'ar' ? 'تم الانتهاء' : 'Finished';
+    return action;
+  };
+
+  // Export the current filtered view as a native Excel workbook.
   const handleExportExcel = () => {
     if (filteredLogs.length === 0) {
       alert(language === 'ar' ? 'لا توجد بيانات للتصدير' : 'No data to export');
       return;
     }
 
-    const headers = ['وقت التنفيذ', 'اسم العامل', 'اسم العميل', 'رقم الأوردر', 'التاريخ', 'الإجراء'];
-    const rows = filteredLogs.map((log) => {
-      const timeFormatted = new Date(log.timestamp).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US');
-      let actionLabel = log.action;
-      if (log.action === 'opened') actionLabel = language === 'ar' ? 'فتح الأوردر' : 'Opened Order';
-      if (log.action === 'arrived') actionLabel = language === 'ar' ? 'تم الوصول' : 'Arrived';
-      if (log.action === 'finished') actionLabel = language === 'ar' ? 'تم الانتهاء' : 'Finished';
+    const rows = filteredLogs.map((log) => ({
+      'وقت التنفيذ': new Date(log.timestamp).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US'),
+      'اسم العامل': log.workerName || '',
+      'اسم العميل': log.customerName || '',
+      'رقم الأوردر': log.orderNumber || '',
+      'التاريخ': log.eventDate || '',
+      'الإجراء': getActionLabel(log.action),
+    }));
 
-      return [
-        `"${timeFormatted}"`,
-        `"${log.workerName || ''}"`,
-        `"${log.customerName || ''}"`,
-        `"${log.orderNumber || ''}"`,
-        `"${log.eventDate || ''}"`,
-        `"${actionLabel}"`,
-      ].join(',');
-    });
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Activity_Log_${todayStr}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet['!cols'] = [
+      { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 18 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, worksheet, language === 'ar' ? 'سجل النشاط' : 'Activity Log');
+    XLSX.writeFile(workbook, `Activity_Log_${todayStr}.xlsx`);
   };
 
-  // Export to PDF / Printable View
+  // Export the current filtered view as a PDF file.
   const handleExportPdf = () => {
     if (filteredLogs.length === 0) {
       alert(language === 'ar' ? 'لا توجد بيانات للتصدير' : 'No data to export');
       return;
     }
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const isAr = language === 'ar';
-    const rowsHtml = filteredLogs
-      .map((log) => {
-        const timeFormatted = new Date(log.timestamp).toLocaleString(isAr ? 'ar-EG' : 'en-US');
-        let actionBadge = `<span style="background: #e0f2fe; color: #0369a1; padding: 4px 8px; borderRadius: 6px; font-weight: bold;">👁 ${isAr ? 'فتح الأوردر' : 'Opened'}</span>`;
-        if (log.action === 'arrived') {
-          actionBadge = `<span style="background: #ffedd5; color: #c2410c; padding: 4px 8px; borderRadius: 6px; font-weight: bold;">🚗 ${isAr ? 'تم الوصول' : 'Arrived'}</span>`;
-        } else if (log.action === 'finished') {
-          actionBadge = `<span style="background: #dcfce7; color: #15803d; padding: 4px 8px; borderRadius: 6px; font-weight: bold;">✅ ${isAr ? 'تم الانتهاء' : 'Finished'}</span>`;
-        }
-
-        return `
-          <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${timeFormatted}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${log.workerName}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${log.customerName || '-'}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-family: monospace; font-weight: bold;">${log.orderNumber}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${log.eventDate || '-'}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${actionBadge}</td>
-          </tr>
-        `;
-      })
-      .join('');
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html dir="${isAr ? 'rtl' : 'ltr'}">
-        <head>
-          <title>${isAr ? 'سجل النشاط' : 'Activity Log Report'}</title>
-          <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; color: #1e293b; }
-            h1 { text-align: center; color: #d97706; margin-bottom: 5px; }
-            p.sub { text-align: center; color: #64748b; font-size: 13px; margin-top: 0; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
-            th { background-color: #f8fafc; padding: 12px; text-align: ${isAr ? 'right' : 'left'}; border-bottom: 2px solid #cbd5e1; font-weight: 800; color: #334155; }
-            .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #94a3b8; }
-          </style>
-        </head>
-        <body>
-          <h1>${isAr ? 'سجل نشاط العمال' : 'Workers Activity Log Report'}</h1>
-          <p class="sub">${isAr ? 'تاريخ التقرير' : 'Report Date'}: ${new Date().toLocaleDateString(isAr ? 'ar-EG' : 'en-US')}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>${isAr ? 'وقت التنفيذ' : 'Timestamp'}</th>
-                <th>${isAr ? 'اسم العامل' : 'Worker'}</th>
-                <th>${isAr ? 'اسم العميل' : 'Customer'}</th>
-                <th>${isAr ? 'رقم الأوردر' : 'Order #'}</th>
-                <th>${isAr ? 'التاريخ' : 'Event Date'}</th>
-                <th>${isAr ? 'الإجراء' : 'Action'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rowsHtml}
-            </tbody>
-          </table>
-          <div class="footer">${isAr ? 'تم الإنشاء بواسطة نظام مدير أعمال الويدينج' : 'Generated by Wedding Work Manager ERP'}</div>
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 500);
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(16);
+    doc.text('Activity Log', 14, 16);
+    doc.setFontSize(10);
+    doc.text(new Date().toLocaleDateString('en-GB'), 14, 23);
+    autoTable(doc, {
+      startY: 28,
+      head: [[
+        language === 'ar' ? 'وقت التنفيذ' : 'Timestamp',
+        language === 'ar' ? 'اسم العامل' : 'Worker',
+        language === 'ar' ? 'اسم العميل' : 'Customer',
+        language === 'ar' ? 'رقم الأوردر' : 'Order #',
+        language === 'ar' ? 'التاريخ' : 'Event Date',
+        language === 'ar' ? 'الإجراء' : 'Action',
+      ]],
+      body: filteredLogs.map((log) => [
+        new Date(log.timestamp).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US'),
+        log.workerName || '-',
+        log.customerName || '-',
+        log.orderNumber || '-',
+        log.eventDate || '-',
+        getActionLabel(log.action),
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [217, 119, 6] },
+    });
+    doc.save(`Activity_Log_${todayStr}.pdf`);
   };
 
   // Access Denied Protection for Non-Admins
