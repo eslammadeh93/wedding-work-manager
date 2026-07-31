@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "workers": {
+      "title": "Workers",
+      "description": "Company worker accounts for task execution and order assignment",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "description": "Worker full name" },
+        "username": { "type": "string", "description": "Unique login username" },
+        "loginCode": { "type": "string", "description": "Numeric or alpha login code" },
+        "jobTitle": { "type": "string", "description": "Worker job title or position" },
+        "phone": { "type": "string", "description": "Worker phone number" },
+        "notes": { "type": "string", "description": "Internal admin notes" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Worker active status" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "username", "loginCode", "status"]
+    },
+    "activityLogs": {
+      "title": "Activity Logs",
+      "description": "Field execution logs recorded when workers open orders or mark arrived/finished status",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "description": "Unique log ID" },
+        "orderId": { "type": "string", "description": "Associated order ID" },
+        "orderNumber": { "type": "string", "description": "Associated order display number" },
+        "workerId": { "type": "string", "description": "Worker user/profile ID" },
+        "workerName": { "type": "string", "description": "Worker display name" },
+        "action": { "type": "string", "enum": ["opened", "arrived", "finished"], "description": "Action performed" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "customerName": { "type": "string", "description": "Customer name on the order" },
+        "eventDate": { "type": "string", "description": "Event date on the order" }
+      },
+      "required": ["orderId", "orderNumber", "workerId", "workerName", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/activityLogs/{logId}": {
+      "schema": "activityLogs",
+      "description": "Collection storing field execution activity logs"
+    }
+  }
+}
