@@ -14,6 +14,7 @@ export const LoginPage: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const logoTaps = useRef(0);
@@ -41,7 +42,7 @@ export const LoginPage: React.FC = () => {
     event.preventDefault(); resetError(); setSubmitting(true);
     try {
       if (view === 'setup') await createFirstSuperAdmin({ displayName: name.trim(), email, password });
-      else await loginEmail(email, password);
+      else await loginEmail(email, password, rememberMe);
     } catch (error: any) {
       const messages: Record<string, string> = {
         'auth/invalid-credential': 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
@@ -76,6 +77,7 @@ export const LoginPage: React.FC = () => {
           {view === 'setup' && <Field label="الاسم" icon={<User className="w-4 h-4" />} value={name} onChange={setName} placeholder="اسم المدير" />}
           <Field label="البريد الإلكتروني" icon={<Mail className="w-4 h-4" />} value={email} onChange={setEmail} placeholder="name@example.com" email />
           <Field label="كلمة المرور" icon={<Lock className="w-4 h-4" />} value={password} onChange={setPassword} placeholder="كلمة المرور" password minLength={6} />
+          {view === 'manager' && <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer w-fit"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="w-4 h-4 accent-amber-500" /><span>تذكرني لمدة 7 أيام</span></label>}
           <Submit submitting={submitting}>{view === 'setup' ? 'إنشاء الحساب' : 'دخول المدير'}</Submit>
           {allUsers.length === 0 && <button type="button" onClick={() => { setView(view === 'setup' ? 'manager' : 'setup'); resetError(); }} className="w-full text-xs font-bold text-amber-400">{view === 'setup' ? 'لدي حساب بالفعل' : 'إنشاء حساب المدير الأول'}</button>}
         </form>}

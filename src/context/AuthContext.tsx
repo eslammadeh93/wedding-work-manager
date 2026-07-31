@@ -7,6 +7,9 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail,
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
 } from 'firebase/auth';
 import {
   doc,
@@ -49,7 +52,7 @@ interface AuthContextType {
   usersInitialized: boolean;
   authError: string | null;
   clearError: () => void;
-  loginEmail: (email: string, pass: string) => Promise<void>;
+  loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
   logout: (reason?: string) => Promise<void>;
@@ -95,11 +98,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const LAST_ACTIVITY_KEY = 'wedding_manager_last_activity';
   const WORKER_SESSION_KEY = 'wedding_manager_worker_session';
+  const REMEMBER_UNTIL_KEY = 'wedding_manager_remember_until';
+  const REMEMBER_DURATION = 7 * 24 * 60 * 60 * 1000;
   const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
 
   const logout = async (reason?: string) => {
     localStorage.removeItem(LAST_ACTIVITY_KEY);
     localStorage.removeItem(WORKER_SESSION_KEY);
+    localStorage.removeItem(REMEMBER_UNTIL_KEY);
     if (reason) {
       setAuthError(reason);
     } else {
@@ -163,6 +169,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(currentUser);
 
       if (currentUser) {
+        const rememberUntil = Number(localStorage.getItem(REMEMBER_UNTIL_KEY) || 0);
+        if (rememberUntil && Date.now() >= rememberUntil) {
+          localStorage.removeItem(REMEMBER_UNTIL_KEY);
+          await signOut(auth);
+          setUser(null);
+          setProfile(null);
+          setAuthError('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.');
+          setLoading(false);
+          return;
+        }
+        // A newly created account may not have gone through loginEmail yet.
+        // Start its inactivity clock without overwriting an existing session timestamp.
+        if (!localStorage.getItem(LAST_ACTIVITY_KEY)) {
+          localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+        }
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userDocRef);
@@ -301,13 +322,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user]);
 
+  // Enforce the seven-day "remember me" expiry even if the app remains open.
+  useEffect(() => {
+    const rememberUntil = Number(localStorage.getItem(REMEMBER_UNTIL_KEY) || 0);
+    if (!user || !rememberUntil) return;
+    const remaining = rememberUntil - Date.now();
+    if (remaining <= 0) {
+      logout('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.');
+      return;
+    }
+    const timer = window.setTimeout(
+      () => logout('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.'),
+      remaining
+    );
+    return () => window.clearTimeout(timer);
+  }, [user]);
+
   const clearError = () => setAuthError(null);
 
-  const loginEmail = async (email: string, pass: string) => {
+  const loginEmail = async (email: string, pass: string, rememberMe = false) => {
     setAuthError(null);
     const trimmedEmail = email.trim().toLowerCase();
 
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_UNTIL_KEY, (Date.now() + REMEMBER_DURATION).toString());
+      } else {
+        localStorage.removeItem(REMEMBER_UNTIL_KEY);
+      }
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
       if (cred.user) {
         localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
@@ -329,6 +372,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const userCred = await createUserWithEmailAndPassword(auth, data.email, data.password);
       if (userCred.user) {
+        localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
         const newProf: UserProfile = {
           uid: userCred.user.uid,
           email: data.email,
