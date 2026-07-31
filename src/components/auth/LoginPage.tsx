@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Lock, LogIn, AlertCircle, Globe, Sun, Moon, Crown, User, HardHat, Key } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Lock, LogIn, AlertCircle, Globe, Sun, Moon, Crown, User, Key } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -9,7 +9,7 @@ export const LoginPage: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const { loginLocalSession, loginWorker, authError, clearError } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'manager' | 'worker'>('manager');
+  const [activeTab, setActiveTab] = useState<'manager' | 'worker'>('worker');
 
   // Manager state
   const [managerUsername, setManagerUsername] = useState('');
@@ -20,6 +20,7 @@ export const LoginPage: React.FC = () => {
   const [workerLoginCode, setWorkerLoginCode] = useState('');
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const lastLogoTapAt = useRef(0);
 
   const displayError = errorMessage || authError;
 
@@ -60,6 +61,19 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const handleLogoTap = () => {
+    const now = Date.now();
+    const isDoubleTap = now - lastLogoTapAt.current < 350;
+    lastLogoTapAt.current = now;
+
+    if (isDoubleTap) {
+      setActiveTab((tab) => (tab === 'worker' ? 'manager' : 'worker'));
+      setErrorMessage(null);
+      clearError();
+      lastLogoTapAt.current = 0;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans" dir="rtl">
       {/* Background Decorative Accents */}
@@ -90,49 +104,17 @@ export const LoginPage: React.FC = () => {
         
         {/* Card Header Branding */}
         <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-700/50">
-          <div className="w-14 h-14 mx-auto mb-3 bg-gradient-to-tr from-amber-500 to-amber-400 rounded-2xl flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20">
+          <button
+            type="button"
+            onClick={handleLogoTap}
+            className="w-14 h-14 mx-auto mb-3 bg-gradient-to-tr from-amber-500 to-amber-400 rounded-2xl flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20 cursor-pointer"
+            aria-label="تغيير نوع تسجيل الدخول"
+          >
             <Crown className="w-7 h-7" />
-          </div>
+          </button>
           <h1 className="text-xl font-black text-white tracking-tight">
             {t('appName')}
           </h1>
-        </div>
-
-        {/* Login Type Tabs (Manager vs Worker) */}
-        <div className="grid grid-cols-2 p-2 bg-slate-900/60 border-b border-slate-700/50 gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('manager');
-              setErrorMessage(null);
-              clearError();
-            }}
-            className={`py-2.5 px-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'manager'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Crown className="w-4 h-4" />
-            <span>{t('managerLogin')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('worker');
-              setErrorMessage(null);
-              clearError();
-            }}
-            className={`py-2.5 px-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'worker'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <HardHat className="w-4 h-4" />
-            <span>{t('workerLogin')}</span>
-          </button>
         </div>
 
         {/* Card Body */}
