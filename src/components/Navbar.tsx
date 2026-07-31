@@ -15,7 +15,6 @@ import { useData } from '../context/DataContext';
 interface NavbarProps {
   onOpenSearch: () => void;
   onToggleNotificationDrawer: () => void;
-  onOpenAuth: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({

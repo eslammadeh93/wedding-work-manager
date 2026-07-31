@@ -50,7 +50,6 @@ interface AuthContextType {
   authError: string | null;
   clearError: () => void;
   loginEmail: (email: string, pass: string) => Promise<void>;
-  loginLocalSession: () => void;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
   logout: (reason?: string) => Promise<void>;
@@ -84,50 +83,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAllUsers(list);
         setUsersInitialized(true);
 
-        // Auto-seed Default Super Admin if no super admin exists or list is empty
-        const hasSuperAdmin = list.some((u) => u.email === 'eslam.madeh93@gmail.com' || u.role === 'super_admin');
-        if (!hasSuperAdmin) {
-          try {
-            const secondaryApp = getApps().find((a) => a.name === 'DefaultAdminInit')
-              ? getApp('DefaultAdminInit')
-              : initializeApp(firebaseConfigJson, 'DefaultAdminInit');
-            const secondaryAuth = getAuth(secondaryApp);
-            
-            try {
-              const cred = await createUserWithEmailAndPassword(secondaryAuth, 'eslam.madeh93@gmail.com', 'asdasdasd');
-              if (cred.user) {
-                const superAdminProf: UserProfile = {
-                  uid: cred.user.uid,
-                  email: 'eslam.madeh93@gmail.com',
-                  displayName: 'Eslam',
-                  phone: '+966 50 000 0000',
-                  role: 'super_admin',
-                  isActive: true,
-                  createdAt: new Date().toISOString(),
-                  lastLogin: 'Never',
-                };
-                await setDoc(doc(db, 'users', cred.user.uid), superAdminProf);
-              }
-              await signOut(secondaryAuth);
-            } catch (authErr: any) {
-              if (authErr.code === 'auth/email-already-in-use') {
-                const docRef = doc(db, 'users', 'default_super_admin');
-                await setDoc(docRef, {
-                  uid: 'default_super_admin',
-                  email: 'eslam.madeh93@gmail.com',
-                  displayName: 'Eslam',
-                  phone: '+966 50 000 0000',
-                  role: 'super_admin',
-                  isActive: true,
-                  createdAt: new Date().toISOString(),
-                  lastLogin: 'Never',
-                }, { merge: true });
-              }
-            }
-          } catch (e) {
-            console.warn('Could not auto-seed default Super Admin:', e);
-          }
-        }
       },
       (err) => {
         console.warn('Firestore user listener error:', err);
@@ -138,15 +93,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const LOCAL_SESSION_KEY = 'wedding_manager_local_session';
-  const WORKER_SESSION_KEY = 'wedding_manager_worker_session';
   const LAST_ACTIVITY_KEY = 'wedding_manager_last_activity';
+  const WORKER_SESSION_KEY = 'wedding_manager_worker_session';
   const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
 
   const logout = async (reason?: string) => {
-    localStorage.removeItem(LOCAL_SESSION_KEY);
-    localStorage.removeItem(WORKER_SESSION_KEY);
     localStorage.removeItem(LAST_ACTIVITY_KEY);
+    localStorage.removeItem(WORKER_SESSION_KEY);
     if (reason) {
       setAuthError(reason);
     } else {
@@ -163,105 +116,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
   };
 
-  const loginLocalSession = () => {
-    const nowStr = Date.now().toString();
-    localStorage.removeItem(WORKER_SESSION_KEY);
-    localStorage.setItem(LOCAL_SESSION_KEY, 'true');
-    localStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
-    setAuthError(null);
-    const localProf: UserProfile = {
-      uid: 'saif_user',
-      displayName: 'Saif',
-      email: 'saif@weddingmanager.com',
-      role: 'super_admin',
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      lastLogin: new Date().toISOString(),
-    };
-    setUser({ uid: 'saif_user', email: 'saif@weddingmanager.com' } as User);
-    setProfile(localProf);
-  };
-
   const loginWorker = async (usernameInput: string, loginCodeInput: string): Promise<boolean> => {
     setAuthError(null);
-    const cleanUsername = usernameInput.trim().toLowerCase();
-    const cleanCode = loginCodeInput.trim();
+    const username = usernameInput.trim().toLowerCase();
+    const loginCode = loginCodeInput.trim();
 
     try {
       const workersRef = collection(db, 'workers');
-      const q = query(workersRef, where('username', '==', cleanUsername));
-      const snap = await getDocs(q);
+      const result = await getDocs(query(workersRef, where('username', '==', username)));
+      const workerDoc = result.docs[0];
+      const worker = workerDoc?.data();
 
-      let foundDoc: any = null;
-      let foundData: any = null;
-
-      if (!snap.empty) {
-        foundDoc = snap.docs[0];
-        foundData = foundDoc.data();
-      } else {
-        // Fallback: search all docs in case username casing differs
-        const allSnap = await getDocs(workersRef);
-        allSnap.forEach((d) => {
-          const data = d.data();
-          if ((data.username || '').trim().toLowerCase() === cleanUsername) {
-            foundDoc = d;
-            foundData = data;
-          }
-        });
+      if (!workerDoc || !worker || worker.loginCode !== loginCode) {
+        setAuthError('اسم المستخدم أو كود الدخول غير صحيح.');
+        return false;
       }
-
-      if (!foundDoc || !foundData) {
-        const msg = 'اسم المستخدم أو كود الدخول غير صحيح';
-        setAuthError(msg);
+      if (worker.status !== 'active') {
+        setAuthError('حساب العامل غير مُفعّل. يرجى التواصل مع الإدارة.');
         return false;
       }
 
-      if ((foundData.loginCode || '').trim() !== cleanCode) {
-        const msg = 'اسم المستخدم أو كود الدخول غير صحيح';
-        setAuthError(msg);
-        return false;
-      }
-
-      if (foundData.status !== 'active') {
-        const msg = 'حساب العامل غير مفعل، يرجى التواصل مع الإدارة';
-        setAuthError(msg);
-        return false;
-      }
-
-      const nowStr = Date.now().toString();
-      const workerSession = {
-        workerId: foundDoc.id,
-        workerName: foundData.fullName,
-        username: foundData.username,
-      };
-
-      localStorage.removeItem(LOCAL_SESSION_KEY);
-      localStorage.setItem(WORKER_SESSION_KEY, JSON.stringify(workerSession));
-      localStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
-
-      const workerProf: UserProfile = {
-        uid: `worker_${foundDoc.id}`,
-        displayName: foundData.fullName,
-        email: `${foundData.username}@worker.local`,
+      const session = { workerId: workerDoc.id, workerName: worker.fullName, username: worker.username };
+      localStorage.setItem(WORKER_SESSION_KEY, JSON.stringify(session));
+      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+      const workerProfile: UserProfile = {
+        uid: `worker_${workerDoc.id}`,
+        displayName: worker.fullName,
+        email: `${worker.username}@worker.local`,
         role: 'worker',
         isActive: true,
-        workerId: foundDoc.id,
-        workerName: foundData.fullName,
-        createdAt: foundData.createdAt || new Date().toISOString(),
-        lastLogin: new Date().toISOString(),
+        workerId: workerDoc.id,
+        workerName: worker.fullName,
       };
-
-      setUser({ uid: `worker_${foundDoc.id}`, email: `${foundData.username}@worker.local` } as User);
-      setProfile(workerProf);
+      setUser({ uid: workerProfile.uid, email: workerProfile.email } as User);
+      setProfile(workerProfile);
       return true;
-    } catch (err: any) {
-      console.warn('Worker login error:', err);
-      setAuthError(err.message || 'بيانات الدخول غير صحيحة');
+    } catch (error: any) {
+      setAuthError(error.message || 'تعذر تسجيل دخول العامل.');
       return false;
     }
   };
 
-  // Sync auth state & profile via Firebase Authentication or local session
+  // Sync authenticated Firebase user with their Firestore profile.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -308,65 +204,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
       } else {
-        // Check if a local session exists in localStorage
-        if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
-          const lastActStr = localStorage.getItem(LAST_ACTIVITY_KEY);
-          const lastAct = lastActStr ? parseInt(lastActStr, 10) : 0;
-          const now = Date.now();
-
-          if (lastAct > 0 && now - lastAct >= INACTIVITY_TIMEOUT) {
-            // Invalidate expired session
-            localStorage.removeItem(LOCAL_SESSION_KEY);
-            localStorage.removeItem(LAST_ACTIVITY_KEY);
-            setUser(null);
-            setProfile(null);
-            setAuthError('انتهت جلسة العمل بسبب عدم النشاط، يرجى تسجيل الدخول مرة أخرى.');
-          } else {
-            localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
-            const localProf: UserProfile = {
-              uid: 'saif_user',
-              displayName: 'Saif',
-              email: 'saif@weddingmanager.com',
-              role: 'super_admin',
-              isActive: true,
-              createdAt: new Date().toISOString(),
-              lastLogin: new Date().toISOString(),
-            };
-            setUser({ uid: 'saif_user', email: 'saif@weddingmanager.com' } as User);
-            setProfile(localProf);
-          }
-        } else if (localStorage.getItem(WORKER_SESSION_KEY)) {
-          const workerSessionStr = localStorage.getItem(WORKER_SESSION_KEY);
+        const workerSession = localStorage.getItem(WORKER_SESSION_KEY);
+        if (workerSession) {
           try {
-            const session = JSON.parse(workerSessionStr!);
-            const lastActStr = localStorage.getItem(LAST_ACTIVITY_KEY);
-            const lastAct = lastActStr ? parseInt(lastActStr, 10) : 0;
-            const now = Date.now();
-
-            if (lastAct > 0 && now - lastAct >= INACTIVITY_TIMEOUT) {
-              localStorage.removeItem(WORKER_SESSION_KEY);
-              localStorage.removeItem(LAST_ACTIVITY_KEY);
-              setUser(null);
-              setProfile(null);
-              setAuthError('انتهت جلسة العمل بسبب عدم النشاط، يرجى تسجيل الدخول مرة أخرى.');
-            } else {
-              localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
-              const workerProf: UserProfile = {
+            const session = JSON.parse(workerSession);
+            const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+            if (lastActivity && Date.now() - lastActivity < INACTIVITY_TIMEOUT) {
+              localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+              const workerProfile: UserProfile = {
                 uid: `worker_${session.workerId}`,
                 displayName: session.workerName,
                 email: `${session.username}@worker.local`,
-                role: 'worker',
-                isActive: true,
-                workerId: session.workerId,
-                workerName: session.workerName,
+                role: 'worker', isActive: true, workerId: session.workerId, workerName: session.workerName,
               };
-              setUser({ uid: `worker_${session.workerId}`, email: `${session.username}@worker.local` } as User);
-              setProfile(workerProf);
+              setUser({ uid: workerProfile.uid, email: workerProfile.email } as User);
+              setProfile(workerProfile);
+            } else {
+              localStorage.removeItem(WORKER_SESSION_KEY);
+              setUser(null); setProfile(null);
             }
-          } catch (e) {
+          } catch {
             localStorage.removeItem(WORKER_SESSION_KEY);
-            setUser(null);
-            setProfile(null);
+            setUser(null); setProfile(null);
           }
         } else {
           setUser(null);
@@ -381,9 +240,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Automatic inactivity monitor (5 minutes timeout)
   useEffect(() => {
-    const isLocalLoggedIn = localStorage.getItem(LOCAL_SESSION_KEY) === 'true';
-    const isWorkerLoggedIn = !!localStorage.getItem(WORKER_SESSION_KEY);
-    if (!user && !isLocalLoggedIn && !isWorkerLoggedIn) {
+    const hasWorkerSession = Boolean(localStorage.getItem(WORKER_SESSION_KEY));
+    if (!user && !hasWorkerSession) {
       return;
     }
 
@@ -452,6 +310,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
       if (cred.user) {
+        localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
         const now = new Date().toISOString();
         try {
           await updateDoc(doc(db, 'users', cred.user.uid), { lastLogin: now });
@@ -460,31 +319,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (err: any) {
-      // If default Super Admin credentials provided and user does not exist in Auth yet, auto-create
-      if (trimmedEmail === 'eslam.madeh93@gmail.com' && pass === 'asdasdasd') {
-        try {
-          const userCred = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
-          if (userCred.user) {
-            const superAdminProf: UserProfile = {
-              uid: userCred.user.uid,
-              email: trimmedEmail,
-              displayName: 'Eslam',
-              phone: '+966 50 000 0000',
-              role: 'super_admin',
-              isActive: true,
-              createdAt: new Date().toISOString(),
-              lastLogin: new Date().toISOString(),
-            };
-            await setDoc(doc(db, 'users', userCred.user.uid), superAdminProf);
-            setProfile(superAdminProf);
-            setUser(userCred.user);
-            return;
-          }
-        } catch (createErr: any) {
-          console.warn('Fallback Super Admin creation failed:', createErr);
-        }
-      }
-
       setAuthError(err.message || 'Login failed. Please check your credentials.');
       throw err;
     }
@@ -531,7 +365,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         newUid = userCred.user.uid;
         await signOut(secondaryAuth);
       } catch (e: any) {
-        console.warn('Firebase secondary auth registration info:', e);
+        setAuthError(e.message || 'تعذر إنشاء حساب المستخدم.');
+        throw e;
       }
     }
 
@@ -607,7 +442,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         authError,
         clearError,
         loginEmail,
-        loginLocalSession,
         loginWorker,
         createFirstSuperAdmin,
         logout,

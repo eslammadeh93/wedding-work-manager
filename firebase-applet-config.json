@@ -1,12 +1,11 @@
 {
-  "projectId": "psychic-wording-pds98",
-  "appId": "1:1007947325155:web:7b25873a00b8d0ce1b2fd6",
-  "apiKey": "AIzaSyC37G4SkoDvJZhljJY_orP_HF2Z-yCJ_vg",
-  "authDomain": "psychic-wording-pds98.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-myweddingworkman-79fd8606-83c5-4e01-a515-1af0f7ba6a80",
-  "storageBucket": "psychic-wording-pds98.firebasestorage.app",
-  "messagingSenderId": "1007947325155",
+  "projectId": "wedding-work-manager-d6628",
+  "appId": "1:1072232660356:web:318b463f2167c6e5b831d1",
+  "apiKey": "AIzaSyCnSXwErj2fO3QmqHr_dWfVtnTu_Vc9h4k",
+  "authDomain": "wedding-work-manager-d6628.firebaseapp.com",
+  "storageBucket": "wedding-work-manager-d6628.firebasestorage.app",
+  "messagingSenderId": "1072232660356",
   "measurementId": "",
-  "oAuthClientId": "1007947325155-meinslg71qj2tuubkt4dijordvil1qdc.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

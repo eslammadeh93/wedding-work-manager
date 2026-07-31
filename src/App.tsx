@@ -8,7 +8,6 @@ import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
-import { AuthModal } from './components/auth/AuthModal';
 import { LoginPage } from './components/auth/LoginPage';
 
 import { DashboardModule } from './components/dashboard/DashboardModule';
@@ -89,7 +88,6 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Set default active tab to dashboard (or orders for workers) when logged in
   useEffect(() => {
@@ -163,7 +161,6 @@ function AppContent() {
       <Navbar
         onOpenSearch={() => setIsSearchOpen(true)}
         onToggleNotificationDrawer={() => setIsNotifDrawerOpen(!isNotifDrawerOpen)}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Main Container */}
@@ -217,10 +214,6 @@ function AppContent() {
         onNavigate={handleNavigate}
       />
 
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-      />
     </div>
   );
 }
