@@ -18,11 +18,13 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { Worker } from '../../types';
 
 export const WorkersModule: React.FC = () => {
   const { t } = useLanguage();
   const { workers, addWorker, updateWorker, deleteWorker, toggleWorkerStatus } = useData();
+  const { provisionWorkerAccount } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -40,6 +42,8 @@ export const WorkersModule: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isMigratingAccounts, setIsMigratingAccounts] = useState(false);
 
   const filteredWorkers = useMemo(() => {
     return workers.filter((worker) => {
@@ -84,6 +88,7 @@ export const WorkersModule: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     setFormError(null);
 
     const cleanUsername = username.trim().toLowerCase();
@@ -104,8 +109,12 @@ export const WorkersModule: React.FC = () => {
       return;
     }
 
+    setIsSaving(true);
     try {
       if (editingWorker) {
+        if (editingWorker.authUid && (editingWorker.username !== cleanUsername || editingWorker.loginCode !== cleanCode)) {
+          throw new Error('لا يمكن تغيير اسم المستخدم أو كود الدخول بعد تأمين الحساب. أنشئ حساب عامل جديداً عند الحاجة.');
+        }
         await updateWorker(editingWorker.id, {
           fullName: fullName.trim(),
           username: cleanUsername,
@@ -116,7 +125,7 @@ export const WorkersModule: React.FC = () => {
           status,
         });
       } else {
-        await addWorker({
+        const workerData = {
           fullName: fullName.trim(),
           username: cleanUsername,
           loginCode: cleanCode,
@@ -124,12 +133,38 @@ export const WorkersModule: React.FC = () => {
           phone: phone.trim(),
           notes: notes.trim(),
           status,
-        });
+        };
+        const workerId = await addWorker(workerData);
+        const authUid = await provisionWorkerAccount({ id: workerId, ...workerData, createdAt: '', updatedAt: '' });
+        await updateWorker(workerId, { authUid });
       }
 
       setIsModalOpen(false);
     } catch (err: any) {
       setFormError(err.message || 'حدث خطأ أثناء حفظ بيانات العامل');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleMigrateWorkerAccounts = async () => {
+    const pendingWorkers = workers.filter((worker) => !worker.authUid);
+    if (!pendingWorkers.length) return;
+    if (!window.confirm(`سيتم تأمين ${pendingWorkers.length} حساب عامل. هل تريد المتابعة؟`)) return;
+    setIsMigratingAccounts(true);
+    const failures: string[] = [];
+    try {
+      for (const worker of pendingWorkers) {
+        try {
+          const authUid = await provisionWorkerAccount(worker);
+          await updateWorker(worker.id, { authUid });
+        } catch {
+          failures.push(worker.fullName);
+        }
+      }
+      alert(failures.length ? `تم تأمين الحسابات، وتعذر ترحيل: ${failures.join('، ')}` : 'تم تأمين جميع حسابات العمال بنجاح.');
+    } finally {
+      setIsMigratingAccounts(false);
     }
   };
 
@@ -162,13 +197,25 @@ export const WorkersModule: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={handleOpenAddModal}
-          className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all self-start sm:self-auto"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>{t('addWorker')}</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {workers.some((worker) => !worker.authUid) && (
+            <button
+              type="button"
+              onClick={handleMigrateWorkerAccounts}
+              disabled={isMigratingAccounts}
+              className="px-4 py-2.5 border border-amber-500/50 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-xl disabled:opacity-60"
+            >
+              {isMigratingAccounts ? 'جارٍ تأمين الحسابات...' : 'تأمين حسابات العمال'}
+            </button>
+          )}
+          <button
+            onClick={handleOpenAddModal}
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>{t('addWorker')}</span>
+          </button>
+        </div>
       </div>
 
       {/* Controls Bar (Search & Filters) */}
@@ -454,9 +501,10 @@ export const WorkersModule: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={isSaving}
                   className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 transition-colors cursor-pointer"
                 >
-                  {t('save')}
+                  {isSaving ? 'جارٍ الحفظ...' : t('save')}
                 </button>
               </div>
             </form>

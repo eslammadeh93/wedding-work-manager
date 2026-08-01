@@ -38,12 +38,15 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
   const [showNewCatForm, setShowNewCatForm] = useState(false);
   const [newCatKey, setNewCatKey] = useState('');
   const [newCatEn, setNewCatEn] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [newCatAr, setNewCatAr] = useState('');
 
   if (!isOpen) return null;
 
   const handleAddCustomCat = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     if (!newCatKey.trim() || !newCatEn.trim() || !newCatAr.trim()) return;
 
     const key = newCatKey.toLowerCase().replace(/\s+/g, '_');
@@ -71,13 +74,16 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
       notes,
     };
 
-    if (isEdit && initialItem) {
-      await updateInventoryItem(initialItem.id, payload);
-    } else {
-      await addInventoryItem(payload);
+    try {
+      if (isEdit && initialItem) {
+        await updateInventoryItem(initialItem.id, payload);
+      } else {
+        await addInventoryItem(payload);
+      }
+      onClose();
+    } finally {
+      setIsSaving(false);
     }
-
-    onClose();
   };
 
   return (
@@ -316,9 +322,10 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20"
             >
-              {t('save')}
+              {isSaving ? 'جارٍ الحفظ...' : t('save')}
             </button>
           </div>
         </form>

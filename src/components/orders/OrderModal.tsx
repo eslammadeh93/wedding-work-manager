@@ -186,6 +186,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [attachmentType, setAttachmentType] = useState<'contract' | 'image' | 'file'>('contract');
   const [attachments, setAttachments] = useState(initialOrder?.attachments || []);
   const [stockWarning, setStockWarning] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -270,7 +271,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
 
+    try {
     let custId = selectedCustomerId;
     if (!custId && customerName.trim()) {
       // Auto create new customer record
@@ -341,8 +345,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     } else {
       await addOrder(payload);
     }
-
     onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -994,9 +1000,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20"
             >
-              {t('save')}
+              {isSaving ? 'جارٍ الحفظ...' : t('save')}
             </button>
           </div>
         </form>

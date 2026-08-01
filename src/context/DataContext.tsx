@@ -5,9 +5,12 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  query,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from './AuthContext';
+import { sanitizeData } from '../utils/security';
 import {
   Order,
   Customer,
@@ -145,6 +148,34 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let unsubSettings: () => void = () => {};
     let unsubCategories: () => void = () => {};
     let unsubActivityLogs: () => void = () => {};
+
+    if (!profile) {
+      setOrders([]); setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
+      setActivityLogs([]); setNotifications([]); setLoading(false);
+      return () => {};
+    }
+
+    // Worker accounts receive only their assigned orders and public company
+    // settings. Do not subscribe to private company collections at all.
+    if (profile.role === 'worker') {
+      if (profile.workerId) {
+        unsubOrders = onSnapshot(
+          query(collection(db, 'orders'), where('workerId', '==', profile.workerId)),
+          (snapshot) => {
+            const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Order));
+            setOrders(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+          }
+        );
+      } else {
+        setOrders([]);
+      }
+      unsubSettings = onSnapshot(doc(db, 'settings', 'company'), (docSnap) => {
+        setSettings(docSnap.exists() ? docSnap.data() as CompanySettings : initialCompanySettings);
+      });
+      setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
+      setActivityLogs([]); setCategories(defaultCategories); setNotifications([]); setLoading(false);
+      return () => { unsubOrders(); unsubSettings(); };
+    }
 
     try {
       // Activity logs are an admin-only dataset. Workers never subscribe to
@@ -285,7 +316,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubSettings();
       unsubCategories();
     };
-  }, [profile?.role]);
+  }, [profile?.role, profile?.workerId]);
 
   // Recalculate inventory reservations based on active orders
   const recalculateInventory = useCallback((allOrders: Order[], currentInventory: InventoryItem[]) => {
@@ -351,12 +382,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Add Category
   const addCategory = async (nameEn: string, nameAr: string): Promise<CategoryItem> => {
-    const key = 'custom_' + nameEn.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const cleanNameEn = sanitizeData(nameEn);
+    const cleanNameAr = sanitizeData(nameAr);
+    const key = 'custom_' + cleanNameEn.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const newCat: CategoryItem = {
       id: 'cat_' + Date.now(),
       key,
-      nameEn,
-      nameAr,
+      nameEn: cleanNameEn,
+      nameAr: cleanNameAr,
       isCustom: true,
     };
 
@@ -393,7 +426,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const now = new Date().toISOString();
 
     const newOrder: Order = {
-      ...orderData,
+      ...sanitizeData(orderData),
       id: newId,
       totalPaid,
       remainingBalance,
@@ -443,7 +476,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updated: Order = {
       ...existing,
-      ...orderData,
+      ...sanitizeData(orderData),
       totalPrice,
       deposit,
       totalPaid,
@@ -503,7 +536,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newId = createRecordId('wrk');
     const now = new Date().toISOString();
     const newWorker: Worker = {
-      ...workerData,
+      ...sanitizeData(workerData),
       id: newId,
       createdAt: now,
       updatedAt: now,
@@ -521,7 +554,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateWorker = async (id: string, workerData: Partial<Worker>) => {
     const now = new Date().toISOString();
-    const updates = { ...workerData, updatedAt: now };
+    const updates = { ...sanitizeData(workerData), updatedAt: now };
 
     try {
       await setDoc(doc(db, 'workers', id), updates, { merge: true });
@@ -535,8 +568,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteWorker = async (id: string) => {
+    const worker = workers.find((item) => item.id === id);
     try {
       await deleteDoc(doc(db, 'workers', id));
+      if (worker?.authUid) await deleteDoc(doc(db, 'users', worker.authUid));
     } catch (e) {
       console.warn('Deleting worker locally:', e);
     }
@@ -545,13 +580,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const toggleWorkerStatus = async (id: string, status: 'active' | 'inactive') => {
     await updateWorker(id, { status });
+    const worker = workers.find((item) => item.id === id);
+    if (worker?.authUid) {
+      await setDoc(doc(db, 'users', worker.authUid), {
+        isActive: status === 'active',
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
   };
 
   // Customers Operations
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>): Promise<string> => {
     const newId = createRecordId('cust');
     const newCustomer: Customer = {
-      ...customerData,
+      ...sanitizeData(customerData),
       id: newId,
       createdAt: new Date().toISOString(),
     };
@@ -568,11 +610,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateCustomer = async (id: string, customerData: Partial<Customer>) => {
     try {
-      await setDoc(doc(db, 'customers', id), customerData, { merge: true });
+      await setDoc(doc(db, 'customers', id), sanitizeData(customerData), { merge: true });
     } catch (e) {
       console.warn('Updating customer locally:', e);
     }
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...customerData } : c)));
+    const cleanCustomerData = sanitizeData(customerData);
+    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanCustomerData } : c)));
   };
 
   const deleteCustomer = async (id: string) => {
@@ -591,7 +634,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newId = createRecordId('inv');
     const now = new Date().toISOString();
     const newItem: InventoryItem = {
-      ...itemData,
+      ...sanitizeData(itemData),
       id: newId,
       reservedQuantity: 0,
       availableQuantity: itemData.quantity,
@@ -618,7 +661,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const now = new Date().toISOString();
     const updated: InventoryItem = {
       ...existing,
-      ...itemData,
+      ...sanitizeData(itemData),
       updatedAt: now,
     };
 
@@ -646,7 +689,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<string> => {
     const newId = createRecordId('exp');
     const newExpense: Expense = {
-      ...expenseData,
+      ...sanitizeData(expenseData),
       id: newId,
       createdAt: new Date().toISOString(),
     };
@@ -663,11 +706,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateExpense = async (id: string, expenseData: Partial<Expense>) => {
     try {
-      await setDoc(doc(db, 'expenses', id), expenseData, { merge: true });
+      await setDoc(doc(db, 'expenses', id), sanitizeData(expenseData), { merge: true });
     } catch (e) {
       console.warn('Updating expense locally:', e);
     }
-    setExpenses((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...expenseData } : ex)));
+    const cleanExpenseData = sanitizeData(expenseData);
+    setExpenses((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...cleanExpenseData } : ex)));
   };
 
   const deleteExpense = async (id: string) => {
@@ -681,7 +725,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Settings Operations
   const updateSettings = async (settingsData: Partial<CompanySettings>) => {
-    const newSettings = { ...settings, ...settingsData };
+    const newSettings = { ...settings, ...sanitizeData(settingsData) };
     try {
       await setDoc(doc(db, 'settings', 'company'), newSettings, { merge: true });
     } catch (e) {
@@ -732,7 +776,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Restore Backup
   const restoreBackupJson = async (jsonData: string): Promise<boolean> => {
     try {
-      const parsed = JSON.parse(jsonData);
+      const parsed = sanitizeData(JSON.parse(jsonData));
       if (parsed.settings && parsed.orders && parsed.inventory) {
         if (parsed.settings) await updateSettings(parsed.settings);
         if (Array.isArray(parsed.customers)) {

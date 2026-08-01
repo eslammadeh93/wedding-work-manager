@@ -19,14 +19,12 @@ import {
   deleteDoc,
   collection,
   onSnapshot,
-  query,
-  where,
-  getDocs,
 } from 'firebase/firestore';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 import { auth, db } from '../firebase/config';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, Worker } from '../types';
+import { sanitizeData, sanitizeText } from '../utils/security';
 
 interface CreateUserData {
   displayName: string;
@@ -54,6 +52,7 @@ interface AuthContextType {
   clearError: () => void;
   loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
+  provisionWorkerAccount: (worker: Worker) => Promise<string>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
   logout: (reason?: string) => Promise<void>;
   createUserAccount: (data: CreateUserData) => Promise<void>;
@@ -64,6 +63,61 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+type LoginAttemptAction = 'check' | 'failure' | 'success';
+type LocalLoginAttemptState = { failures: number; level: number; lockedUntil: number };
+type LoginAttemptResult = { attemptNumber?: number; maxAttempts?: number; nextLockMinutes?: number };
+const LOCAL_LOGIN_ATTEMPTS_KEY = 'wedding_manager_login_attempts';
+
+const formatFailedLoginMessage = (attempt: LoginAttemptResult) => {
+  if (!attempt.attemptNumber || !attempt.maxAttempts) return 'بيانات الدخول غير صحيحة.';
+  const lockHint = attempt.nextLockMinutes
+    ? ` عند الوصول للحد سيتم إيقاف الدخول لمدة ${attempt.nextLockMinutes} دقيقة.`
+    : '';
+  return `بيانات الدخول غير صحيحة. المحاولة ${attempt.attemptNumber} من ${attempt.maxAttempts}.${lockHint}`;
+};
+
+// Used only if the app is served as a static site without server.ts. A real
+// IP-based lock is always enforced by the /api route when that backend runs.
+const applyLocalLoginAttemptLock = (action: LoginAttemptAction): LoginAttemptResult | undefined => {
+  const now = Date.now();
+  let state: LocalLoginAttemptState = { failures: 0, level: 0, lockedUntil: 0 };
+  try {
+    const saved = localStorage.getItem(LOCAL_LOGIN_ATTEMPTS_KEY);
+    if (saved) state = { ...state, ...JSON.parse(saved) };
+  } catch {
+    // Privacy modes can block localStorage; login must still remain usable.
+  }
+  const persist = (nextState?: LocalLoginAttemptState) => {
+    try {
+      if (nextState) localStorage.setItem(LOCAL_LOGIN_ATTEMPTS_KEY, JSON.stringify(nextState));
+      else localStorage.removeItem(LOCAL_LOGIN_ATTEMPTS_KEY);
+    } catch {
+      // The fallback cannot persist in this browser, but must not block login.
+    }
+  };
+
+  if (action === 'success') {
+    persist();
+    return undefined;
+  }
+  if (state.lockedUntil > now) {
+    const minutes = Math.ceil((state.lockedUntil - now) / 60_000);
+    throw new Error(`تم إيقاف محاولات الدخول مؤقتًا. حاول مرة أخرى بعد ${minutes} دقيقة.`);
+  }
+  if (action !== 'failure') return undefined;
+
+  const failuresNeeded = state.level >= 2 ? 1 : 3;
+  const nextLockMinutes = state.level === 0 ? 1 : state.level === 1 ? 5 : 30;
+  state.failures += 1;
+  if (state.failures >= failuresNeeded) {
+    const attemptNumber = state.failures;
+    state = { failures: 0, level: state.level + 1, lockedUntil: now + nextLockMinutes * 60_000 };
+    persist(state);
+    throw new Error(`بيانات الدخول غير صحيحة. المحاولة ${attemptNumber} من ${failuresNeeded}. تم إيقاف الدخول لمدة ${nextLockMinutes} دقيقة.`);
+  }
+  persist(state);
+  return { attemptNumber: state.failures, maxAttempts: failuresNeeded, nextLockMinutes };
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -72,6 +126,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [usersInitialized, setUsersInitialized] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  const reportLoginAttempt = async (action: LoginAttemptAction): Promise<LoginAttemptResult | undefined> => {
+    // Keep this route in sync with server.ts. It is deliberately relative so
+    // it uses the same server that delivered the app.
+    const endpoint = '/api/auth/attempt';
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+    } catch {
+      console.warn('Login lock API is unavailable; using this-device fallback.');
+      return applyLocalLoginAttemptLock(action);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    let result: ({ allowed?: boolean; retryAfterSeconds?: number; message?: string } & LoginAttemptResult) | null = null;
+    if (contentType.includes('application/json')) {
+      try {
+        result = await response.json();
+      } catch {
+        // A malformed JSON response is treated exactly like an unavailable API.
+      }
+    }
+
+    if (!response.ok) {
+      if (response.status === 429 && result?.retryAfterSeconds) {
+        const minutes = Math.ceil(result.retryAfterSeconds / 60);
+        const attempts = result.attemptNumber && result.maxAttempts
+          ? `بيانات الدخول غير صحيحة. المحاولة ${result.attemptNumber} من ${result.maxAttempts}. `
+          : '';
+        throw new Error(`${attempts}تم إيقاف الدخول لمدة ${minutes} دقيقة.`);
+      }
+      if (response.status === 404 || !result) {
+        console.warn('Login lock API route is unavailable; using this-device fallback.');
+        return applyLocalLoginAttemptLock(action);
+      }
+      throw new Error(result?.message || `تعذر تنفيذ حماية تسجيل الدخول (رمز الخطأ ${response.status}).`);
+    }
+
+    if (!result || result.allowed !== true) {
+      console.warn('Login lock API returned an invalid response; using this-device fallback.');
+      return applyLocalLoginAttemptLock(action);
+    }
+    return result;
+  };
 
   // Subscribe to all users from Firestore
   useEffect(() => {
@@ -97,14 +199,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const LAST_ACTIVITY_KEY = 'wedding_manager_last_activity';
-  const WORKER_SESSION_KEY = 'wedding_manager_worker_session';
   const REMEMBER_UNTIL_KEY = 'wedding_manager_remember_until';
   const REMEMBER_DURATION = 7 * 24 * 60 * 60 * 1000;
   const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
 
   const logout = async (reason?: string) => {
     localStorage.removeItem(LAST_ACTIVITY_KEY);
-    localStorage.removeItem(WORKER_SESSION_KEY);
     localStorage.removeItem(REMEMBER_UNTIL_KEY);
     if (reason) {
       setAuthError(reason);
@@ -124,41 +224,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWorker = async (usernameInput: string, loginCodeInput: string): Promise<boolean> => {
     setAuthError(null);
-    const username = usernameInput.trim().toLowerCase();
-    const loginCode = loginCodeInput.trim();
+    const username = sanitizeText(usernameInput).trim().toLowerCase();
+    const loginCode = sanitizeText(loginCodeInput).trim();
 
     try {
-      const workersRef = collection(db, 'workers');
-      const result = await getDocs(query(workersRef, where('username', '==', username)));
-      const workerDoc = result.docs[0];
-      const worker = workerDoc?.data();
+      await reportLoginAttempt('check');
+      const credential = await signInWithEmailAndPassword(auth, `${username}@worker.local`, loginCode);
+      const workerProfileSnap = await getDoc(doc(db, 'users', credential.user.uid));
+      const workerProfile = workerProfileSnap.exists()
+        ? ({ uid: credential.user.uid, ...workerProfileSnap.data() } as UserProfile)
+        : null;
 
-      if (!workerDoc || !worker || worker.loginCode !== loginCode) {
-        setAuthError('اسم المستخدم أو كود الدخول غير صحيح.');
+      if (!workerProfile || workerProfile.role !== 'worker' || !workerProfile.workerId) {
+        await signOut(auth);
+        const attempt = await reportLoginAttempt('failure');
+        setAuthError(formatFailedLoginMessage(attempt || {}));
         return false;
       }
-      if (worker.status !== 'active') {
+      if (!workerProfile.isActive) {
+        await signOut(auth);
+        await reportLoginAttempt('failure');
         setAuthError('حساب العامل غير مُفعّل. يرجى التواصل مع الإدارة.');
         return false;
       }
 
-      const session = { workerId: workerDoc.id, workerName: worker.fullName, username: worker.username };
-      localStorage.setItem(WORKER_SESSION_KEY, JSON.stringify(session));
       localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
-      const workerProfile: UserProfile = {
-        uid: `worker_${workerDoc.id}`,
-        displayName: worker.fullName,
-        email: `${worker.username}@worker.local`,
-        role: 'worker',
-        isActive: true,
-        workerId: workerDoc.id,
-        workerName: worker.fullName,
-      };
-      setUser({ uid: workerProfile.uid, email: workerProfile.email } as User);
       setProfile(workerProfile);
+      await reportLoginAttempt('success');
       return true;
     } catch (error: any) {
-      setAuthError(error.message || 'تعذر تسجيل دخول العامل.');
+      if (String(error.message || '').includes('إيقاف الدخول')) {
+        setAuthError(error.message);
+        return false;
+      }
+      try {
+        const attempt = await reportLoginAttempt('failure');
+        const baseMessage = formatFailedLoginMessage(attempt || {});
+        const guidance = error?.code === 'auth/invalid-credential'
+          ? ' إذا كان الحساب قديماً، اطلب من المدير تأمين حسابات العمال من لوحة العمال أولاً.'
+          : '';
+        setAuthError(`${baseMessage}${guidance}`);
+      } catch (lockError: any) {
+        setAuthError(lockError.message);
+      }
       return false;
     }
   };
@@ -199,70 +307,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setProfile(userProf);
             }
           } else {
-            // Check if there are any existing users in Firestore. If none, first user is super_admin.
-            const isFirstUser = allUsers.length === 0;
-            const newProf: UserProfile = {
-              uid: currentUser.uid,
-              email: currentUser.email || 'user@weddingmanager.com',
-              displayName:
-                currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-              role: isFirstUser ? 'super_admin' : 'employee',
-              isActive: true,
-              createdAt: new Date().toISOString(),
-              lastLogin: new Date().toISOString(),
-            };
-            await setDoc(userDocRef, newProf);
-            setProfile(newProf);
+            // Never invent a privileged profile on the client. Every account
+            // must be explicitly provisioned by an existing manager.
+            setAuthError('هذا الحساب غير مُجهز من الإدارة.');
+            await signOut(auth);
+            setUser(null);
+            setProfile(null);
           }
         } catch (e) {
           console.warn('Error reading user profile from Firestore:', e);
-          setProfile({
-            uid: currentUser.uid,
-            email: currentUser.email || 'admin@weddingmanager.com',
-            displayName: currentUser.displayName || 'User',
-            role: 'super_admin',
-            isActive: true,
-          });
-        }
-      } else {
-        const workerSession = localStorage.getItem(WORKER_SESSION_KEY);
-        if (workerSession) {
-          try {
-            const session = JSON.parse(workerSession);
-            const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
-            if (lastActivity && Date.now() - lastActivity < INACTIVITY_TIMEOUT) {
-              localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
-              const workerProfile: UserProfile = {
-                uid: `worker_${session.workerId}`,
-                displayName: session.workerName,
-                email: `${session.username}@worker.local`,
-                role: 'worker', isActive: true, workerId: session.workerId, workerName: session.workerName,
-              };
-              setUser({ uid: workerProfile.uid, email: workerProfile.email } as User);
-              setProfile(workerProfile);
-            } else {
-              localStorage.removeItem(WORKER_SESSION_KEY);
-              setUser(null); setProfile(null);
-            }
-          } catch {
-            localStorage.removeItem(WORKER_SESSION_KEY);
-            setUser(null); setProfile(null);
-          }
-        } else {
+          setAuthError('تعذر التحقق من صلاحيات الحساب.');
+          await signOut(auth);
           setUser(null);
           setProfile(null);
         }
+      } else {
+        setUser(null);
+        setProfile(null);
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [allUsers.length]);
+  }, []);
 
   // Automatic inactivity monitor (5 minutes timeout)
   useEffect(() => {
-    const hasWorkerSession = Boolean(localStorage.getItem(WORKER_SESSION_KEY));
-    if (!user && !hasWorkerSession) {
+    if (!user) {
       return;
     }
 
@@ -340,11 +411,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearError = () => setAuthError(null);
 
+  const provisionWorkerAccount = async (worker: Worker): Promise<string> => {
+    if (worker.authUid) return worker.authUid;
+    const secondaryApp = getApps().find((app) => app.name === 'SecondaryWorkerApp')
+      ? getApp('SecondaryWorkerApp')
+      : initializeApp(firebaseConfigJson, 'SecondaryWorkerApp');
+    const secondaryAuth = getAuth(secondaryApp);
+    const email = `${sanitizeText(worker.username).trim().toLowerCase()}@worker.local`;
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, worker.loginCode);
+    await signOut(secondaryAuth);
+    const workerProfile: UserProfile = {
+      uid: credential.user.uid,
+      email,
+      displayName: worker.fullName,
+      phone: worker.phone || '',
+      role: 'worker',
+      isActive: worker.status === 'active',
+      workerId: worker.id,
+      workerName: worker.fullName,
+      createdAt: new Date().toISOString(),
+      lastLogin: 'Never',
+    };
+    await setDoc(doc(db, 'users', credential.user.uid), workerProfile);
+    return credential.user.uid;
+  };
+
   const loginEmail = async (email: string, pass: string, rememberMe = false) => {
     setAuthError(null);
-    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedEmail = sanitizeText(email).trim().toLowerCase();
 
     try {
+      await reportLoginAttempt('check');
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       if (rememberMe) {
         localStorage.setItem(REMEMBER_UNTIL_KEY, (Date.now() + REMEMBER_DURATION).toString());
@@ -361,7 +458,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn('Could not update lastLogin:', e);
         }
       }
+      await reportLoginAttempt('success');
     } catch (err: any) {
+      // Do not count a server lock response twice; it was already created by
+      // the failed-attempt endpoint.
+      if (!String(err.message || '').includes('إيقاف محاولات الدخول')) {
+        try {
+          const attempt = await reportLoginAttempt('failure');
+          const message = formatFailedLoginMessage(attempt || {});
+          setAuthError(message);
+          throw new Error(message);
+        } catch (lockError: any) {
+          setAuthError(lockError.message);
+          throw lockError;
+        }
+      }
       setAuthError(err.message || 'Login failed. Please check your credentials.');
       throw err;
     }
@@ -370,14 +481,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createFirstSuperAdmin = async (data: CreateFirstSuperAdminData) => {
     setAuthError(null);
     try {
-      const userCred = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const cleanData = sanitizeData(data);
+      const userCred = await createUserWithEmailAndPassword(auth, cleanData.email, data.password);
       if (userCred.user) {
         localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
         const newProf: UserProfile = {
           uid: userCred.user.uid,
-          email: data.email,
-          displayName: data.displayName,
-          phone: data.phone || '',
+          email: cleanData.email,
+          displayName: cleanData.displayName,
+          phone: cleanData.phone || '',
           role: 'super_admin',
           isActive: true,
           createdAt: new Date().toISOString(),
@@ -414,13 +526,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    const cleanData = sanitizeData(data);
     const newProfile: UserProfile = {
       uid: newUid,
-      email: data.email,
-      displayName: data.displayName,
-      phone: data.phone || '',
-      role: data.role,
-      isActive: data.isActive,
+      email: cleanData.email,
+      displayName: cleanData.displayName,
+      phone: cleanData.phone || '',
+      role: cleanData.role,
+      isActive: cleanData.isActive,
       createdAt: new Date().toISOString(),
       lastLogin: 'Never',
     };
@@ -438,19 +551,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateUserProfile = async (uid: string, updates: Partial<UserProfile>) => {
+    const cleanUpdates = sanitizeData(updates);
     try {
       const docRef = doc(db, 'users', uid);
-      await updateDoc(docRef, { ...updates, updatedAt: new Date().toISOString() });
+      await updateDoc(docRef, { ...cleanUpdates, updatedAt: new Date().toISOString() });
     } catch (e) {
       console.warn('Firestore update warning:', e);
     }
 
     setAllUsers((prev) =>
-      prev.map((u) => (u.uid === uid ? { ...u, ...updates, updatedAt: new Date().toISOString() } : u))
+      prev.map((u) => (u.uid === uid ? { ...u, ...cleanUpdates, updatedAt: new Date().toISOString() } : u))
     );
 
     if (profile?.uid === uid) {
-      setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+      setProfile((prev) => (prev ? { ...prev, ...cleanUpdates } : null));
     }
   };
 
@@ -487,6 +601,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearError,
         loginEmail,
         loginWorker,
+        provisionWorkerAccount,
         createFirstSuperAdmin,
         logout,
         createUserAccount,

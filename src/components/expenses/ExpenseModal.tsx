@@ -53,11 +53,14 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [notes, setNotes] = useState(
     initialExpense?.notes || initialExpense?.description || ''
   );
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
 
     const finalCategory = type === 'capital' ? 'رأس مال' : category;
 
@@ -76,13 +79,16 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
       payload.description = notes.trim();
     }
 
-    if (isEdit && initialExpense) {
-      await updateExpense(initialExpense.id, payload);
-    } else {
-      await addExpense(payload);
+    try {
+      if (isEdit && initialExpense) {
+        await updateExpense(initialExpense.id, payload);
+      } else {
+        await addExpense(payload);
+      }
+      onClose();
+    } finally {
+      setIsSaving(false);
     }
-
-    onClose();
   };
 
   return (
@@ -248,13 +254,14 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className={`px-6 py-2.5 rounded-xl text-white text-xs font-bold shadow-md transition-all cursor-pointer ${
                 type === 'capital'
                   ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
                   : 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20'
               }`}
             >
-              {t('save')}
+              {isSaving ? 'جارٍ الحفظ...' : t('save')}
             </button>
           </div>
         </form>

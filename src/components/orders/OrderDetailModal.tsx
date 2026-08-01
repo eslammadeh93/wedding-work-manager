@@ -28,6 +28,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { Order, OrderStatus } from '../../types';
+import { toSafeExternalUrl } from '../../utils/security';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -55,6 +56,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [copiedLocation, setCopiedLocation] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [isLogging, setIsLogging] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [logToast, setLogToast] = useState<string | null>(null);
 
   const hasLoggedOpenRef = React.useRef<string | null>(null);
@@ -98,29 +102,44 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   const handleStatusChange = async (newStatus: OrderStatus) => {
-    await updateOrder(order.id, { orderStatus: newStatus });
+    if (isUpdatingStatus) return;
+    try {
+      setIsUpdatingStatus(true);
+      await updateOrder(order.id, { orderStatus: newStatus });
+    } finally {
+      setIsUpdatingStatus(false);
+    }
   };
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (paymentAmount <= 0) return;
+    if (paymentAmount <= 0 || isSavingPayment) return;
 
-    await addPaymentToOrder(order.id, {
-      amount: Number(paymentAmount),
-      date: new Date().toISOString().split('T')[0],
-      method: paymentMethod,
-      notes: paymentNotes || 'Partial Payment',
-    });
+    try {
+      setIsSavingPayment(true);
+      await addPaymentToOrder(order.id, {
+        amount: Number(paymentAmount),
+        date: new Date().toISOString().split('T')[0],
+        method: paymentMethod,
+        notes: paymentNotes || 'Partial Payment',
+      });
 
-    setPaymentAmount(0);
-    setPaymentNotes('');
-    setShowAddPayment(false);
+      setPaymentAmount(0);
+      setPaymentNotes('');
+      setShowAddPayment(false);
+    } finally {
+      setIsSavingPayment(false);
+    }
   };
 
   const handleDelete = async () => {
-    if (window.confirm(t('confirmDelete'))) {
+    if (!window.confirm(t('confirmDelete')) || isDeleting) return;
+    try {
+      setIsDeleting(true);
       await deleteOrder(order.id);
       onClose();
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -199,6 +218,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </button>
                 <button
                   onClick={handleDelete}
+                  disabled={isDeleting}
                   className="p-2 bg-rose-500/30 hover:bg-rose-500/50 text-white rounded-xl transition-colors cursor-pointer"
                   title={t('delete')}
                 >
@@ -257,10 +277,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (order.locationLink?.trim()) {
-                      const url = order.locationLink.trim().startsWith('http')
-                        ? order.locationLink.trim()
-                        : `https://${order.locationLink.trim()}`;
+                    const url = toSafeExternalUrl(order.locationLink || '');
+                    if (url) {
                       window.open(url, '_blank');
                     } else {
                       alert(t('noLocationAdded'));
@@ -296,7 +314,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <select
                   value={order.orderStatus}
                   onChange={(e) => handleStatusChange(e.target.value as OrderStatus)}
-                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  disabled={isUpdatingStatus}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white disabled:opacity-60"
                 >
                   <option value="new">{t('statusNew')}</option>
                   <option value="confirmed">{t('statusConfirmed')}</option>
@@ -314,6 +333,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     setPaymentAmount(order.remainingBalance);
                     setShowAddPayment(true);
                   }}
+                  disabled={isSavingPayment || isUpdatingStatus}
                   className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -386,15 +406,17 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAddPayment(false)}
+                  disabled={isSavingPayment}
                   className="px-3 py-1 text-xs font-semibold rounded-lg border border-slate-300"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
+                  disabled={isSavingPayment}
                   className="px-4 py-1 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
                 >
-                  {t('save')}
+                  {isSavingPayment ? 'جارٍ الحفظ...' : t('save')}
                 </button>
               </div>
             </form>
@@ -509,10 +531,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const url = order.locationLink!.trim().startsWith('http')
-                      ? order.locationLink!.trim()
-                      : `https://${order.locationLink!.trim()}`;
-                    window.open(url, '_blank');
+                    const url = toSafeExternalUrl(order.locationLink || '');
+                    if (url) window.open(url, '_blank');
                   }}
                   className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                 >
@@ -656,7 +676,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                         type="button"
                         onClick={() => {
                           if (img.url && img.url.trim().length > 0) {
-                            window.open(img.url.trim(), '_blank');
+                            const url = toSafeExternalUrl(img.url);
+                            if (url) window.open(url, '_blank');
                           } else {
                             alert(t('noLink'));
                           }

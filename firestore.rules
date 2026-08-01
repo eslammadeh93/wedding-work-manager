@@ -1,11 +1,40 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /activityLogs/{logId} {
-      allow read, write: if true;
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isManager() {
+      return signedIn() && profile().role in ['super_admin', 'admin', 'manager'] && profile().isActive == true;
     }
-    match /{document=**} {
-      allow read, write: if true;
+    function isWorker() { return signedIn() && profile().role == 'worker' && profile().isActive == true; }
+    function workerId() { return profile().workerId; }
+
+    match /users/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || isManager());
+      allow list: if isManager();
+      allow create, update, delete: if isManager();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isManager() || (isWorker() && resource.data.workerId == workerId());
+      allow write: if isManager();
+    }
+
+    match /activityLogs/{logId} {
+      allow read, update, delete: if isManager();
+      allow create: if isWorker()
+        && request.resource.data.workerId == workerId()
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.workerId == workerId();
+    }
+
+    match /workers/{workerId} {
+      allow read: if isManager() || (isWorker() && resource.data.authUid == request.auth.uid);
+      allow write: if isManager();
+    }
+
+    match /settings/company { allow read: if signedIn(); allow write: if isManager(); }
+    match /{collection}/{document} {
+      allow read, write: if isManager();
     }
   }
 }

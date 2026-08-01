@@ -39,24 +39,22 @@ export const SettingsModule: React.FC = () => {
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings({
-      companyNameAr,
-      companyNameEn,
-      phone,
-      email,
-      addressAr,
-      addressEn,
-      taxNumber,
-      logoUrl,
-      termsAr,
-      termsEn,
-    });
-
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      await updateSettings({
+        companyNameAr, companyNameEn, phone, email, addressAr, addressEn,
+        taxNumber, logoUrl, termsAr, termsEn,
+      });
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -300,10 +298,11 @@ export const SettingsModule: React.FC = () => {
         <div className="flex justify-end pt-2">
           <button
             type="submit"
+            disabled={isSaving}
             className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-md shadow-amber-500/20 flex items-center gap-2 cursor-pointer"
           >
             <Save className="w-4 h-4" />
-            <span>{t('save')}</span>
+            <span>{isSaving ? 'جارٍ الحفظ...' : t('save')}</span>
           </button>
         </div>
       </form>

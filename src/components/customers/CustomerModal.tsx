@@ -25,20 +25,25 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   const [email, setEmail] = useState(initialCustomer?.email || '');
   const [address, setAddress] = useState(initialCustomer?.address || '');
   const [notes, setNotes] = useState(initialCustomer?.notes || '');
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     const payload = { name, phone, email, address, notes };
-
-    if (isEdit && initialCustomer) {
-      await updateCustomer(initialCustomer.id, payload);
-    } else {
-      await addCustomer(payload);
+    try {
+      if (isEdit && initialCustomer) {
+        await updateCustomer(initialCustomer.id, payload);
+      } else {
+        await addCustomer(payload);
+      }
+      onClose();
+    } finally {
+      setIsSaving(false);
     }
-
-    onClose();
   };
 
   return (
@@ -134,9 +139,10 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20"
             >
-              {t('save')}
+              {isSaving ? 'جارٍ الحفظ...' : t('save')}
             </button>
           </div>
         </form>

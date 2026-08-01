@@ -35,8 +35,11 @@ export const LoginPage: React.FC = () => {
 
   const handleWorkerLogin = async (event: React.FormEvent) => {
     event.preventDefault(); resetError(); setSubmitting(true);
-    await loginWorker(workerUsername, workerCode);
-    setSubmitting(false);
+    try {
+      await loginWorker(workerUsername, workerCode);
+    } finally {
+      setSubmitting(false);
+    }
   };
   const handleManagerLogin = async (event: React.FormEvent) => {
     event.preventDefault(); resetError(); setSubmitting(true);

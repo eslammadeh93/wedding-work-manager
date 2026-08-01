@@ -127,6 +127,8 @@ export interface Order {
 
 export interface Worker {
   id: string;
+  /** Firebase Authentication UID created during worker-account migration. */
+  authUid?: string;
   fullName: string;
   username: string;
   loginCode: string;
@@ -236,4 +238,3 @@ export interface UserProfile {
   updatedAt?: string;
   lastLogin?: string;
 }
-
