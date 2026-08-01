@@ -3,6 +3,9 @@ import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
+import { USE_MULTI_TENANT_DATA } from './multiTenant/featureFlags';
+import { PlatformRouteGuard } from './multiTenant/RouteGuards';
+import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBoundary';
 
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -25,6 +28,19 @@ const ReportsModule = lazy(() => import('./components/reports/ReportsModule').th
 const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityLogModule').then(({ ActivityLogModule }) => ({ default: ActivityLogModule })));
 const UsersModule = lazy(() => import('./components/users/UsersModule').then(({ UsersModule }) => ({ default: UsersModule })));
 const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
+const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
+
+function UnauthorizedPlatform() {
+  return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب المنصة فقط.</p></div></div>;
+}
+
+/** Kept outside the legacy tree so platform code is only requested after verification. */
+function PlatformEntry() {
+  const { user, authSession, loading } = useAuth();
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>;
+  if (!user || authSession?.userType !== 'platform' || authSession.role !== 'platform_owner') return <UnauthorizedPlatform />;
+  return <PlatformRouteGuard fallback={<UnauthorizedPlatform />}><PlatformErrorBoundary><Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>}><PlatformModule /></Suspense></PlatformErrorBoundary></PlatformRouteGuard>;
+}
 
 const getPageTitle = (tab: ActiveTab, lang: string): string => {
   if (lang === 'ar') {
@@ -136,6 +152,12 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // With the flag off this branch is never selected: no platform module,
+  // routes, navigation, or queries are activated in the legacy application.
+  if (USE_MULTI_TENANT_DATA && window.location.pathname.startsWith('/platform')) {
+    return <PlatformEntry />;
+  }
+
   const handleNavigate = (tab: ActiveTab) => {
     setActiveTab(tab);
   };
@@ -161,10 +183,6 @@ function AppContent() {
   // 2. Strict Authentication Protection: If not authenticated, open on Login page
   if (!user || !profile) {
     return <LoginPage />;
-  }
-
-  if (authSession?.userType === 'platform') {
-    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">منصة الإدارة</h1><p className="text-sm text-slate-500 mt-2">تم التحقق من صلاحيات صاحب المنصة.</p></div></div>;
   }
 
   // 3. Authenticated Application Main Layout

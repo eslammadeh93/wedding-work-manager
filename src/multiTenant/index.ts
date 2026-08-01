@@ -7,3 +7,5 @@ export * from './roles';
 export * from './RouteGuards';
 export * from './TenantContext';
 export * from './types';
+export * from './platform/types';
+export * from './platform/platformService';
