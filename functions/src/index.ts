@@ -3,6 +3,7 @@ import * as admin from 'firebase-admin';
 import { onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import { CompanyProvisioningService, type CreateCompanyResponse } from './companyProvisioning.js';
+import { CompanyMemberService, type ChangeCompanyMemberRoleRequest, type ChangeCompanyMemberRoleResponse, type CreateCompanyMemberRequest, type CreateCompanyMemberResponse, type DisableCompanyMemberRequest, type DisableCompanyMemberResponse, type ReactivateCompanyMemberRequest, type ReactivateCompanyMemberResponse, type ResetWorkerLoginCodeRequest, type ResetWorkerLoginCodeResponse, type SendCompanyMemberPasswordResetRequest, type SendCompanyMemberPasswordResetResponse, type UpdateCompanyMemberRequest, type UpdateCompanyMemberResponse } from './companyMembers.js';
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -106,3 +107,14 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
     return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   }
 });
+
+const memberService = new CompanyMemberService({ db, auth: admin.auth(), emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
+const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' };
+type MemberRequest = { auth?: { uid: string }; data: unknown };
+export const createCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));
+export const updateCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateCompanyMemberResponse> => memberService.update(request.data as UpdateCompanyMemberRequest, request.auth));
+export const changeCompanyMemberRole = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ChangeCompanyMemberRoleResponse> => memberService.changeRole(request.data as ChangeCompanyMemberRoleRequest, request.auth));
+export const disableCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DisableCompanyMemberResponse> => memberService.disable(request.data as DisableCompanyMemberRequest, request.auth));
+export const reactivateCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ReactivateCompanyMemberResponse> => memberService.reactivate(request.data as ReactivateCompanyMemberRequest, request.auth));
+export const sendCompanyMemberPasswordReset = onCall(memberFunctionOptions, (request: MemberRequest): Promise<SendCompanyMemberPasswordResetResponse> => memberService.passwordReset(request.data as SendCompanyMemberPasswordResetRequest, request.auth));
+export const resetWorkerLoginCode = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ResetWorkerLoginCodeResponse> => memberService.resetWorkerCode(request.data as ResetWorkerLoginCodeRequest, request.auth));

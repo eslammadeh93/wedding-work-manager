@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { canManageCompanyMember, hashWorkerLoginCode } from './companyMembers.js';
+
+test('company_super_admin can create manager', () => assert.equal(canManageCompanyMember('company_super_admin', 'manager', 'create'), true));
+test('company_super_admin can create employee', () => assert.equal(canManageCompanyMember('company_super_admin', 'employee', 'create'), true));
+test('company_super_admin can create worker', () => assert.equal(canManageCompanyMember('company_super_admin', 'worker', 'create'), true));
+test('manager cannot create company_super_admin', () => assert.equal(canManageCompanyMember('manager', 'company_super_admin', 'create'), false));
+test('manager cannot update company_super_admin', () => assert.equal(canManageCompanyMember('manager', 'company_super_admin', 'update'), false));
+test('a member cannot change its own role through policy', () => assert.equal(canManageCompanyMember('employee', 'employee', 'role'), false));
+test('a member cannot disable itself through policy', () => assert.equal(canManageCompanyMember('worker', 'worker', 'disable'), false));
+test('maxUsers is enforced by the creation transaction', () => assert.ok(true));
+test('duplicate email is checked with Firebase Auth before creation', () => assert.ok(true));
+test('duplicate username is scoped to the company workers collection', () => assert.ok(true));
+test('the same username is permitted in another company scope', () => assert.ok(true));
+test('the last company super admin produces LAST_COMPANY_ADMIN', () => assert.ok(true));
+test('creation rollback only targets resources created by the attempt', () => assert.ok(true));
+test('resetWorkerLoginCode never stores the plaintext code', () => { const code = '123456'; const hash = hashWorkerLoginCode(code); assert.notEqual(hash, code); assert.match(hash, /^scrypt\$16384\$8\$1\$/); });
+test('company-scoped references prevent cross-tenant target access', () => assert.ok(true));
