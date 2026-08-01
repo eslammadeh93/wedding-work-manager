@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import * as admin from 'firebase-admin';
 import { onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
+import { CompanyProvisioningService, type CreateCompanyResponse } from './companyProvisioning.js';
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -88,5 +89,20 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: proc
   } catch {
     // Infrastructure failures are intentionally indistinguishable from invalid credentials.
     return { success: false, code: 'INVALID_CREDENTIALS', message: GENERIC_FAILURE } satisfies WorkerLoginResponse;
+  }
+});
+
+/** Emulator-only privileged provisioning endpoint. Callable is used so Auth claims are verified by Firebase. */
+export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateCompanyResponse> => {
+  if (process.env.FUNCTIONS_EMULATOR !== 'true') return { success: false, code: 'UNKNOWN_ERROR', message: 'هذه العملية متاحة في Firebase Emulator فقط.' };
+  const uid = request.auth?.uid;
+  if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  try {
+    const platformUser = await db.doc(`platformUsers/${uid}`).get();
+    if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+    return await new CompanyProvisioningService({ db, auth: admin.auth() }).create(request.data, uid);
+  } catch (error) {
+    logger.error('Company provisioning authorization failed', { uid, reason: error instanceof Error ? error.message : 'unknown' });
+    return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   }
 });
