@@ -4,7 +4,7 @@ import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import { USE_MULTI_TENANT_DATA } from './multiTenant/featureFlags';
-import { PlatformRouteGuard } from './multiTenant/RouteGuards';
+import { CompanySessionRouteGuard, PlatformRouteGuard } from './multiTenant/RouteGuards';
 import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBoundary';
 
 import { Navbar } from './components/Navbar';
@@ -29,9 +29,14 @@ const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityL
 const UsersModule = lazy(() => import('./components/users/UsersModule').then(({ UsersModule }) => ({ default: UsersModule })));
 const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
+const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
 
 function UnauthorizedPlatform() {
   return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب المنصة فقط.</p></div></div>;
+}
+
+function UnauthorizedCompanyMembers() {
+  return <div dir="rtl" className="min-h-64 flex items-center justify-center text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب الشركة فقط.</p></div></div>;
 }
 
 /** Kept outside the legacy tree so platform code is only requested after verification. */
@@ -67,6 +72,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'المستخدمين';
       case 'settings':
         return 'الإعدادات';
+      case 'members':
+        return 'إدارة الفريق';
       default:
         return 'لوحة التحكم';
     }
@@ -94,6 +101,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Users';
       case 'settings':
         return 'Settings';
+      case 'members':
+        return 'Team Management';
       default:
         return 'Dashboard';
     }
@@ -103,7 +112,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
 function AppContent() {
   const { user, profile, authSession, loading, usersInitialized } = useAuth();
   const { language } = useLanguage();
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => USE_MULTI_TENANT_DATA && window.location.pathname === '/company/members' ? 'members' : 'dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
@@ -122,6 +131,9 @@ function AppContent() {
 
   // Role guard for current active tab
   useEffect(() => {
+    // The member screen performs its own AuthSession permission guard so a
+    // direct /company/members visit can show Unauthorized rather than redirect.
+    if (USE_MULTI_TENANT_DATA && activeTab === 'members') return;
     const role = profile?.role || 'employee';
     if (role === 'worker') {
       if (activeTab !== 'orders') {
@@ -159,6 +171,7 @@ function AppContent() {
   }
 
   const handleNavigate = (tab: ActiveTab) => {
+    if (activeTab === 'members' && tab !== 'members' && USE_MULTI_TENANT_DATA) window.history.replaceState({}, '', '/company');
     setActiveTab(tab);
   };
 
@@ -237,6 +250,7 @@ function AppContent() {
             {activeTab === 'activityLog' && <ActivityLogModule />}
             {activeTab === 'users' && <UsersModule />}
             {activeTab === 'settings' && <SettingsModule />}
+            {USE_MULTI_TENANT_DATA && activeTab === 'members' && <CompanySessionRouteGuard permission="company:members:read" fallback={<UnauthorizedCompanyMembers />}><CompanyMembersModule /></CompanySessionRouteGuard>}
           </Suspense>
         </main>
       </div>

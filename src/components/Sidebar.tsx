@@ -13,10 +13,13 @@ import {
   Crown,
   HardHat,
   History,
+  UsersRound,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
+import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
+import { hasPermission } from '../multiTenant/permissions';
 
 export type ActiveTab =
   | 'dashboard'
@@ -29,7 +32,8 @@ export type ActiveTab =
   | 'reports'
   | 'activityLog'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'members';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -46,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t } = useLanguage();
   const { orders, inventory } = useData();
-  const { profile } = useAuth();
+  const { profile, authSession } = useAuth();
 
   const pendingOrdersCount = orders.filter((o) => o.orderStatus === 'pending' || o.orderStatus === 'in_progress').length;
   const lowInventoryCount = inventory.filter((i) => i.availableQuantity <= i.minStockLevel).length;
@@ -68,6 +72,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const navItems = allNavItems.filter((item) => item.roles.includes(userRole));
+  const showCompanyMembers = USE_MULTI_TENANT_DATA
+    && authSession?.userType === 'company'
+    && hasPermission(authSession.role, 'company:members:read');
 
   const handleTabClick = (id: ActiveTab) => {
     setActiveTab(id);
@@ -145,6 +152,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
+          {showCompanyMembers && (
+            <button
+              onClick={() => { window.history.pushState({}, '', '/company/members'); handleTabClick('members'); }}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 sm:py-2.5 rounded-xl font-medium text-xs transition-all cursor-pointer min-h-[44px] ${
+                activeTab === 'members'
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-extrabold border-l-2 border-amber-500 rtl:border-l-0 rtl:border-r-2 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
+              }`}
+            >
+              <UsersRound className={`w-4 h-4 ${activeTab === 'members' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`} />
+              <span>إدارة الفريق</span>
+            </button>
+          )}
         </nav>
 
         {/* Sidebar Footer info */}

@@ -21,3 +21,13 @@ export function CompanyRouteGuard({ children, fallback = null, roles, permission
   const allowedPermission = !permission || (member ? hasPermission(member.role, permission) : false);
   return isActiveMember && allowedRole && allowedPermission ? <>{children}</> : <>{fallback}</>;
 }
+
+/** Guards staged company routes using the authenticated session, rather than a URL parameter. */
+export function CompanySessionRouteGuard({ children, fallback = null, roles, permission }: CompanyRouteGuardProps) {
+  const { authSession } = useAuth();
+  const companyRole = authSession?.userType === 'company' ? authSession.role as CompanyMemberRole : undefined;
+  const active = authSession?.userType === 'company' && authSession.memberStatus === 'active' && Boolean(authSession.companyId);
+  const allowedRole = !roles || (companyRole ? roles.includes(companyRole) : false);
+  const allowedPermission = !permission || (companyRole ? hasPermission(companyRole, permission) : false);
+  return active && allowedRole && allowedPermission ? <>{children}</> : <>{fallback}</>;
+}
