@@ -1,4 +1,5 @@
 export * from './featureFlags';
+export * from './auth';
 export * from './firestorePaths';
 export * from './permissions';
 export * from './PlatformContext';

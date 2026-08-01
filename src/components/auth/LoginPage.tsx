@@ -3,12 +3,14 @@ import { AlertCircle, Crown, Globe, KeyRound, Lock, LogIn, Mail, Moon, Sun, User
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { USE_MULTI_TENANT_DATA } from '../../multiTenant';
 
 export const LoginPage: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
   const { darkMode, toggleDarkMode } = useTheme();
-  const { loginEmail, loginWorker, createFirstSuperAdmin, allUsers, authError, clearError } = useAuth();
-  const [view, setView] = useState<'worker' | 'manager' | 'setup'>('worker');
+  const { loginEmail, loginWorker, loginMultiTenantEmail, loginMultiTenantWorker, createFirstSuperAdmin, allUsers, authError, clearError } = useAuth();
+  const [view, setView] = useState<'worker' | 'manager' | 'setup'>(USE_MULTI_TENANT_DATA ? 'manager' : 'worker');
+  const [companyCode, setCompanyCode] = useState('');
   const [workerUsername, setWorkerUsername] = useState('');
   const [workerCode, setWorkerCode] = useState('');
   const [name, setName] = useState('');
@@ -22,6 +24,7 @@ export const LoginPage: React.FC = () => {
 
   const resetError = () => { setLocalError(null); clearError(); };
   const handleLogoTap = () => {
+    if (USE_MULTI_TENANT_DATA) return;
     logoTaps.current += 1;
     window.clearTimeout(resetTapTimer.current);
     resetTapTimer.current = window.setTimeout(() => { logoTaps.current = 0; }, 1200);
@@ -36,7 +39,8 @@ export const LoginPage: React.FC = () => {
   const handleWorkerLogin = async (event: React.FormEvent) => {
     event.preventDefault(); resetError(); setSubmitting(true);
     try {
-      await loginWorker(workerUsername, workerCode);
+      if (USE_MULTI_TENANT_DATA) await loginMultiTenantWorker(companyCode, workerUsername, workerCode);
+      else await loginWorker(workerUsername, workerCode);
     } finally {
       setSubmitting(false);
     }
@@ -45,6 +49,7 @@ export const LoginPage: React.FC = () => {
     event.preventDefault(); resetError(); setSubmitting(true);
     try {
       if (view === 'setup') await createFirstSuperAdmin({ displayName: name.trim(), email, password });
+      else if (USE_MULTI_TENANT_DATA) await loginMultiTenantEmail(email, password, rememberMe);
       else await loginEmail(email, password, rememberMe);
     } catch (error: any) {
       const messages: Record<string, string> = {
@@ -71,8 +76,13 @@ export const LoginPage: React.FC = () => {
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول العامل' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
       </div>
       <div className="p-7 space-y-4">
+        {USE_MULTI_TENANT_DATA && <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 dark:bg-slate-900 p-1">
+          <button type="button" onClick={() => { setView('manager'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'manager' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول إداري</button>
+          <button type="button" onClick={() => { setView('worker'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'worker' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول عامل</button>
+        </div>}
         {displayError && <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 text-rose-300 rounded-2xl text-xs font-black flex items-center justify-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /><span>{displayError}</span></div>}
         {!isManager ? <form onSubmit={handleWorkerLogin} className="space-y-4">
+          {USE_MULTI_TENANT_DATA && <Field label="كود الشركة" icon={<KeyRound className="w-4 h-4" />} value={companyCode} onChange={setCompanyCode} placeholder="كود الشركة" />}
           <Field label="اسم المستخدم" icon={<User className="w-4 h-4" />} value={workerUsername} onChange={setWorkerUsername} placeholder="اسم المستخدم" />
           <Field label="كود الدخول" icon={<KeyRound className="w-4 h-4" />} value={workerCode} onChange={setWorkerCode} placeholder="كود الدخول" password />
           <Submit submitting={submitting}>دخول العامل</Submit>
@@ -82,7 +92,7 @@ export const LoginPage: React.FC = () => {
           <Field label="كلمة المرور" icon={<Lock className="w-4 h-4" />} value={password} onChange={setPassword} placeholder="كلمة المرور" password minLength={6} />
           {view === 'manager' && <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer w-fit"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="w-4 h-4 accent-amber-500" /><span>تذكرني لمدة 7 أيام</span></label>}
           <Submit submitting={submitting}>{view === 'setup' ? 'إنشاء الحساب' : 'دخول المدير'}</Submit>
-          {allUsers.length === 0 && <button type="button" onClick={() => { setView(view === 'setup' ? 'manager' : 'setup'); resetError(); }} className="w-full text-xs font-bold text-amber-400">{view === 'setup' ? 'لدي حساب بالفعل' : 'إنشاء حساب المدير الأول'}</button>}
+          {!USE_MULTI_TENANT_DATA && allUsers.length === 0 && <button type="button" onClick={() => { setView(view === 'setup' ? 'manager' : 'setup'); resetError(); }} className="w-full text-xs font-bold text-amber-400">{view === 'setup' ? 'لدي حساب بالفعل' : 'إنشاء حساب المدير الأول'}</button>}
         </form>}
       </div>
     </div>

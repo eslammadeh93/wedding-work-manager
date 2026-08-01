@@ -48,3 +48,15 @@ export interface CompanyMember {
   createdAt: RecordTimestamp;
   createdBy: string;
 }
+
+export interface AuthSession {
+  uid: string;
+  email: string;
+  displayName: string;
+  userType: 'platform' | 'company';
+  role: SaaSRole;
+  companyId?: string;
+  memberStatus?: AccountStatus;
+  companyStatus?: CompanyStatus;
+  permissions: readonly import('./permissions').Permission[];
+}

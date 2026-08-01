@@ -1,0 +1,9 @@
+{
+  "name": "wedding-manager-functions",
+  "private": true,
+  "engines": { "node": "20" },
+  "main": "lib/index.js",
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "npm run build" },
+  "dependencies": { "firebase-admin": "^13.0.0", "firebase-functions": "^6.0.0" },
+  "devDependencies": { "@types/node": "^22.14.0", "typescript": "~5.8.2" }
+}

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   User,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -25,6 +26,7 @@ import firebaseConfigJson from '../../firebase-applet-config.json';
 import { auth, db } from '../firebase/config';
 import { UserProfile, UserRole, Worker } from '../types';
 import { sanitizeData, sanitizeText } from '../utils/security';
+import { USE_MULTI_TENANT_DATA, getPostLoginPath, MultiTenantAuthError, requestWorkerCustomToken, resolveMultiTenantSession, type AuthSession } from '../multiTenant';
 
 interface CreateUserData {
   displayName: string;
@@ -45,6 +47,7 @@ interface CreateFirstSuperAdminData {
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
+  authSession: AuthSession | null;
   allUsers: UserProfile[];
   loading: boolean;
   usersInitialized: boolean;
@@ -52,6 +55,8 @@ interface AuthContextType {
   clearError: () => void;
   loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
+  loginMultiTenantEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
+  loginMultiTenantWorker: (companyCode: string, username: string, loginCode: string) => Promise<boolean>;
   provisionWorkerAccount: (worker: Worker) => Promise<string>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
   logout: (reason?: string) => Promise<void>;
@@ -122,6 +127,7 @@ const applyLocalLoginAttemptLock = (action: LoginAttemptAction): LoginAttemptRes
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [usersInitialized, setUsersInitialized] = useState<boolean>(false);
@@ -177,6 +183,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Subscribe to all users from Firestore
   useEffect(() => {
+    if (USE_MULTI_TENANT_DATA) {
+      setUsersInitialized(true);
+      return;
+    }
     const usersColRef = collection(db, 'users');
     const unsubscribe = onSnapshot(
       usersColRef,
@@ -220,6 +230,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setUser(null);
     setProfile(null);
+    setAuthSession(null);
   };
 
   const loginWorker = async (usernameInput: string, loginCodeInput: string): Promise<boolean> => {
@@ -277,6 +288,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(currentUser);
 
       if (currentUser) {
+        if (USE_MULTI_TENANT_DATA) {
+          try {
+            const session = await resolveMultiTenantSession(currentUser);
+            setAuthSession(session);
+            // Compatibility shape for legacy UI only; authorization remains AuthSession.
+            const compatibleRole: UserRole = session.role === 'company_super_admin' || session.role === 'platform_owner' ? 'super_admin' : session.role;
+            setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: session.role === 'worker' ? String((await currentUser.getIdTokenResult()).claims.workerId || '') : undefined });
+            window.history.replaceState({}, '', getPostLoginPath(session));
+          } catch (error) {
+            setAuthError(error instanceof MultiTenantAuthError ? error.message : 'تعذر التحقق من صلاحيات الحساب.');
+            setAuthSession(null);
+            setProfile(null);
+            await signOut(auth);
+            setUser(null);
+          }
+          setLoading(false);
+          return;
+        }
         const rememberUntil = Number(localStorage.getItem(REMEMBER_UNTIL_KEY) || 0);
         if (rememberUntil && Date.now() >= rememberUntil) {
           localStorage.removeItem(REMEMBER_UNTIL_KEY);
@@ -324,6 +353,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setUser(null);
         setProfile(null);
+        setAuthSession(null);
       }
       setLoading(false);
     });
@@ -478,6 +508,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginMultiTenantEmail = async (email: string, pass: string, rememberMe = false) => {
+    setAuthError(null);
+    try {
+      await reportLoginAttempt('check');
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithEmailAndPassword(auth, sanitizeText(email).trim().toLowerCase(), pass);
+      await reportLoginAttempt('success');
+    } catch (error: any) {
+      const attempt = await reportLoginAttempt('failure');
+      setAuthError(formatFailedLoginMessage(attempt || {}));
+      throw error;
+    }
+  };
+
+  const loginMultiTenantWorker = async (companyCode: string, username: string, loginCode: string): Promise<boolean> => {
+    setAuthError(null);
+    try {
+      await reportLoginAttempt('check');
+      const result = await requestWorkerCustomToken(
+        sanitizeText(companyCode).trim(),
+        sanitizeText(username).trim(),
+        loginCode,
+      );
+      if (!result.success || !result.customToken) {
+        setAuthError(result.retryAfterSeconds ? `تم إيقاف المحاولة مؤقتًا. حاول بعد ${Math.ceil(result.retryAfterSeconds / 60)} دقيقة.` : result.message);
+        return false;
+      }
+      await signInWithCustomToken(auth, result.customToken);
+      await reportLoginAttempt('success');
+      return true;
+    } catch {
+      const attempt = await reportLoginAttempt('failure');
+      setAuthError(formatFailedLoginMessage(attempt || {}));
+      return false;
+    }
+  };
+
   const createFirstSuperAdmin = async (data: CreateFirstSuperAdminData) => {
     setAuthError(null);
     try {
@@ -594,6 +661,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         profile,
+        authSession,
         allUsers,
         loading,
         usersInitialized,
@@ -601,6 +669,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearError,
         loginEmail,
         loginWorker,
+        loginMultiTenantEmail,
+        loginMultiTenantWorker,
         provisionWorkerAccount,
         createFirstSuperAdmin,
         logout,

@@ -85,7 +85,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
 };
 
 function AppContent() {
-  const { user, profile, loading, usersInitialized } = useAuth();
+  const { user, profile, authSession, loading, usersInitialized } = useAuth();
   const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -161,6 +161,10 @@ function AppContent() {
   // 2. Strict Authentication Protection: If not authenticated, open on Login page
   if (!user || !profile) {
     return <LoginPage />;
+  }
+
+  if (authSession?.userType === 'platform') {
+    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">منصة الإدارة</h1><p className="text-sm text-slate-500 mt-2">تم التحقق من صلاحيات صاحب المنصة.</p></div></div>;
   }
 
   // 3. Authenticated Application Main Layout
