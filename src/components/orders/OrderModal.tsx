@@ -346,8 +346,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <h3 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
@@ -967,7 +967,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       key={att.id}
                       className="relative group px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200"
                     >
-                      <span>{att.type === 'contract' ? '📄 Contract' : '🖼️ Image'}</span>
+                      {att.type === 'contract' ? <FileText className="w-4 h-4" /> : <Image className="w-4 h-4" />}
+                      <span>{att.type === 'contract' ? 'Contract' : 'Image'}</span>
                       <button
                         type="button"
                         onClick={() => setAttachments(attachments.filter((a) => a.id !== att.id))}
@@ -1003,4 +1004,3 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     </div>
   );
 };
-

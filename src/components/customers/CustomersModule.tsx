@@ -41,7 +41,14 @@ export const CustomersModule: React.FC = () => {
   };
 
   const getCleanPhone = (phoneStr: string) => {
-    return phoneStr.replace(/[^0-9]/g, '');
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    const normalized = phoneStr.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)));
+    const digits = normalized.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    // Local Egyptian mobile numbers (01xxxxxxxxx) need Egypt's country code.
+    if (digits.startsWith('0')) return `20${digits.slice(1)}`;
+    if (digits.length === 10 && digits.startsWith('1')) return `20${digits}`;
+    return digits;
   };
 
   return (
@@ -228,11 +235,11 @@ export const CustomersModule: React.FC = () => {
                     {custOrders.length === 0 ? (
                       <p className="text-xs text-slate-400 italic">No previous orders recorded for this customer.</p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {custOrders.map((ord) => (
                           <div
                             key={ord.id}
-                            className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between"
+                            className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col gap-2"
                           >
                             <div>
                               <span className="font-bold text-xs text-amber-600 dark:text-amber-400">

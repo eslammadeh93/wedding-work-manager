@@ -110,6 +110,18 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
+// Firestore's real-time listener can receive the same document while a save
+// request is resolving. Always merge by id so optimistic UI updates never
+// render a second copy of the same record.
+const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
+  const index = items.findIndex((existing) => existing.id === item.id);
+  if (index === -1) return [item, ...items];
+  return items.map((existing) => (existing.id === item.id ? item : existing));
+};
+
+const createRecordId = (prefix: string) =>
+  `${prefix}_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -362,7 +374,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addOrder = async (
     orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus'>
   ): Promise<string> => {
-    const newId = 'ord_' + Date.now();
+    const newId = createRecordId('ord');
     const history = orderData.paymentHistory || [];
     
     // Calculate total paid: deposit + sum of payment history entries
@@ -397,7 +409,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Saving order locally:', e);
     }
 
-    const updatedOrders = [newOrder, ...orders];
+    const updatedOrders = upsertById(orders, newOrder);
     setOrders(updatedOrders);
 
     // Recalculate inventory
@@ -488,7 +500,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addWorker = async (
     workerData: Omit<Worker, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<string> => {
-    const newId = 'wrk_' + Date.now();
+    const newId = createRecordId('wrk');
     const now = new Date().toISOString();
     const newWorker: Worker = {
       ...workerData,
@@ -503,7 +515,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Saving worker locally:', e);
     }
 
-    setWorkers((prev) => [newWorker, ...prev]);
+    setWorkers((prev) => upsertById(prev, newWorker));
     return newId;
   };
 
@@ -537,7 +549,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Customers Operations
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>): Promise<string> => {
-    const newId = 'cust_' + Date.now();
+    const newId = createRecordId('cust');
     const newCustomer: Customer = {
       ...customerData,
       id: newId,
@@ -550,7 +562,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Saving customer locally:', e);
     }
 
-    setCustomers((prev) => [newCustomer, ...prev]);
+    setCustomers((prev) => upsertById(prev, newCustomer));
     return newId;
   };
 
@@ -576,7 +588,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addInventoryItem = async (
     itemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'reservedQuantity' | 'availableQuantity'>
   ): Promise<string> => {
-    const newId = 'inv_' + Date.now();
+    const newId = createRecordId('inv');
     const now = new Date().toISOString();
     const newItem: InventoryItem = {
       ...itemData,
@@ -632,7 +644,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Expenses Operations
   const addExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt'>): Promise<string> => {
-    const newId = 'exp_' + Date.now();
+    const newId = createRecordId('exp');
     const newExpense: Expense = {
       ...expenseData,
       id: newId,
@@ -645,7 +657,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Saving expense locally:', e);
     }
 
-    setExpenses((prev) => [newExpense, ...prev]);
+    setExpenses((prev) => upsertById(prev, newExpense));
     return newId;
   };
 

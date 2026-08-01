@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -44,7 +44,11 @@ type QuickFilterType =
 type SortField = 'bookingDate' | 'eventDate' | 'orderNumber' | 'totalPrice';
 type SortOrder = 'asc' | 'desc';
 
-export const OrdersModule: React.FC = () => {
+interface OrdersModuleProps {
+  createOrderRequest?: number;
+}
+
+export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0 }) => {
   const { t, language } = useLanguage();
   const { orders, deleteOrder } = useData();
   const { profile } = useAuth();
@@ -83,7 +87,7 @@ export const OrdersModule: React.FC = () => {
   const [eventYear, setEventYear] = useState<string>('all');
 
   // View & Sort State
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('grid');
   const [sortField, setSortField] = useState<SortField>('eventDate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
@@ -92,6 +96,10 @@ export const OrdersModule: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    if (createOrderRequest > 0) setIsCreateOpen(true);
+  }, [createOrderRequest]);
 
   // Helper date parsing
   const getBookingDate = (ord: Order) => ord.bookingDate || ord.createdAt.split('T')[0];
@@ -341,10 +349,20 @@ export const OrdersModule: React.FC = () => {
 
   const todaysAssignedOrders = useMemo(() => {
     return filteredOrders.filter((ord) => {
-      const eDate = getEventDate(ord);
-      return eDate === todayStr;
+      return (ord.deliveryDate || getEventDate(ord)) === todayStr;
     });
   }, [filteredOrders, todayStr]);
+
+  const tomorrowStr = useMemo(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  }, []);
+
+  const tomorrowsAssignedOrders = useMemo(
+    () => filteredOrders.filter((ord) => (ord.deliveryDate || getEventDate(ord)) === tomorrowStr),
+    [filteredOrders, tomorrowStr]
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -354,7 +372,7 @@ export const OrdersModule: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-2xl">👷</span>
+                <Wrench className="w-6 h-6" />
                 <h3 className="text-2xl font-black">
                   {profile?.workerName || profile?.displayName || 'المنفذ'}
                 </h3>
@@ -372,7 +390,8 @@ export const OrdersModule: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl flex items-center gap-3 shrink-0 self-start sm:self-center">
+            <div className="flex items-center gap-3 shrink-0 self-start sm:self-center">
+            <div className="bg-white/20 backdrop-blur-md px-5 py-3 rounded-2xl flex items-center gap-3">
               <ClipboardList className="w-6 h-6 text-white" />
               <div>
                 <span className="text-[11px] text-amber-100 font-bold block uppercase">
@@ -383,11 +402,23 @@ export const OrdersModule: React.FC = () => {
                 </span>
               </div>
             </div>
+            <div className="bg-emerald-600/80 backdrop-blur-md px-5 py-3 rounded-2xl flex items-center gap-3 border border-emerald-300/30">
+              <Calendar className="w-6 h-6 text-white" />
+              <div>
+                <span className="text-[11px] text-emerald-50 font-bold block uppercase">
+                  {language === 'ar' ? 'مهام الغد' : "Tomorrow's Tasks"}
+                </span>
+                <span className="text-2xl font-black font-mono text-white">
+                  {tomorrowsAssignedOrders.length}
+                </span>
+              </div>
+            </div>
+            </div>
           </div>
 
           {todaysAssignedOrders.length === 0 && (
             <div className="p-3 bg-black/20 backdrop-blur-sm rounded-xl border border-white/20 text-center text-xs font-bold text-amber-100 flex items-center justify-center gap-2">
-              <span>📋</span>
+              <ClipboardList className="w-4 h-4" />
               <span>{t('noTasksToday')}</span>
             </div>
           )}
@@ -564,7 +595,7 @@ export const OrdersModule: React.FC = () => {
           {/* Booking Month */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-              📅 {t('bookingMonth')}
+              <Calendar className="w-3.5 h-3.5 inline-block me-1" /> {t('bookingMonth')}
             </label>
             <select
               value={bookingMonth}
@@ -583,7 +614,7 @@ export const OrdersModule: React.FC = () => {
           {/* Event Month */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-              💍 {t('eventMonth')}
+              <Sparkles className="w-3.5 h-3.5 inline-block me-1" /> {t('eventMonth')}
             </label>
             <select
               value={eventMonth}
@@ -602,7 +633,7 @@ export const OrdersModule: React.FC = () => {
           {/* Booking Year */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-              📅 {t('bookingYear')}
+              <Calendar className="w-3.5 h-3.5 inline-block me-1" /> {t('bookingYear')}
             </label>
             <select
               value={bookingYear}
@@ -621,7 +652,7 @@ export const OrdersModule: React.FC = () => {
           {/* Event Year */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-              💍 {t('eventYear')}
+              <Sparkles className="w-3.5 h-3.5 inline-block me-1" /> {t('eventYear')}
             </label>
             <select
               value={eventYear}
@@ -937,10 +968,10 @@ export const OrdersModule: React.FC = () => {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 font-medium flex items-center gap-1">
                         <Calendar className="w-3.5 h-3.5 text-amber-500" />
-                        {t('eventDate')}:
+                        {isWorker ? (language === 'ar' ? 'تاريخ التركيب:' : 'Setup Date:') : `${t('eventDate')}:`}
                       </span>
-                      <strong className="text-amber-700 dark:text-amber-300 font-semibold">
-                        {eDate}
+                      <strong className={isWorker ? 'premium-gold font-bold' : 'text-amber-700 dark:text-amber-300 font-semibold'}>
+                        {isWorker ? (ord.deliveryDate || eDate) : eDate}
                       </strong>
                     </div>
                   </div>

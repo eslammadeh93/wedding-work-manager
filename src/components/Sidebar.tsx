@@ -94,19 +94,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         {/* Mobile / Sidebar Top Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gradient-to-tr from-amber-500 to-amber-400 rounded-xl flex items-center justify-center font-extrabold text-slate-950 text-base shadow-xs shadow-amber-500/20">
+          <button onClick={() => handleTabClick('dashboard')} className="flex items-center gap-3 text-start cursor-pointer">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 premium-gold-bg rounded-xl flex items-center justify-center font-extrabold text-base shadow-xs shadow-amber-500/20">
               <Crown className="w-4 h-4 text-slate-950 fill-slate-950" />
             </div>
             <div className="flex flex-col">
               <span className="text-xs font-black tracking-tight text-slate-900 dark:text-white leading-tight">
                 {t('appName')}
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                SaaS Dashboard
-              </span>
             </div>
-          </div>
+          </button>
           <button
             onClick={onClose}
             className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
@@ -153,7 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Sidebar Footer info */}
         <div className="p-3.5 border-t border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/50">
-            <div className="w-7 h-7 rounded-lg bg-amber-400 text-slate-900 font-black text-xs flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg premium-gold-bg font-black text-xs flex items-center justify-center">
               W
             </div>
             <div className="text-[11px] min-w-0">

@@ -72,8 +72,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     matchedExpenses.length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center pt-16 px-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95">
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center pt-16 px-4">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95">
         {/* Search Header */}
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
           <Search className="w-5 h-5 text-amber-500" />
@@ -97,7 +97,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             onClick={onClose}
             className="px-2.5 py-1 text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
           >
-            Esc
+            Skip
           </button>
         </div>
 

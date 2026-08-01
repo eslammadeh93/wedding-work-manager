@@ -1,3 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
+
+/* Wedding Planner design system — shared color tokens for every module. */
+@theme {
+  --font-sans: "Cairo", "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --color-white: #fffefe;
+  --color-black: #161214;
+
+  /* Champagne surfaces / Wine neutrals */
+  --color-slate-50: #fcfafb;
+  --color-slate-100: #f5f1ec;
+  --color-slate-200: #e8ddd4;
+  --color-slate-300: #d6c5b8;
+  --color-slate-400: #9b8581;
+  --color-slate-500: #735f61;
+  --color-slate-600: #5a464b;
+  --color-slate-700: #3c2b31;
+  --color-slate-800: #33252d;
+  --color-slate-900: #22181d;
+  --color-slate-950: #161214;
+
+  /* Existing amber utilities are the app's primary actions: make them Burgundy. */
+  --color-amber-50: #fbedf0;
+  --color-amber-100: #f5ebec;
+  --color-amber-200: #ebc8d1;
+  --color-amber-300: #d88a9f;
+  --color-amber-400: #a94663;
+  --color-amber-500: #8f3655;
+  --color-amber-600: #6e1f38;
+  --color-amber-700: #54162b;
+  --color-amber-800: #421021;
+  --color-amber-900: #2e0b17;
+  --color-amber-950: #1b060d;
+
+  /* Status colors from the supplied palette. */
+  --color-emerald-50: #eaf6ef;
+  --color-emerald-100: #d7efdf;
+  --color-emerald-500: #3e8e6d;
+  --color-emerald-600: #2f7659;
+  --color-emerald-700: #245b45;
+  --color-emerald-800: #1d4938;
+  --color-emerald-900: #143126;
+  --color-emerald-950: #0d2119;
+  --color-rose-50: #fcedef;
+  --color-rose-100: #f8dadd;
+  --color-rose-500: #c84a5a;
+  --color-rose-600: #ad3547;
+  --color-rose-700: #8e2838;
+  --color-rose-800: #70202d;
+  --color-rose-900: #51171f;
+  --color-rose-950: #351015;
+  --color-blue-50: #edf4ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2f6fd4;
+  --color-blue-700: #2558aa;
+  --color-blue-800: #1d4687;
+  --color-blue-900: #173766;
+  --color-blue-950: #102442;
+}
+
+:root {
+  color-scheme: light;
+  background: #fcfafb;
+}
+
+:root.dark {
+  color-scheme: dark;
+  background: #161214;
+}
+
+html[lang='en'] body,
+html[lang='en'] button,
+html[lang='en'] input,
+html[lang='en'] select,
+html[lang='en'] textarea {
+  font-family: "Poppins", "Cairo", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  min-width: 320px;
+  background: #fcfafb;
+  color: #3c2b31;
+}
+
+.dark body {
+  background: #161214;
+  color: #f5f1ec;
+}
+
+::selection {
+  background: #8f3655;
+  color: #fff;
+}
+
+/* Gold is reserved for premium details and small highlights. */
+.premium-gold {
+  color: #c7a96b;
+}
+
+.premium-gold-bg {
+  background: linear-gradient(135deg, #b18a4e, #e0c893);
+  color: #22181d;
+}

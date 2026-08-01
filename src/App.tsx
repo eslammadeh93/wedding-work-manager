@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -10,18 +10,21 @@ import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { LoginPage } from './components/auth/LoginPage';
 
-import { DashboardModule } from './components/dashboard/DashboardModule';
-import { OrdersModule } from './components/orders/OrdersModule';
-import { WorkersModule } from './components/workers/WorkersModule';
-import { CustomersModule } from './components/customers/CustomersModule';
-import { InventoryModule } from './components/inventory/InventoryModule';
-import { ExpensesModule } from './components/expenses/ExpensesModule';
-import { CalendarModule } from './components/calendar/CalendarModule';
-import { ReportsModule } from './components/reports/ReportsModule';
-import { ActivityLogModule } from './components/activityLogs/ActivityLogModule';
-import { UsersModule } from './components/users/UsersModule';
-import { SettingsModule } from './components/settings/SettingsModule';
 import { Menu, Crown, Loader2 } from 'lucide-react';
+
+// Load each workspace only when it is opened. This keeps PDF/Excel and other
+// heavy feature code out of the application's initial download.
+const DashboardModule = lazy(() => import('./components/dashboard/DashboardModule').then(({ DashboardModule }) => ({ default: DashboardModule })));
+const OrdersModule = lazy(() => import('./components/orders/OrdersModule').then(({ OrdersModule }) => ({ default: OrdersModule })));
+const WorkersModule = lazy(() => import('./components/workers/WorkersModule').then(({ WorkersModule }) => ({ default: WorkersModule })));
+const CustomersModule = lazy(() => import('./components/customers/CustomersModule').then(({ CustomersModule }) => ({ default: CustomersModule })));
+const InventoryModule = lazy(() => import('./components/inventory/InventoryModule').then(({ InventoryModule }) => ({ default: InventoryModule })));
+const ExpensesModule = lazy(() => import('./components/expenses/ExpensesModule').then(({ ExpensesModule }) => ({ default: ExpensesModule })));
+const CalendarModule = lazy(() => import('./components/calendar/CalendarModule').then(({ CalendarModule }) => ({ default: CalendarModule })));
+const ReportsModule = lazy(() => import('./components/reports/ReportsModule').then(({ ReportsModule }) => ({ default: ReportsModule })));
+const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityLogModule').then(({ ActivityLogModule }) => ({ default: ActivityLogModule })));
+const UsersModule = lazy(() => import('./components/users/UsersModule').then(({ UsersModule }) => ({ default: UsersModule })));
+const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
 
 const getPageTitle = (tab: ActiveTab, lang: string): string => {
   if (lang === 'ar') {
@@ -88,6 +91,7 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
+  const [createOrderRequest, setCreateOrderRequest] = useState(0);
 
   // Set default active tab to dashboard (or orders for workers) when logged in
   useEffect(() => {
@@ -136,15 +140,20 @@ function AppContent() {
     setActiveTab(tab);
   };
 
+  const handleCreateOrder = () => {
+    setActiveTab('orders');
+    setCreateOrderRequest((request) => request + 1);
+  };
+
   // 1. App Startup Loading State
   if (loading || !usersInitialized) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 transition-colors">
         <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 mb-4 shadow-lg shadow-amber-500/20">
           <Crown className="w-6 h-6" />
         </div>
         <Loader2 className="w-6 h-6 text-amber-500 animate-spin mb-2" />
-        <p className="text-xs font-bold text-slate-400">Loading Wedding Work Manager...</p>
+        <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Loading Wedding Work Manager...</p>
       </div>
     );
   }
@@ -161,6 +170,7 @@ function AppContent() {
       <Navbar
         onOpenSearch={() => setIsSearchOpen(true)}
         onToggleNotificationDrawer={() => setIsNotifDrawerOpen(!isNotifDrawerOpen)}
+        onNavigateDashboard={() => setActiveTab('dashboard')}
       />
 
       {/* Main Container */}
@@ -187,17 +197,25 @@ function AppContent() {
           </div>
 
           {/* Module Views */}
-          {activeTab === 'dashboard' && <DashboardModule onNavigate={handleNavigate} />}
-          {activeTab === 'orders' && <OrdersModule />}
-          {activeTab === 'workers' && <WorkersModule />}
-          {activeTab === 'customers' && <CustomersModule />}
-          {activeTab === 'inventory' && <InventoryModule />}
-          {activeTab === 'expenses' && <ExpensesModule />}
-          {activeTab === 'calendar' && <CalendarModule />}
-          {activeTab === 'reports' && <ReportsModule />}
-          {activeTab === 'activityLog' && <ActivityLogModule />}
-          {activeTab === 'users' && <UsersModule />}
-          {activeTab === 'settings' && <SettingsModule />}
+          <Suspense
+            fallback={
+              <div className="min-h-64 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
+              </div>
+            }
+          >
+            {activeTab === 'dashboard' && <DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} />}
+            {activeTab === 'orders' && <OrdersModule createOrderRequest={createOrderRequest} />}
+            {activeTab === 'workers' && <WorkersModule />}
+            {activeTab === 'customers' && <CustomersModule />}
+            {activeTab === 'inventory' && <InventoryModule />}
+            {activeTab === 'expenses' && <ExpensesModule />}
+            {activeTab === 'calendar' && <CalendarModule />}
+            {activeTab === 'reports' && <ReportsModule />}
+            {activeTab === 'activityLog' && <ActivityLogModule />}
+            {activeTab === 'users' && <UsersModule />}
+            {activeTab === 'settings' && <SettingsModule />}
+          </Suspense>
         </main>
       </div>
 

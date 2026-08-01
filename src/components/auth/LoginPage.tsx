@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 
 export const LoginPage: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
-  const { theme, toggleTheme } = useTheme();
+  const { darkMode, toggleDarkMode } = useTheme();
   const { loginEmail, loginWorker, createFirstSuperAdmin, allUsers, authError, clearError } = useAuth();
   const [view, setView] = useState<'worker' | 'manager' | 'setup'>('worker');
   const [workerUsername, setWorkerUsername] = useState('');
@@ -55,17 +55,17 @@ export const LoginPage: React.FC = () => {
   const displayError = localError || authError;
   const isManager = view === 'manager' || view === 'setup';
 
-  return <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans" dir="rtl">
+  return <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans transition-colors" dir="rtl">
     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
     <div className="absolute top-4 ltr:right-4 rtl:left-4 flex items-center gap-2 z-20">
-      <button onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')} className="px-3 py-1.5 bg-slate-800/80 border border-slate-700/80 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-amber-400" /><span>{language === 'ar' ? 'English' : 'العربية'}</span></button>
-      <button onClick={toggleTheme} className="p-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-slate-200">{theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-400" />}</button>
+      <button onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')} className="px-3 py-1.5 bg-white/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" /><span>{language === 'ar' ? 'English' : 'العربية'}</span></button>
+      <button onClick={toggleDarkMode} className="p-2 bg-white/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200">{darkMode ? <Sun className="w-4 h-4 text-amber-500" /> : <Moon className="w-4 h-4 text-slate-500" />}</button>
     </div>
-    <div className="w-full max-w-md bg-slate-800/90 border border-slate-700/80 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden z-10">
-      <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-700/50">
-        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 bg-gradient-to-tr from-amber-500 to-amber-400 rounded-2xl flex items-center justify-center text-slate-950 shadow-lg shadow-amber-500/20"><Crown className="w-7 h-7" /></button>
-        <h1 className="text-xl font-black text-white tracking-tight">{t('appName')}</h1>
-        <p className="text-xs text-slate-400 mt-2">{view === 'worker' ? 'دخول العامل' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
+    <div className="w-full max-w-md bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden z-10">
+      <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-200 dark:border-slate-700/50">
+        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 premium-gold-bg rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20"><Crown className="w-7 h-7" /></button>
+        <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{t('appName')}</h1>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول العامل' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
       </div>
       <div className="p-7 space-y-4">
         {displayError && <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 text-rose-300 rounded-2xl text-xs font-black flex items-center justify-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /><span>{displayError}</span></div>}
@@ -77,7 +77,7 @@ export const LoginPage: React.FC = () => {
           {view === 'setup' && <Field label="الاسم" icon={<User className="w-4 h-4" />} value={name} onChange={setName} placeholder="اسم المدير" />}
           <Field label="البريد الإلكتروني" icon={<Mail className="w-4 h-4" />} value={email} onChange={setEmail} placeholder="name@example.com" email />
           <Field label="كلمة المرور" icon={<Lock className="w-4 h-4" />} value={password} onChange={setPassword} placeholder="كلمة المرور" password minLength={6} />
-          {view === 'manager' && <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer w-fit"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="w-4 h-4 accent-amber-500" /><span>تذكرني لمدة 7 أيام</span></label>}
+          {view === 'manager' && <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer w-fit"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="w-4 h-4 accent-amber-500" /><span>تذكرني لمدة 7 أيام</span></label>}
           <Submit submitting={submitting}>{view === 'setup' ? 'إنشاء الحساب' : 'دخول المدير'}</Submit>
           {allUsers.length === 0 && <button type="button" onClick={() => { setView(view === 'setup' ? 'manager' : 'setup'); resetError(); }} className="w-full text-xs font-bold text-amber-400">{view === 'setup' ? 'لدي حساب بالفعل' : 'إنشاء حساب المدير الأول'}</button>}
         </form>}
@@ -86,5 +86,5 @@ export const LoginPage: React.FC = () => {
   </div>;
 };
 
-const Field: React.FC<{ label: string; icon: React.ReactNode; value: string; onChange: (value: string) => void; placeholder: string; password?: boolean; email?: boolean; minLength?: number }> = ({ label, icon, value, onChange, placeholder, password, email, minLength }) => <div><label className="block text-xs font-bold text-slate-300 mb-1.5">{label}</label><div className="relative text-slate-400"><span className="absolute right-3.5 top-1/2 -translate-y-1/2">{icon}</span><input type={password ? 'password' : email ? 'email' : 'text'} required minLength={minLength} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full pr-10 pl-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-xs text-white outline-none focus:ring-2 focus:ring-amber-500" /></div></div>;
+const Field: React.FC<{ label: string; icon: React.ReactNode; value: string; onChange: (value: string) => void; placeholder: string; password?: boolean; email?: boolean; minLength?: number }> = ({ label, icon, value, onChange, placeholder, password, email, minLength }) => <div><label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">{label}</label><div className="relative text-slate-400"><span className="absolute right-3.5 top-1/2 -translate-y-1/2">{icon}</span><input type={password ? 'password' : email ? 'email' : 'text'} required minLength={minLength} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full pr-10 pl-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500" /></div></div>;
 const Submit: React.FC<{ submitting: boolean; children: React.ReactNode }> = ({ submitting, children }) => <button type="submit" disabled={submitting} className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-60"><LogIn className="w-4 h-4" /><span>{submitting ? 'جاري التنفيذ...' : children}</span></button>;

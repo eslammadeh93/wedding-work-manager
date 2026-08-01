@@ -13,15 +13,18 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
+  onCreateOrder: () => void;
 }
 
-export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) => {
+export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate, onCreateOrder }) => {
   const { t, language } = useLanguage();
-  const { orders, expenses, inventory, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
+  const { profile } = useAuth();
+  const { orders, inventory, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
 
   // Metrics Calculations
   const currentMonth = new Date().getMonth();
@@ -46,14 +49,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
   const monthlyOrderExpenses = monthlyOrders.reduce((sum, o) => sum + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
 
-  const monthlyExpensesTotal = expenses
-    .filter((e) => {
-      const d = new Date(e.date);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
-    .reduce((sum, e) => sum + e.amount, 0);
-
-  const netProfit = monthlyRevenue - monthlyOrderExpenses - monthlyExpensesTotal;
+  // Order profitability stays independent from the company capital/expense ledger.
+  const netProfit = monthlyRevenue - monthlyOrderExpenses;
+  const firstName = profile?.displayName?.trim().split(/\s+/)[0] || (language === 'ar' ? 'مدير' : 'Manager');
 
   const totalOrdersCount = orders.length;
   const pendingOrdersCount = orders.filter((o) => o.orderStatus === 'pending' || o.orderStatus === 'in_progress' || o.orderStatus === 'confirmed').length;
@@ -91,14 +89,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
     const orderExp = monthOrders.reduce((acc, o) => acc + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
 
-    const genExp = expenses
-      .filter((e) => {
-        const ed = new Date(e.date);
-        return ed.getMonth() === m && ed.getFullYear() === y;
-      })
-      .reduce((acc, e) => acc + e.amount, 0);
-
-    const exp = orderExp + genExp;
+    const exp = orderExp;
 
     return { name: monthName, rev, exp };
   });
@@ -108,16 +99,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Banner Greetings */}
-      <div className="p-6 bg-slate-900 dark:bg-slate-900/90 rounded-2xl text-white border border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 bg-white dark:bg-slate-900/90 rounded-2xl text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-amber-400"></span>
             <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">System Dashboard</span>
           </div>
-          <h2 className="text-xl font-extrabold tracking-tight text-white">{t('welcomeBack')}, Manager</h2>
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">{t('welcomeBack')}, {firstName}</h2>
         </div>
         <button
-          onClick={() => onNavigate('orders')}
+          onClick={onCreateOrder}
           className="px-4 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-900 font-extrabold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-2"
         >
           <ClipboardList className="w-4 h-4" />
@@ -126,19 +117,19 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
       </div>
 
       {/* Company Financial Balance Summary Banner */}
-      <div className="p-5 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl border border-slate-700/80 shadow-md text-white">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-700/60">
+      <div className="p-5 bg-gradient-to-r from-slate-100 via-white to-slate-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700/80 shadow-md text-slate-900 dark:text-white">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-700/60">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 block">
               {language === 'ar' ? 'الوضع المالي للشركة' : 'Company Financial Balance'}
             </span>
-            <h3 className="text-lg font-black text-white mt-0.5">
+            <h3 className="text-lg font-black text-slate-900 dark:text-white mt-0.5">
               {t('capitalAndExpenses')}
             </h3>
           </div>
           <button
             onClick={() => onNavigate('expenses')}
-            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-400/30 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-3.5 py-1.5 bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-amber-700 dark:text-amber-400 border border-amber-400/30 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
           >
             <span>{language === 'ar' ? 'عرض السجل المالي' : 'View Financial Ledger'}</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
@@ -147,7 +138,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
           {/* Total Capital */}
-          <div className="p-3.5 bg-slate-800/80 rounded-xl border border-emerald-500/30">
+          <div className="p-3.5 bg-white/80 dark:bg-slate-800/80 rounded-xl border border-emerald-500/30">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('totalCapital')}
             </span>
@@ -157,7 +148,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           </div>
 
           {/* Total General Expenses */}
-          <div className="p-3.5 bg-slate-800/80 rounded-xl border border-rose-500/30">
+          <div className="p-3.5 bg-white/80 dark:bg-slate-800/80 rounded-xl border border-rose-500/30">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('totalGeneralExpenses')}
             </span>
@@ -167,7 +158,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           </div>
 
           {/* Current Cash Balance */}
-          <div className="p-3.5 bg-slate-800/80 rounded-xl border border-amber-500/30">
+          <div className="p-3.5 bg-white/80 dark:bg-slate-800/80 rounded-xl border border-amber-500/30">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('currentCashBalance')}
             </span>
@@ -190,7 +181,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               <Calendar className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black text-slate-900 dark:text-white mt-3 tracking-tight">
+          <p className="text-2xl font-black premium-gold mt-3 tracking-tight">
             {bookingsThisMonth}
           </p>
           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider block mt-1.5">
@@ -211,7 +202,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-3 tracking-tight">
             {eventsThisMonth}
           </p>
-          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider block mt-1.5">
+          <span className="text-[10px] premium-gold font-bold uppercase tracking-wider block mt-1.5">
             Weddings Executed
           </span>
         </div>
@@ -235,21 +226,21 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           </span>
         </div>
 
-        {/* Monthly Expenses */}
+        {/* Direct Order Costs */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              {t('monthlyExpenses')}
+              {language === 'ar' ? 'تكاليف الأوردرات' : 'Order Costs'}
             </span>
             <div className="p-2 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg">
               <TrendingDown className="w-4 h-4" />
             </div>
           </div>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-3 tracking-tight">
-            ${monthlyExpensesTotal.toLocaleString()}
+            ${monthlyOrderExpenses.toLocaleString()}
           </p>
           <span className="text-[10px] text-rose-500 font-bold uppercase tracking-wider block mt-1.5">
-            Operating cost
+            {language === 'ar' ? 'تكاليف مرتبطة بالأوردرات فقط' : 'Direct order costs only'}
           </span>
         </div>
 
@@ -263,11 +254,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-black text-slate-900 dark:text-white mt-3 tracking-tight">
+          <p className="text-2xl font-black premium-gold mt-3 tracking-tight">
             ${netProfit.toLocaleString()}
           </p>
-          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider block mt-1.5">
-            Calculated automatically
+          <span className="text-[10px] premium-gold font-bold uppercase tracking-wider block mt-1.5">
+            {language === 'ar' ? 'ربح الأوردرات فقط' : 'Orders profit only'}
           </span>
         </div>
 
@@ -310,7 +301,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-rose-500"></span>
-                <span className="text-[10px]">{t('monthlyExpenses')}</span>
+                <span className="text-[10px]">{language === 'ar' ? 'تكاليف الأوردرات' : 'Order Costs'}</span>
               </div>
             </div>
           </div>

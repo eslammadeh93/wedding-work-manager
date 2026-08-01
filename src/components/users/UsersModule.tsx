@@ -16,6 +16,7 @@ import {
   Lock,
   Sparkles,
   RefreshCw,
+  X,
   Crown,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -427,8 +428,8 @@ export const UsersModule: React.FC = () => {
 
       {/* CREATE USER MODAL */}
       {isAddOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+        <div onClick={() => setIsAddOpen(false)} className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-amber-500" />
@@ -438,7 +439,7 @@ export const UsersModule: React.FC = () => {
                 onClick={() => setIsAddOpen(false)}
                 className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -554,8 +555,8 @@ export const UsersModule: React.FC = () => {
 
       {/* EDIT USER MODAL */}
       {editingUser && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
+        <div onClick={() => setEditingUser(null)} className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Edit2 className="w-5 h-5 text-amber-500" />
@@ -565,7 +566,7 @@ export const UsersModule: React.FC = () => {
                 onClick={() => setEditingUser(null)}
                 className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 

@@ -61,15 +61,20 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
     const finalCategory = type === 'capital' ? 'رأس مال' : category;
 
-    const payload = {
+    const payload: Omit<Expense, 'id' | 'createdAt'> = {
       type,
       category: finalCategory,
       amount: Number(amount),
       date,
-      addedBy: addedBy || undefined,
-      notes: notes || undefined,
-      description: notes || undefined,
     };
+
+    // Firestore rejects `undefined` field values. Only add optional fields
+    // when the user actually entered them.
+    if (addedBy.trim()) payload.addedBy = addedBy.trim();
+    if (notes.trim()) {
+      payload.notes = notes.trim();
+      payload.description = notes.trim();
+    }
 
     if (isEdit && initialExpense) {
       await updateExpense(initialExpense.id, payload);
@@ -81,8 +86,8 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col my-auto animate-in zoom-in-95 duration-200">
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col my-auto animate-in zoom-in-95 duration-200">
         <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {type === 'capital' ? (
@@ -257,4 +262,3 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     </div>
   );
 };
-

@@ -3,7 +3,6 @@ import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  Clock,
   MapPin,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -16,7 +15,6 @@ export const CalendarModule: React.FC = () => {
   const { orders } = useData();
 
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [calendarMode, setCalendarMode] = useState<'booking' | 'event'>('event');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   const year = currentDate.getFullYear();
@@ -56,16 +54,9 @@ export const CalendarModule: React.FC = () => {
     calendarDays.push(day);
   }
 
-  // Get orders for a specific date based on mode
+  // The calendar is an installation schedule: only setup/delivery dates are shown.
   const getEventsForDate = (dateStr: string) => {
-    if (calendarMode === 'booking') {
-      const bookingOrders = orders.filter((o) => (o.bookingDate || o.createdAt.split('T')[0]) === dateStr);
-      return { primaryOrders: bookingOrders, secondaryOrders: [] };
-    } else {
-      const weddingOrders = orders.filter((o) => (o.eventDate || o.weddingDate) === dateStr);
-      const deliveryOrders = orders.filter((o) => o.deliveryDate === dateStr);
-      return { primaryOrders: weddingOrders, secondaryOrders: deliveryOrders };
-    }
+    return orders.filter((o) => o.deliveryDate === dateStr);
   };
 
   return (
@@ -75,35 +66,11 @@ export const CalendarModule: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <CalendarIcon className="w-6 h-6 text-amber-500" />
-            <span>{calendarMode === 'booking' ? t('bookingCalendar') : t('eventCalendar')}</span>
+            <span>{language === 'ar' ? 'تقويم التركيبات' : 'Installation Calendar'}</span>
           </h2>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Calendar Mode Switcher */}
-          <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl flex items-center border border-slate-200 dark:border-slate-700">
-            <button
-              onClick={() => setCalendarMode('event')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-                calendarMode === 'event'
-                  ? 'bg-amber-500 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
-              }`}
-            >
-              💍 {t('eventCalendar')}
-            </button>
-            <button
-              onClick={() => setCalendarMode('booking')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-                calendarMode === 'booking'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
-              }`}
-            >
-              📅 {t('bookingCalendar')}
-            </button>
-          </div>
-
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
             <button
               onClick={prevMonth}
@@ -147,8 +114,8 @@ export const CalendarModule: React.FC = () => {
             const fullDateStr = `${year}-${formattedMonth}-${formattedDay}`;
 
             const isToday = fullDateStr === todayStr;
-            const { primaryOrders, secondaryOrders } = getEventsForDate(fullDateStr);
-            const totalCount = primaryOrders.length + secondaryOrders.length;
+            const installationOrders = getEventsForDate(fullDateStr);
+            const totalCount = installationOrders.length;
 
             return (
               <div
@@ -169,40 +136,24 @@ export const CalendarModule: React.FC = () => {
                   </span>
                   {totalCount > 0 && (
                     <span className="text-[10px] font-extrabold text-amber-600 dark:text-amber-400">
-                      {totalCount} {calendarMode === 'booking' ? 'bookings' : 'events'}
+                      {totalCount} {language === 'ar' ? 'تركيبات' : 'setups'}
                     </span>
                   )}
                 </div>
 
                 {/* Event badges */}
                 <div className="space-y-1 flex-1 overflow-y-auto max-h-[80px]">
-                  {primaryOrders.map((ord) => (
-                    <div
-                      key={ord.id}
-                      onClick={() => setSelectedOrder(ord)}
-                      className={`p-1.5 text-white rounded-lg text-[10px] font-bold truncate cursor-pointer shadow-xs transition-colors flex items-center gap-1 ${
-                        calendarMode === 'booking'
-                          ? 'bg-emerald-600 hover:bg-emerald-700'
-                          : 'bg-amber-500 hover:bg-amber-600'
-                      }`}
-                      title={`${ord.customerName} - ${ord.eventLocation}`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
-                      <span className="truncate">
-                        {calendarMode === 'booking' ? `Booked: ${ord.customerName}` : ord.customerName}
-                      </span>
-                    </div>
-                  ))}
-
-                  {secondaryOrders.map((ord) => (
+                  {installationOrders.map((ord) => (
                     <div
                       key={ord.id}
                       onClick={() => setSelectedOrder(ord)}
                       className="p-1.5 bg-blue-500 text-white rounded-lg text-[10px] font-bold truncate cursor-pointer shadow-xs hover:bg-blue-600 transition-colors flex items-center gap-1"
-                      title={`Setup: ${ord.customerName}`}
+                      title={`${language === 'ar' ? 'تركيب' : 'Setup'}: ${ord.customerName} - ${ord.eventLocation}`}
                     >
-                      <Clock className="w-3 h-3 shrink-0" />
-                      <span className="truncate">Setup: {ord.customerName}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                      <span className="truncate">
+                        {language === 'ar' ? `تركيب: ${ord.customerName}` : `Setup: ${ord.customerName}`}
+                      </span>
                     </div>
                   ))}
                 </div>

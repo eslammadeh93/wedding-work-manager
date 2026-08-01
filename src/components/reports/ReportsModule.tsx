@@ -9,6 +9,7 @@ import {
   TrendingDown,
   Boxes,
   ClipboardList,
+  Calendar,
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -53,7 +54,9 @@ export const ReportsModule: React.FC = () => {
   const totalRevenue = reportOrders.reduce((sum, o) => sum + o.totalPrice, 0);
   const totalPaidRevenue = reportOrders.reduce((sum, o) => sum + o.deposit + (o.paymentStatus === 'fully_paid' ? o.remainingBalance : 0), 0);
   const totalOrderExpenses = reportOrders.reduce((sum, o) => sum + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
-  const netProfit = totalRevenue - totalOrderExpenses - monthGeneralExpenses;
+  // Keep order profitability completely separate from company capital and
+  // operating expenses. The latter are shown in their own financial ledger.
+  const netProfit = totalRevenue - totalOrderExpenses;
 
   // Top Rented Inventory Items count
   const itemUsageMap: Record<string, number> = {};
@@ -91,7 +94,7 @@ export const ReportsModule: React.FC = () => {
         ['Total Capital Deposited', `$${monthCapital.toLocaleString()}`],
         ['Total General Expenses', `$${monthGeneralExpenses.toLocaleString()}`],
         ['Current Cash Balance', `$${monthCashBalance.toLocaleString()}`],
-        ['Net Realized Profit', `$${netProfit.toLocaleString()}`],
+        ['Order Profit (before company expenses)', `$${netProfit.toLocaleString()}`],
         ['Total Orders Booked', `${reportOrders.length}`],
       ],
     });
@@ -129,7 +132,7 @@ export const ReportsModule: React.FC = () => {
       { Metric: 'Total Capital', Value: monthCapital },
       { Metric: 'General Expenses', Value: monthGeneralExpenses },
       { Metric: 'Current Cash Balance', Value: monthCashBalance },
-      { Metric: 'Net Profit', Value: netProfit },
+      { Metric: 'Order Profit', Value: netProfit },
     ];
 
     const ordersExportData = reportOrders.map((o) => {
@@ -250,7 +253,7 @@ export const ReportsModule: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
-            💍 {t('eventDate')}
+            <ClipboardList className="w-3.5 h-3.5 inline-block me-1" /> {t('eventDate')}
           </button>
           <button
             onClick={() => setReportDateBasis('booking')}
@@ -260,13 +263,18 @@ export const ReportsModule: React.FC = () => {
                 : 'text-slate-600 dark:text-slate-300'
             }`}
           >
-            📅 {t('bookingDate')}
+            <Calendar className="w-3.5 h-3.5 inline-block me-1" /> {t('bookingDate')}
           </button>
         </div>
       </div>
 
-      {/* KPI Financial Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* Order accounts: revenue, direct costs, and profit */}
+      <section className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+          <ClipboardList className="w-5 h-5 text-amber-500" />
+          <span>{language === 'ar' ? 'حسابات الأوردرات والربحية' : 'Orders & Profitability'}</span>
+        </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalPrice')}</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
@@ -282,31 +290,47 @@ export const ReportsModule: React.FC = () => {
           </p>
           <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Collected Cash</span>
         </div>
-
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalCapital')}</span>
-          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
-            ${monthCapital.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Monthly Capital</span>
-        </div>
-
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalGeneralExpenses')}</span>
+          <span className="text-xs font-semibold text-slate-400 uppercase">{language === 'ar' ? 'تكاليف الأوردرات' : 'Order Costs'}</span>
           <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">
-            ${monthGeneralExpenses.toLocaleString()}
+            ${totalOrderExpenses.toLocaleString()}
           </p>
-          <span className="text-[11px] text-rose-500 font-medium mt-1 block">Company Expenses</span>
+          <span className="text-[11px] text-rose-500 font-medium mt-1 block">Direct order costs</span>
         </div>
-
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('currentCashBalance')}</span>
-          <p className={`text-2xl font-black mt-2 ${monthCashBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>
-            ${monthCashBalance.toLocaleString()}
+          <span className="text-xs font-semibold text-slate-400 uppercase">{t('netProfit')}</span>
+          <p className={`text-2xl font-black mt-2 ${netProfit >= 0 ? 'premium-gold' : 'text-rose-600 dark:text-rose-400'}`}>
+            ${netProfit.toLocaleString()}
           </p>
-          <span className="text-[11px] text-slate-400 font-medium mt-1 block">Capital - Expenses</span>
+          <span className="text-[11px] text-slate-400 font-medium mt-1 block">Orders only</span>
         </div>
       </div>
+      </section>
+
+      {/* Company finance ledger: capital and general expenses */}
+      <section className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+          <DollarSign className="w-5 h-5 text-emerald-500" />
+          <span>{language === 'ar' ? 'حسابات رأس المال والمصروفات' : 'Capital & Operating Expenses'}</span>
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="p-5 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('totalCapital')}</span>
+            <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">${monthCapital.toLocaleString()}</p>
+            <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Monthly capital</span>
+          </div>
+          <div className="p-5 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/50">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('totalGeneralExpenses')}</span>
+            <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">${monthGeneralExpenses.toLocaleString()}</p>
+            <span className="text-[11px] text-rose-500 font-medium mt-1 block">Company operating expenses</span>
+          </div>
+          <div className="p-5 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/50">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('currentCashBalance')}</span>
+            <p className={`text-2xl font-black mt-2 ${monthCashBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>${monthCashBalance.toLocaleString()}</p>
+            <span className="text-[11px] text-slate-400 font-medium mt-1 block">Capital − expenses</span>
+          </div>
+        </div>
+      </section>
 
       {/* General Expense Categories Breakdown */}
       <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">

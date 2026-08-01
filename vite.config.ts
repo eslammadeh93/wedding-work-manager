@@ -11,6 +11,23 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      // Firestore is the only required runtime SDK near this size (134 KB gzip).
+      // Feature bundles remain below this threshold and load on demand.
+      chunkSizeWarningLimit: 550,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'firebase-core': ['firebase/app'],
+            'firebase-auth': ['firebase/auth'],
+            'firebase-firestore': ['firebase/firestore'],
+            'vendor-pdf': ['jspdf', 'jspdf-autotable'],
+            'vendor-xlsx': ['xlsx'],
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

@@ -22,7 +22,7 @@ import {
   Check,
   MessageCircle,
   Clock,
-  Maximize2,
+  Car,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
@@ -56,7 +56,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [isLogging, setIsLogging] = useState(false);
   const [logToast, setLogToast] = useState<string | null>(null);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const hasLoggedOpenRef = React.useRef<string | null>(null);
 
@@ -126,12 +125,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   const formatWhatsAppPhone = (phone: string) => {
-    const clean = phone.replace(/[^0-9]/g, '');
-    if (!clean) return '';
-    if (clean.startsWith('0')) {
-      return '20' + clean.substring(1);
-    }
-    return clean;
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    const normalized = phone.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)));
+    const digits = normalized.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('0')) return `20${digits.slice(1)}`;
+    if (digits.length === 10 && digits.startsWith('1')) return `20${digits}`;
+    return digits;
   };
 
   const handleLogActivity = async (action: 'arrived' | 'finished', label: string) => {
@@ -161,8 +161,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[92vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[92vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-600 to-amber-700 text-white flex items-center justify-between shrink-0">
           <div>
@@ -229,7 +229,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           {isWorker ? (
             <div className="p-4 bg-amber-500/10 dark:bg-amber-500/5 rounded-2xl border border-amber-500/20 space-y-3">
               <h4 className="font-extrabold text-sm text-amber-900 dark:text-amber-300 flex items-center gap-2">
-                <span>⚡</span>
+                <Wrench className="w-4 h-4" />
                 <span>{t('quickActions')}</span>
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -239,7 +239,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   className="p-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
                 >
                   <Phone className="w-5 h-5" />
-                  <span>📞 {t('call')}</span>
+                  <span>{t('call')}</span>
                 </a>
 
                 {/* 2. WhatsApp */}
@@ -250,7 +250,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   className="p-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
                 >
                   <MessageCircle className="w-5 h-5" />
-                  <span>💬 {t('whatsapp')}</span>
+                  <span>{t('whatsapp')}</span>
                 </a>
 
                 {/* 3. Location */}
@@ -269,7 +269,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   className="p-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
                 >
                   <MapPin className="w-5 h-5" />
-                  <span>📍 {t('openLocation')}</span>
+                  <span>{t('openLocation')}</span>
                 </button>
 
                 {/* 4. Design Images */}
@@ -284,7 +284,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   className="p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
                 >
                   <ImageIcon className="w-5 h-5" />
-                  <span>🖼 {t('designImageSection')}</span>
+                  <span>{t('designImageSection')}</span>
                 </button>
               </div>
             </div>
@@ -428,12 +428,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              {!isWorker && <div className="flex items-center gap-2 shrink-0">
                 <a
                   href={`tel:${order.customerPhone}`}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
                 >
-                  <span>📞</span>
+                  <Phone className="w-4 h-4" />
                   <span>{t('call')}</span>
                 </a>
                 <a
@@ -442,10 +442,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   rel="noreferrer"
                   className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
                 >
-                  <span>💬</span>
+                  <MessageCircle className="w-4 h-4" />
                   <span>{t('whatsapp')}</span>
                 </a>
-              </div>
+              </div>}
             </div>
           </div>
 
@@ -516,7 +516,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   }}
                   className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <span>📍</span>
+                  <MapPin className="w-4 h-4" />
                   <span>{t('openLocation')}</span>
                 </button>
 
@@ -532,7 +532,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   }}
                   className="px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <span>📋</span>
+                  <Copy className="w-4 h-4" />
                   <span>{copiedLocation ? t('copied') : t('copyLink')}</span>
                 </button>
               </div>
@@ -601,9 +601,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       ${((order.workerCost || 0) + (order.transportationCost || 0) + (order.otherExpenses || 0)).toLocaleString()}
                     </p>
                   </div>
-                  <div className="p-2 bg-emerald-100/60 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800 col-span-2 sm:col-span-1">
-                    <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">{t('expectedNetProfit')}</span>
-                    <p className="text-sm font-extrabold text-emerald-800 dark:text-emerald-200 mt-0.5">
+                  <div className="p-2 bg-amber-100/60 dark:bg-amber-950/50 rounded-xl border border-amber-200 dark:border-amber-800 col-span-2 sm:col-span-1">
+                    <span className="text-[11px] premium-gold font-semibold">{t('expectedNetProfit')}</span>
+                    <p className="text-sm font-extrabold premium-gold mt-0.5">
                       ${(order.totalPrice - ((order.workerCost || 0) + (order.transportationCost || 0) + (order.otherExpenses || 0))).toLocaleString()}
                     </p>
                   </div>
@@ -652,18 +652,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      {img.url && (img.url.startsWith('http') || img.url.startsWith('data:image')) && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewImageUrl(img.url)}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                          title="عرض المكبر"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                          <span>عرض</span>
-                        </button>
-                      )}
-
                       <button
                         type="button"
                         onClick={() => {
@@ -682,7 +670,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleCopyLink(img.url, idx)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                        className="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-800 text-slate-800 dark:text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
                       >
                         {copiedIndex === idx ? (
                           <>
@@ -782,7 +770,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     rel="noreferrer"
                     className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center gap-2 text-xs font-semibold hover:bg-slate-100"
                   >
-                    <span>{att.type === 'contract' ? '📄 Contract' : '🖼️ Photo'}</span>
+                    {att.type === 'contract' ? <FileText className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
+                    <span>{att.type === 'contract' ? 'Contract' : 'Photo'}</span>
                   </a>
                 ))}
               </div>
@@ -808,7 +797,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   disabled={isLogging}
                   className="p-3 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
                 >
-                  <span>🚗</span>
+                  <Car className="w-4 h-4" />
                   <span>{t('markArrived')}</span>
                 </button>
                 <button
@@ -817,7 +806,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   disabled={isLogging}
                   className="p-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
                 >
-                  <span>✅</span>
+                  <Check className="w-4 h-4" />
                   <span>{t('markFinished')}</span>
                 </button>
               </div>
@@ -832,7 +821,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     className="p-2.5 bg-white dark:bg-slate-900 rounded-xl text-xs border border-slate-200 dark:border-slate-700 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
-                      <span className="text-base">{log.action === 'arrived' ? '🚗' : '✅'}</span>
+                      {log.action === 'arrived' ? <Car className="w-4 h-4 text-amber-500" /> : <Check className="w-4 h-4 text-emerald-500" />}
                       <span>{log.actionText}</span>
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">
@@ -848,21 +837,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
         </div>
       </div>
-
-      {/* Image Lightbox Modal */}
-      {previewImageUrl && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setPreviewImageUrl(null)}>
-          <div className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => setPreviewImageUrl(null)}
-              className="absolute top-3 right-3 p-2 bg-black/60 hover:bg-black text-white rounded-full transition-colors cursor-pointer"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            <img src={previewImageUrl} alt="Design Preview" className="max-w-full max-h-[85vh] object-contain rounded-2xl" />
-          </div>
-        </div>
-      )}
     </div>
   );
 };
