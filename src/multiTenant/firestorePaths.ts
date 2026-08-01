@@ -4,12 +4,24 @@ const documentId = (value: string, label: string): string => {
 };
 
 const companyRoot = (companyId: string) => `companies/${documentId(companyId, 'companyId')}`;
+const companyCollection = (companyId: string, collectionName: string) =>
+  `${companyRoot(companyId)}/${collectionName}`;
 
 /** Central source of truth for future multi-tenant Firestore paths. */
 export const firestorePaths = {
   platformUser: (uid: string) => `platformUsers/${documentId(uid, 'uid')}`,
   company: companyRoot,
   companyMember: (companyId: string, uid: string) => `${companyRoot(companyId)}/members/${documentId(uid, 'uid')}`,
+  companyCollection,
+  orders: (companyId: string) => companyCollection(companyId, 'orders'),
+  customers: (companyId: string) => companyCollection(companyId, 'customers'),
+  workers: (companyId: string) => companyCollection(companyId, 'workers'),
+  inventory: (companyId: string) => companyCollection(companyId, 'inventory'),
+  expenses: (companyId: string) => companyCollection(companyId, 'expenses'),
+  categories: (companyId: string) => companyCollection(companyId, 'categories'),
+  activityLogs: (companyId: string) => companyCollection(companyId, 'activityLogs'),
+  notifications: (companyId: string) => companyCollection(companyId, 'notifications'),
+  members: (companyId: string) => companyCollection(companyId, 'members'),
   order: (companyId: string, orderId: string) => `${companyRoot(companyId)}/orders/${documentId(orderId, 'orderId')}`,
   customer: (companyId: string, customerId: string) => `${companyRoot(companyId)}/customers/${documentId(customerId, 'customerId')}`,
   worker: (companyId: string, workerId: string) => `${companyRoot(companyId)}/workers/${documentId(workerId, 'workerId')}`,

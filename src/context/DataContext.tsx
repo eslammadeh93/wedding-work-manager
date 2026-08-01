@@ -31,6 +31,8 @@ import {
   initialExpenses,
   initialNotifications,
 } from '../data/sampleData';
+import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
+import { MultiTenantDataProvider } from '../multiTenant/data/MultiTenantDataProvider';
 
 const defaultCategories: CategoryItem[] = [
   { id: 'cat_1', key: 'wedding_chairs', nameEn: 'Wedding Chairs', nameAr: 'كراسي أعراس' },
@@ -51,7 +53,7 @@ const defaultCategories: CategoryItem[] = [
   { id: 'cat_16', key: 'other', nameEn: 'Other', nameAr: 'أخرى' },
 ];
 
-interface DataContextType {
+export interface DataContextType {
   orders: Order[];
   customers: Customer[];
   inventory: InventoryItem[];
@@ -111,7 +113,7 @@ interface DataContextType {
   checkStockAvailability: (items: { inventoryItemId: string; quantity: number }[]) => { available: boolean; warnings: string[] };
 }
 
-const DataContext = createContext<DataContextType | undefined>(undefined);
+export const DataContext = createContext<DataContextType | undefined>(undefined);
 
 // Firestore's real-time listener can receive the same document while a save
 // request is resolving. Always merge by id so optimistic UI updates never
@@ -125,7 +127,7 @@ const upsertById = <T extends { id: string }>(items: T[], item: T): T[] => {
 const createRecordId = (prefix: string) =>
   `${prefix}_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 
-export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -890,6 +892,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </DataContext.Provider>
   );
 };
+
+/** The mode choice is intentionally centralized; legacy code is never mounted in tenant mode. */
+export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =>
+  USE_MULTI_TENANT_DATA ? <MultiTenantDataProvider>{children}</MultiTenantDataProvider> : <LegacyDataProvider>{children}</LegacyDataProvider>;
 
 export const useData = () => {
   const context = useContext(DataContext);
