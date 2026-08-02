@@ -297,6 +297,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: session.role === 'worker' ? String((await currentUser.getIdTokenResult()).claims.workerId || '') : undefined });
             window.history.replaceState({}, '', getPostLoginPath(session));
           } catch (error) {
+            if (['localhost', '127.0.0.1'].includes(window.location.hostname)) console.error('[auth-context] session resolution failed before user-facing fallback', { name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
             setAuthError(error instanceof MultiTenantAuthError ? error.message : 'تعذر التحقق من صلاحيات الحساب.');
             setAuthSession(null);
             setProfile(null);

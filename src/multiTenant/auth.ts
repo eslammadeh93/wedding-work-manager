@@ -1,5 +1,5 @@
 import type { User } from 'firebase/auth';
-import { collectionGroup, doc, documentId, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 import { firestorePaths } from './firestorePaths';
@@ -19,7 +19,13 @@ function assertCompanyAllowsLogin(company: Company) {
 }
 
 export async function resolveMultiTenantSession(user: User): Promise<AuthSession> {
+  const development = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const debug = (step: string, details: Record<string, unknown>) => { if (development) console.debug(`[auth-resolution] ${step}`, details); };
+  try {
   const [token, platformSnapshot] = await Promise.all([user.getIdTokenResult(true), getDoc(doc(db, firestorePaths.platformUser(user.uid)))]);
+  const tokenRole = typeof token.claims.role === 'string' ? token.claims.role : null;
+  const tokenCompanyId = typeof token.claims.companyId === 'string' ? token.claims.companyId : null;
+  debug('token', { hasRole: Boolean(tokenRole), roleIsCompanySuperAdmin: tokenRole === 'company_super_admin', hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
   const platformProfile = platformSnapshot.exists() ? platformSnapshot.data() as PlatformUser : null;
   const hasClaim = token.claims.platform_owner === true;
   const hasProfile = platformProfile?.role === 'platform_owner';
@@ -28,15 +34,22 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
     if (platformProfile.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل.');
     return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: 'platform_owner', permissions: PERMISSION_MATRIX.platform_owner };
   }
-  const memberships = await getDocs(query(collectionGroup(db, 'members'), where(documentId(), '==', user.uid), limit(2)));
-  if (memberships.size !== 1) throw new MultiTenantAuthError('تعذر التحقق من عضوية الشركة.');
-  const member = memberships.docs[0].data() as CompanyMember;
-  if (member.uid !== user.uid || member.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل أو غير صالح.');
-  const companySnapshot = await getDoc(doc(db, firestorePaths.company(member.companyId)));
+  if (!tokenCompanyId || !tokenRole) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات الحساب.');
+  const memberSnapshot = await getDoc(doc(db, firestorePaths.companyMember(tokenCompanyId, user.uid)));
+  debug('membership', { found: memberSnapshot.exists(), companyId: tokenCompanyId });
+  if (!memberSnapshot.exists()) throw new MultiTenantAuthError('تعذر التحقق من عضوية الشركة.');
+  const member = memberSnapshot.data() as CompanyMember;
+  if (member.uid !== user.uid || member.status !== 'active' || member.role !== tokenRole) throw new MultiTenantAuthError('الحساب معطّل أو غير صالح.');
+  const companySnapshot = await getDoc(doc(db, firestorePaths.company(tokenCompanyId)));
   if (!companySnapshot.exists()) throw new MultiTenantAuthError('تعذر التحقق من الشركة.');
   const company = companySnapshot.data() as Company;
+  debug('company', { companyId: tokenCompanyId, status: company.status, active: company.status === 'active' });
   assertCompanyAllowsLogin(company);
-  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: member.companyId, memberStatus: member.status, companyStatus: company.status, permissions: PERMISSION_MATRIX[member.role] };
+  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: PERMISSION_MATRIX[member.role] };
+  } catch (error) {
+    if (development) console.error('[auth-resolution] exception at resolveMultiTenantSession', { name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
+    throw error;
+  }
 }
 
 export async function requestWorkerCustomToken(companyCode: string, username: string, loginCode: string): Promise<WorkerLoginResult> {
