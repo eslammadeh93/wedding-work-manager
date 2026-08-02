@@ -9,7 +9,7 @@ export const LoginPage: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
   const { darkMode, toggleDarkMode } = useTheme();
   const { loginEmail, loginWorker, loginMultiTenantEmail, loginMultiTenantWorker, createFirstSuperAdmin, allUsers, authError, clearError } = useAuth();
-  const [view, setView] = useState<'worker' | 'manager' | 'setup'>(USE_MULTI_TENANT_DATA ? 'manager' : 'worker');
+  const [view, setView] = useState<'worker' | 'manager' | 'setup'>('worker');
   const [companyCode, setCompanyCode] = useState('');
   const [workerUsername, setWorkerUsername] = useState('');
   const [workerCode, setWorkerCode] = useState('');
@@ -78,19 +78,19 @@ export const LoginPage: React.FC = () => {
       <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-200 dark:border-slate-700/50">
         <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 premium-gold-bg rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20"><Crown className="w-7 h-7" /></button>
         <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{t('appName')}</h1>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول العامل' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول الموظف' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
       </div>
       <div className="p-7 space-y-4">
         {USE_MULTI_TENANT_DATA && <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 dark:bg-slate-900 p-1">
           <button type="button" onClick={() => { setView('manager'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'manager' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول إداري</button>
-          <button type="button" onClick={() => { setView('worker'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'worker' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول عامل</button>
+          <button type="button" onClick={() => { setView('worker'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'worker' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول الموظف</button>
         </div>}
         {displayError && <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 text-rose-300 rounded-2xl text-xs font-black flex items-center justify-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /><span>{displayError}</span></div>}
         {!isManager ? <form onSubmit={handleWorkerLogin} className="space-y-4">
           {USE_MULTI_TENANT_DATA && <Field label="كود الشركة" icon={<KeyRound className="w-4 h-4" />} value={companyCode} onChange={(value) => setCompanyCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="100001" inputMode="numeric" maxLength={6} />}
           <Field label="اسم المستخدم" icon={<User className="w-4 h-4" />} value={workerUsername} onChange={setWorkerUsername} placeholder="اسم المستخدم" />
           <Field label="كود الدخول" icon={<KeyRound className="w-4 h-4" />} value={workerCode} onChange={setWorkerCode} placeholder="كود الدخول" password />
-          <Submit submitting={submitting}>دخول العامل</Submit>
+          <Submit submitting={submitting}>دخول الموظف</Submit>
         </form> : <form onSubmit={handleManagerLogin} className="space-y-4">
           {view === 'setup' && <Field label="الاسم" icon={<User className="w-4 h-4" />} value={name} onChange={setName} placeholder="اسم المدير" />}
           <Field label="البريد الإلكتروني" icon={<Mail className="w-4 h-4" />} value={email} onChange={setEmail} placeholder="name@example.com" email />
