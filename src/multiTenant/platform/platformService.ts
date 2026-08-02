@@ -18,6 +18,11 @@ export const formatPlatformDate = (value: unknown) => {
   return date ? new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium' }).format(date) : '—';
 };
 
+export const platformDateInputValue = (value: unknown) => {
+  const date = toDate(value);
+  return date ? date.toISOString().slice(0, 10) : '';
+};
+
 export const daysUntil = (value: unknown) => {
   const date = toDate(value);
   if (!date) return null;
@@ -27,7 +32,7 @@ export const daysUntil = (value: unknown) => {
 /** Reads only the platform-level companies collection; no tenant operational data. */
 export async function listPlatformCompanies(): Promise<PlatformCompany[]> {
   const snapshot = await getDocs(query(collection(db, 'companies')));
-  return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Omit<PlatformCompany, 'id'>) }));
+  return snapshot.docs.map(item => ({ id: item.id, ...(item.data() as Omit<PlatformCompany, 'id'>) }) as PlatformCompany);
 }
 
 export function summarizeCompanies(companies: PlatformCompany[]): PlatformOverview {

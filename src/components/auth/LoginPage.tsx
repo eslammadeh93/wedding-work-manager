@@ -38,6 +38,11 @@ export const LoginPage: React.FC = () => {
 
   const handleWorkerLogin = async (event: React.FormEvent) => {
     event.preventDefault(); resetError(); setSubmitting(true);
+    if (USE_MULTI_TENANT_DATA && !/^\d{6}$/.test(companyCode)) {
+      setLocalError('كود الشركة يجب أن يتكون من 6 أرقام.');
+      setSubmitting(false);
+      return;
+    }
     try {
       if (USE_MULTI_TENANT_DATA) await loginMultiTenantWorker(companyCode, workerUsername, workerCode);
       else await loginWorker(workerUsername, workerCode);
@@ -82,7 +87,7 @@ export const LoginPage: React.FC = () => {
         </div>}
         {displayError && <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 text-rose-300 rounded-2xl text-xs font-black flex items-center justify-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /><span>{displayError}</span></div>}
         {!isManager ? <form onSubmit={handleWorkerLogin} className="space-y-4">
-          {USE_MULTI_TENANT_DATA && <Field label="كود الشركة" icon={<KeyRound className="w-4 h-4" />} value={companyCode} onChange={setCompanyCode} placeholder="كود الشركة" />}
+          {USE_MULTI_TENANT_DATA && <Field label="كود الشركة" icon={<KeyRound className="w-4 h-4" />} value={companyCode} onChange={(value) => setCompanyCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="100001" inputMode="numeric" maxLength={6} />}
           <Field label="اسم المستخدم" icon={<User className="w-4 h-4" />} value={workerUsername} onChange={setWorkerUsername} placeholder="اسم المستخدم" />
           <Field label="كود الدخول" icon={<KeyRound className="w-4 h-4" />} value={workerCode} onChange={setWorkerCode} placeholder="كود الدخول" password />
           <Submit submitting={submitting}>دخول العامل</Submit>
@@ -99,5 +104,5 @@ export const LoginPage: React.FC = () => {
   </div>;
 };
 
-const Field: React.FC<{ label: string; icon: React.ReactNode; value: string; onChange: (value: string) => void; placeholder: string; password?: boolean; email?: boolean; minLength?: number }> = ({ label, icon, value, onChange, placeholder, password, email, minLength }) => <div><label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">{label}</label><div className="relative text-slate-400"><span className="absolute right-3.5 top-1/2 -translate-y-1/2">{icon}</span><input type={password ? 'password' : email ? 'email' : 'text'} required minLength={minLength} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full pr-10 pl-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500" /></div></div>;
+const Field: React.FC<{ label: string; icon: React.ReactNode; value: string; onChange: (value: string) => void; placeholder: string; password?: boolean; email?: boolean; minLength?: number; maxLength?: number; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'] }> = ({ label, icon, value, onChange, placeholder, password, email, minLength, maxLength, inputMode }) => <div><label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">{label}</label><div className="relative text-slate-400"><span className="absolute right-3.5 top-1/2 -translate-y-1/2">{icon}</span><input type={password ? 'password' : email ? 'email' : 'text'} required minLength={minLength} maxLength={maxLength} inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full pr-10 pl-4 py-3 bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500" /></div></div>;
 const Submit: React.FC<{ submitting: boolean; children: React.ReactNode }> = ({ submitting, children }) => <button type="submit" disabled={submitting} className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-60"><LogIn className="w-4 h-4" /><span>{submitting ? 'جاري التنفيذ...' : children}</span></button>;

@@ -15,7 +15,7 @@ export type ResetWorkerLoginCodeRequest = { workerId: string; loginCode: string 
 const invoke = async <Request, Response>(name: string, request: Request): Promise<Response> => (await httpsCallable<Request, Response>(functions, name)(request)).data;
 /** All writes are callable Functions; this contract intentionally contains no client Firestore/Auth writes. */
 export const companyMembersService = {
-  create: (request: CreateCompanyMemberRequest) => invoke<CreateCompanyMemberRequest, CompanyMemberOperationResponse<{ uid: string; workerId?: string }>>('createCompanyMember', request),
+  create: (request: CreateCompanyMemberRequest) => invoke<CreateCompanyMemberRequest, CompanyMemberOperationResponse<{ uid: string; workerId?: string; companyCode?: string }>>('createCompanyMember', request),
   update: (request: UpdateCompanyMemberRequest) => invoke<UpdateCompanyMemberRequest, CompanyMemberOperationResponse>('updateCompanyMember', request),
   changeRole: (request: ChangeCompanyMemberRoleRequest) => invoke<ChangeCompanyMemberRoleRequest, CompanyMemberOperationResponse>('changeCompanyMemberRole', request),
   disable: (request: DisableCompanyMemberRequest) => invoke<DisableCompanyMemberRequest, CompanyMemberOperationResponse>('disableCompanyMember', request),

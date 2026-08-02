@@ -1,4 +1,4 @@
-import type { CompanyManagementRequest, CreateCompanyRequest } from './types';
+import type { CompanyManagementRequest, CreateCompanyRequest, UpdateCompanyRequest } from './types';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase/config';
 
@@ -17,6 +17,11 @@ export const companyManagementService = {
       if (error instanceof Error && error.message) throw error;
       throw new PlatformProvisioningUnavailableError();
     }
+  },
+  async updateCompany(request: UpdateCompanyRequest): Promise<void> {
+    const call = httpsCallable<UpdateCompanyRequest, { success: boolean; message: string }>(functions, 'updateCompany');
+    const result = await call(request);
+    if (!result.data.success) throw new Error(result.data.message);
   },
   async manageCompany(_request: CompanyManagementRequest): Promise<void> {
     throw new PlatformProvisioningUnavailableError();

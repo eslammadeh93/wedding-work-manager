@@ -3,7 +3,7 @@ import test from 'node:test';
 import { validateCreateCompanyRequest } from './companyProvisioning.js';
 
 const validRequest = {
-  companyName: 'Acme Events', slug: 'acme-events', companyCode: 'acme', ownerName: 'Owner',
+  companyName: 'Acme Events', slug: 'acme-events', ownerName: 'Owner',
   ownerEmail: 'owner@example.test', ownerPassword: 'Strong-owner-123!', plan: 'trial', subscriptionStart: '2026-01-01',
   subscriptionEnd: '2026-02-01', maxUsers: 2, features: ['orders'],
 };
@@ -12,8 +12,8 @@ test('accepts a valid company provisioning request', () => {
   assert.equal('success' in validateCreateCompanyRequest(validRequest), false);
 });
 
-test('rejects unsafe slug and company code', () => {
-  const result = validateCreateCompanyRequest({ ...validRequest, slug: '../unsafe', companyCode: 'also unsafe' });
+test('rejects an unsafe slug', () => {
+  const result = validateCreateCompanyRequest({ ...validRequest, slug: '../unsafe' });
   assert.equal('success' in result && result.success, false);
   assert.equal('code' in result && result.code, 'INVALID_INPUT');
 });

@@ -6,7 +6,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService } from './companyMembers.js';
-import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse } from './apiTypes.js';
+import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateCompanyRequest, UpdateCompanyResponse } from './apiTypes.js';
 import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
 initializeApp();
@@ -122,6 +122,44 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
   } catch (error) {
     logger.error('Company provisioning authorization failed', { uid, reason: error instanceof Error ? error.message : 'unknown' });
     return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  }
+});
+
+export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<UpdateCompanyResponse> => {
+  const uid = request.auth?.uid;
+  if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const platformUser = await db.doc(`platformUsers/${uid}`).get();
+  if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const data = (request.data || {}) as Partial<UpdateCompanyRequest>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const slug = typeof data.slug === 'string' ? data.slug.trim().toLowerCase() : '';
+  const plan = typeof data.plan === 'string' ? data.plan.trim() : '';
+  const status = data.status;
+  const subscriptionStart = typeof data.subscriptionStart === 'string' ? data.subscriptionStart : '';
+  const subscriptionEnd = typeof data.subscriptionEnd === 'string' ? data.subscriptionEnd : '';
+  const startTime = Date.parse(subscriptionStart), endTime = Date.parse(subscriptionEnd);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !name || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || !plan || !['trial','active','past_due','expired','suspended'].includes(String(status)) || !Number.isInteger(data.maxUsers) || Number(data.maxUsers) < 1 || !Array.isArray(data.features) || data.features.some(value => typeof value !== 'string' || !value.trim()) || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return { success: false, code: 'INVALID_INPUT', message: 'بيانات تحديث الشركة غير صالحة.' };
+  const companyRef = db.doc(`companies/${companyId}`);
+  try {
+    await db.runTransaction(async tx => {
+      const company = await tx.get(companyRef);
+      if (!company.exists) throw new Error('COMPANY_NOT_FOUND');
+      if (Number(data.maxUsers) < Number(company.data()?.memberCount || 0)) throw new Error('MAX_USERS_TOO_LOW');
+      const oldSlug = String(company.data()?.slug || '');
+      if (slug !== oldSlug) {
+        const slugRef = db.doc(`companyIndexes/slug_${slug}`);
+        if ((await tx.get(slugRef)).exists) throw new Error('SLUG_EXISTS');
+        tx.create(slugRef, { companyId, value: slug, createdAt: FieldValue.serverTimestamp() });
+        if (oldSlug) tx.delete(db.doc(`companyIndexes/slug_${oldSlug}`));
+      }
+      tx.update(companyRef, { name, slug, plan, status, subscriptionStart, subscriptionEnd, maxUsers: data.maxUsers, features: data.features!.map(value => String(value).trim()).filter(Boolean), updatedAt: FieldValue.serverTimestamp() });
+    });
+    return { success: true, code: 'OK', message: 'تم تحديث الشركة بنجاح.' };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : '';
+    const code = reason === 'SLUG_EXISTS' ? 'SLUG_EXISTS' : reason === 'MAX_USERS_TOO_LOW' ? 'INVALID_INPUT' : 'UNKNOWN_ERROR';
+    return { success: false, code, message: reason === 'SLUG_EXISTS' ? 'Slug مستخدم بالفعل.' : reason === 'MAX_USERS_TOO_LOW' ? 'لا يمكن أن يقل maxUsers عن عدد أعضاء الشركة الحالي.' : 'تعذر تحديث الشركة.' };
   }
 });
 

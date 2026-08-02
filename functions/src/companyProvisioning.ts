@@ -24,10 +24,10 @@ const failure = (code: CreateCompanyError, message: string): CreateCompanyRespon
 export function validateCreateCompanyRequest(input: unknown): CreateCompanyRequest | CreateCompanyResponse {
   if (!input || typeof input !== 'object') return failure('INVALID_INPUT', 'بيانات الطلب غير صحيحة.');
   const value = input as Partial<CreateCompanyRequest>;
-  const strings = ['companyName', 'slug', 'companyCode', 'ownerName', 'ownerEmail', 'ownerPassword', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
+  const strings = ['companyName', 'slug', 'ownerName', 'ownerEmail', 'ownerPassword', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
   if (strings.some(key => typeof value[key] !== 'string' || !value[key]?.trim())) return failure('INVALID_INPUT', 'جميع الحقول النصية المطلوبة يجب أن تكون موجودة.');
-  const normalized = { ...value, companyName: value.companyName!.trim(), ownerName: value.ownerName!.trim(), ownerEmail: value.ownerEmail!.trim().toLowerCase(), slug: value.slug!.trim().toLowerCase(), companyCode: value.companyCode!.trim().toLowerCase(), plan: value.plan!.trim() } as CreateCompanyRequest;
-  if (!emailPattern.test(normalized.ownerEmail) || normalized.ownerPassword.length < 12 || !validKey(normalized.slug) || !validKey(normalized.companyCode)) return failure('INVALID_INPUT', 'بيانات المالك أو slug أو companyCode غير صالحة.');
+  const normalized = { ...value, companyName: value.companyName!.trim(), ownerName: value.ownerName!.trim(), ownerEmail: value.ownerEmail!.trim().toLowerCase(), slug: value.slug!.trim().toLowerCase(), plan: value.plan!.trim() } as CreateCompanyRequest;
+  if (!emailPattern.test(normalized.ownerEmail) || normalized.ownerPassword.length < 12 || !validKey(normalized.slug)) return failure('INVALID_INPUT', 'بيانات المالك أو slug غير صالحة.');
   if (!Number.isInteger(value.maxUsers) || value.maxUsers! <= 0 || !Array.isArray(value.features) || value.features.some(feature => typeof feature !== 'string' || !feature.trim())) return failure('INVALID_INPUT', 'maxUsers أو features غير صالح.');
   const start = Date.parse(normalized.subscriptionStart), end = Date.parse(normalized.subscriptionEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return failure('INVALID_INPUT', 'تواريخ الاشتراك غير صالحة.');
@@ -45,7 +45,6 @@ export class CompanyProvisioningService {
     if ('success' in request) return request;
     const { db, auth } = this.dependencies;
     let ownerUid: string | undefined;
-    const rollbackRefs: FirebaseFirestore.DocumentReference[] = [];
     logger.info('Company provisioning started', { createdBy, slug: request.slug });
     try {
       const existingEmail = await auth.getUserByEmail(request.ownerEmail).catch(error => {
@@ -53,12 +52,8 @@ export class CompanyProvisioningService {
         throw error;
       });
       if (existingEmail) return failure('EMAIL_EXISTS', 'البريد الإلكتروني مستخدم بالفعل.');
-      const [slugMatches, codeMatches] = await Promise.all([
-        db.collection('companies').where('slug', '==', request.slug).limit(1).get(),
-        db.collection('companies').where('companyCode', '==', request.companyCode).limit(1).get(),
-      ]);
+      const slugMatches = await db.collection('companies').where('slug', '==', request.slug).limit(1).get();
       if (!slugMatches.empty) return failure('SLUG_EXISTS', 'Slug مستخدم بالفعل.');
-      if (!codeMatches.empty) return failure('COMPANY_CODE_EXISTS', 'Company code مستخدم بالفعل.');
       try {
         const user = await auth.createUser({ displayName: request.ownerName, email: request.ownerEmail, password: request.ownerPassword, emailVerified: false });
         ownerUid = user.uid;
@@ -71,17 +66,30 @@ export class CompanyProvisioningService {
       const auditRef = db.collection('platformAuditLogs').doc();
       // Registries make slug/code uniqueness transactionally enforceable for this provisioning path.
       const slugRef = db.doc(`companyIndexes/slug_${request.slug}`);
-      const codeRef = db.doc(`companyIndexes/code_${request.companyCode}`);
-      rollbackRefs.push(companyRef, memberRef, auditRef, slugRef, codeRef);
+      const counterRef = db.doc('platformCounters/companyCode');
+      let generatedCompanyCode = '';
       await db.runTransaction(async transaction => {
-        const [slugIndex, codeIndex] = await Promise.all([transaction.get(slugRef), transaction.get(codeRef)]);
+        const [slugIndex, counter] = await Promise.all([transaction.get(slugRef), transaction.get(counterRef)]);
         if ((slugIndex as FirebaseFirestore.DocumentSnapshot).exists) throw new ProvisioningFailure('SLUG_EXISTS', 'Slug مستخدم بالفعل.');
-        if ((codeIndex as FirebaseFirestore.DocumentSnapshot).exists) throw new ProvisioningFailure('COMPANY_CODE_EXISTS', 'Company code مستخدم بالفعل.');
+        let nextCode = Math.max(100001, Number((counter as FirebaseFirestore.DocumentSnapshot).data()?.lastCode || 100000) + 1);
+        let codeRef: FirebaseFirestore.DocumentReference | undefined;
+        while (nextCode <= 999999) {
+          generatedCompanyCode = String(nextCode);
+          codeRef = db.doc(`companyIndexes/code_${generatedCompanyCode}`);
+          const [codeIndex, legacyMatch] = await Promise.all([
+            transaction.get(codeRef),
+            transaction.get(db.collection('companies').where('companyCode', '==', generatedCompanyCode).limit(1)),
+          ]);
+          if (!codeIndex.exists && (legacyMatch as FirebaseFirestore.QuerySnapshot).empty) break;
+          nextCode += 1;
+        }
+        if (!codeRef || nextCode > 999999) throw new ProvisioningFailure('COMPANY_CODE_EXISTS', 'نفد نطاق رموز الشركات المتاح.');
         const timestamp = FieldValue.serverTimestamp();
         transaction.create(slugRef, { companyId: companyRef.id, value: request.slug, createdAt: timestamp });
-        transaction.create(codeRef, { companyId: companyRef.id, value: request.companyCode, createdAt: timestamp });
-        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: request.companyCode, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: 'active', memberCount: 1, createdAt: timestamp, updatedAt: timestamp });
-        transaction.create(memberRef, { uid: ownerUid, name: request.ownerName, email: request.ownerEmail, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp });
+        transaction.create(codeRef, { companyId: companyRef.id, value: generatedCompanyCode, createdAt: timestamp });
+        transaction.set(counterRef, { lastCode: nextCode, updatedAt: timestamp });
+        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: generatedCompanyCode, ownerName: request.ownerName, ownerEmail: request.ownerEmail, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: 'active', memberCount: 1, createdAt: timestamp, updatedAt: timestamp });
+        transaction.create(memberRef, { uid: ownerUid, companyId: companyRef.id, companyCode: generatedCompanyCode, name: request.ownerName, email: request.ownerEmail, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp });
         transaction.create(auditRef, { companyId: companyRef.id, ownerUid, createdBy, timestamp, action: 'company_created_with_owner' });
       });
       const response = { success: true, code: 'OK', message: 'تم إنشاء الشركة ومالكها بنجاح.', companyId: companyRef.id, ownerUid } satisfies CreateCompanyResponse;
@@ -90,7 +98,8 @@ export class CompanyProvisioningService {
     } catch (error) {
       const known = error instanceof ProvisioningFailure ? error : new ProvisioningFailure('UNKNOWN_ERROR', 'تعذر إنشاء الشركة.');
       logger.error('Company provisioning failed', { code: known.code, durationMs: (this.dependencies.now?.() ?? Date.now()) - startedAt });
-      const rollbackOk = await this.rollback(ownerUid, rollbackRefs);
+      // Firestore transaction writes are atomic; only the Auth user exists outside it.
+      const rollbackOk = await this.rollback(ownerUid, []);
       return rollbackOk ? failure(known.code, known.message) : failure('ROLLBACK_FAILED', 'فشلت العملية وتعذر إكمال التراجع الآمن.');
     }
   }

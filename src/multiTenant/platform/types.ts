@@ -3,6 +3,8 @@ import type { Company, CompanyStatus, RecordTimestamp } from '../types';
 export interface PlatformCompany extends Company {
   /** Optional denormalized value supplied by trusted backend provisioning. */
   memberCount?: number;
+  ownerName?: string;
+  ownerEmail?: string;
 }
 
 export interface PlatformOverview {
@@ -19,7 +21,6 @@ export interface PlatformOverview {
 export interface CreateCompanyRequest {
   companyName: string;
   slug: string;
-  companyCode: string;
   ownerName: string;
   ownerEmail: string;
   ownerPassword: string;
@@ -30,6 +31,8 @@ export interface CreateCompanyRequest {
   features: string[];
   status: Extract<CompanyStatus, 'trial' | 'active'>;
 }
+
+export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; plan: string; status: CompanyStatus; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
 
 export interface CompanyManagementRequest {
   companyId: string;
