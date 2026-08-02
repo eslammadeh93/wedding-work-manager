@@ -128,6 +128,18 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: fals
   }
 });
 
+export const getWorkerOrders = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async request => {
+  if (!request.auth?.uid) return { success: false, code: 'UNAUTHORIZED', message: 'يجب تسجيل الدخول أولاً.' };
+  const memberships = await db.collectionGroup('members').where('uid', '==', request.auth.uid).limit(2).get();
+  if (memberships.size !== 1) return { success: false, code: 'UNAUTHORIZED', message: 'عضوية العامل غير صالحة.' };
+  const member = memberships.docs[0]; const memberData = member.data(); const companyRef = member.ref.parent.parent;
+  if (!companyRef || memberData.role !== 'worker' || memberData.status !== 'active' || typeof memberData.workerId !== 'string') return { success: false, code: 'FORBIDDEN', message: 'حساب العامل غير صالح.' };
+  const company = await companyRef.get();
+  if (!company.exists || !['active', 'trial'].includes(String(company.data()?.status))) return { success: false, code: 'FORBIDDEN', message: 'الشركة غير متاحة.' };
+  const orders = await companyRef.collection('orders').where('workerId', '==', memberData.workerId).get();
+  return { success: true, code: 'OK', orders: orders.docs.map(order => ({ id: order.id, ...order.data() })) };
+});
+
 /** Setup is deliberately limited to the local emulator or an explicitly configured staging environment. */
 export const createInitialPlatformOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'private' }, async () => ({ success: false, code: 'SETUP_DISABLED', message: 'إعداد المنصة غير متاح في هذه البيئة.' }));
 
@@ -223,4 +235,4 @@ export const sendCompanyMemberPasswordReset = onCall(memberFunctionOptions, (req
 export const resetWorkerLoginCode = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ResetWorkerLoginCodeResponse> => memberService.resetWorkerCode(request.data as ResetWorkerLoginCodeRequest, request.auth));
 export const deleteCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DeleteCompanyMemberResponse> => memberService.deleteMember(request.data as DeleteCompanyMemberRequest, request.auth));
 export const deleteWorker = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DeleteWorkerResponse> => memberService.deleteWorker(request.data as DeleteWorkerRequest, request.auth));
-export const updateOwnCompanyProfile = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateOwnCompanyProfileResponse> => memberService.updateOwnProfile(request.data as UpdateOwnCompanyProfileRequest, request.auth));
+export const updateOwnCompanyProfile = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<UpdateOwnCompanyProfileResponse> => memberService.updateOwnProfile(request.data as UpdateOwnCompanyProfileRequest, request.auth));

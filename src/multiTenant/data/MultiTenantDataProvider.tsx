@@ -32,9 +32,19 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const ready = () => { remaining -= 1; if (remaining === 0 && !failed) setLoading(false); };
     const onError = (result: DataOperationResult<never>) => { failed = true; setLoading(false); setLoadError(result.message || 'تعذر تحميل البيانات.'); };
     const listen = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void) => companyDataService.subscribe<T>(companyId, name, (items) => { set(items); ready(); }, onError);
-    const orderListener = workerOnly && !hasWorkerId
-      ? (() => { setOrders([]); ready(); return () => undefined; })()
-      : companyDataService.subscribe<Order>(companyId, 'orders', (items) => { setOrders(sortCreated(items)); ready(); }, onError, workerOnly ? { field: 'workerId', value: profile!.workerId! } : undefined);
+    const orderListener = workerOnly
+      ? (() => {
+          let cancelled = false;
+          if (!hasWorkerId) { setOrders([]); ready(); return () => { cancelled = true; }; }
+          void companyDataService.loadWorkerOrders<Order>().then(result => {
+            if (cancelled) return;
+            if (result.success) setOrders(sortCreated(result.data || []));
+            else console.error('[worker-orders] backend load failed', { code: result.code || 'UNKNOWN_ERROR' });
+            ready();
+          });
+          return () => { cancelled = true; };
+        })()
+      : companyDataService.subscribe<Order>(companyId, 'orders', (items) => { setOrders(sortCreated(items)); ready(); }, onError);
     const settingsListener = companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError);
     const unsubs = workerOnly ? [orderListener] : [
       orderListener, listen<Customer>('customers', setCustomers), listen<Worker>('workers', (items) => setWorkers(sortCreated(items))),

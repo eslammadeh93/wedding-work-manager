@@ -1,5 +1,7 @@
 import { collection, deleteDoc, doc, onSnapshot, query, setDoc, where, type Unsubscribe } from 'firebase/firestore';
 import { db } from '../../firebase/config';
+import { functions } from '../../firebase/config';
+import { httpsCallable } from 'firebase/functions';
 import { firestorePaths } from '../firestorePaths';
 
 export type CompanyCollection = 'orders' | 'customers' | 'workers' | 'inventory' | 'expenses' | 'categories' | 'activityLogs' | 'notifications';
@@ -23,6 +25,12 @@ const messageFor = (error: unknown, fallback: string): Pick<DataOperationResult<
 
 /** All tenant operational paths are constructed here, never in UI components. */
 export const companyDataService = {
+  async loadWorkerOrders<T extends { id: string }>(): Promise<DataOperationResult<T[]>> {
+    try {
+      const response = await httpsCallable<Record<string, never>, { success: boolean; code: string; message?: string; orders?: T[] }>(functions, 'getWorkerOrders')({});
+      return response.data.success ? { success: true, data: response.data.orders || [] } : { success: false, code: response.data.code === 'UNAUTHORIZED' ? 'UNAUTHENTICATED' : 'PERMISSION_DENIED', message: response.data.message || 'تعذر تحميل الطلبات.' };
+    } catch (error) { return { success: false, ...messageFor(error, 'تعذر تحميل الطلبات.') }; }
+  },
   subscribe<T extends { id: string }>(companyId: string, name: CompanyCollection, next: (records: T[]) => void, fail: (result: DataOperationResult<never>) => void, equalTo?: { field: string; value: string }): Unsubscribe {
     const path = firestorePaths[name](companyId); warnOnTenantRootCollection(path);
     const source = collection(db, path);
