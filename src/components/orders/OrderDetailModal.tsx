@@ -29,6 +29,7 @@ import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { Order, OrderStatus } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
+import { localDateString } from '../../utils/localDate';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -119,7 +120,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setIsSavingPayment(true);
       await addPaymentToOrder(order.id, {
         amount: Number(paymentAmount),
-        date: new Date().toISOString().split('T')[0],
+        date: localDateString(),
         method: paymentMethod,
         notes: paymentNotes || 'Partial Payment',
       });

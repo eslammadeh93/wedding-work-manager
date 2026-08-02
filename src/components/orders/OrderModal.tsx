@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, Alert
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker } from '../../types';
+import { localDateString } from '../../utils/localDate';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -117,16 +118,16 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [customerName, setCustomerName] = useState(initialOrder?.customerName || '');
   const [customerPhone, setCustomerPhone] = useState(initialOrder?.customerPhone || '');
   const [bookingDate, setBookingDate] = useState(
-    initialOrder?.bookingDate || new Date().toISOString().split('T')[0]
+    initialOrder?.bookingDate || localDateString()
   );
   const [weddingDate, setWeddingDate] = useState(
-    initialOrder?.weddingDate || new Date().toISOString().split('T')[0]
+    initialOrder?.weddingDate || localDateString()
   );
   const [deliveryDate, setDeliveryDate] = useState(
-    initialOrder?.deliveryDate || new Date().toISOString().split('T')[0]
+    initialOrder?.deliveryDate || localDateString()
   );
   const [returnDate, setReturnDate] = useState(
-    initialOrder?.returnDate || new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]
+    initialOrder?.returnDate || localDateString(new Date(Date.now() + 86400000 * 2))
   );
   const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || '');
   const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || '');
@@ -333,7 +334,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         {
           id: 'pay_init_' + Date.now(),
           amount: Number(deposit),
-          date: new Date().toISOString().split('T')[0],
+          date: localDateString(),
           method: paymentMethod,
           notes: 'Initial Deposit Payment',
         },

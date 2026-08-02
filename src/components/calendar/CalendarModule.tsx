@@ -9,6 +9,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Order } from '../../types';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
+import { localDateString } from '../../utils/localDate';
 
 export const CalendarModule: React.FC = () => {
   const { t, language } = useLanguage();
@@ -33,7 +34,7 @@ export const CalendarModule: React.FC = () => {
     setCurrentDate(new Date(year, month + 1, 1));
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = localDateString();
 
   const monthName = currentDate.toLocaleString(language === 'ar' ? 'ar' : 'en-US', {
     month: 'long',

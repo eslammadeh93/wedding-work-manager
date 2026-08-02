@@ -3,6 +3,7 @@ import { X, Building2, Receipt } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Expense, FinanceType } from '../../types';
+import { localDateString } from '../../utils/localDate';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -41,7 +42,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     initialExpense?.type || defaultType
   );
   const [date, setDate] = useState(
-    initialExpense?.date || new Date().toISOString().split('T')[0]
+    initialExpense?.date || localDateString()
   );
   const [category, setCategory] = useState(
     initialExpense?.category && initialExpense.category !== 'رأس مال'

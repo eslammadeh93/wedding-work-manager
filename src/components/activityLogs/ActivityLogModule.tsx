@@ -25,6 +25,7 @@ import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { ActivityLogRecord, Order } from '../../types';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
+import { localDateString } from '../../utils/localDate';
 
 type DateFilterType = 'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all';
 
@@ -46,12 +47,12 @@ export const ActivityLogModule: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   // Quick dates
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => localDateString(), []);
   
   const yesterdayStr = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    return localDateString(d);
   }, []);
 
   // Filtered Activity Logs

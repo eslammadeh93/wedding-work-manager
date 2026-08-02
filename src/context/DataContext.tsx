@@ -11,6 +11,7 @@ import {
 import { db } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import { sanitizeData } from '../utils/security';
+import { localDateString } from '../utils/localDate';
 import {
   Order,
   Customer,
@@ -259,7 +260,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               type: data.type || (data.category === 'رأس مال' ? 'capital' : 'expense'),
               category: data.category || (data.type === 'capital' ? 'رأس مال' : 'عام'),
               amount: Number(data.amount) || 0,
-              date: data.date || new Date().toISOString().split('T')[0],
+              date: data.date || localDateString(),
               addedBy: data.addedBy || '',
               notes: data.notes || data.description || '',
               ...data,
@@ -770,7 +771,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Wedding_ERP_Backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `Wedding_ERP_Backup_${localDateString()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };

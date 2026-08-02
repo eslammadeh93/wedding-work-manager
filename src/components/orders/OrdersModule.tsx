@@ -29,6 +29,7 @@ import { Order, OrderStatus, PaymentStatus } from '../../types';
 import { OrderModal } from './OrderModal';
 import { OrderDetailModal } from './OrderDetailModal';
 import { OrderInvoicePrint } from './OrderInvoicePrint';
+import { localDateString } from '../../utils/localDate';
 
 type QuickFilterType =
   | 'all'
@@ -105,7 +106,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const getBookingDate = (ord: Order) => ord.bookingDate || ord.createdAt.split('T')[0];
   const getEventDate = (ord: Order) => ord.eventDate || ord.weddingDate;
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => localDateString(), []);
 
   // Reset all filters
   const resetFilters = () => {
@@ -126,7 +127,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   // Filter & Sort Logic
   const filteredOrders = useMemo(() => {
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = localDateString(today);
 
     // Helper for week check
     const startOfWeek = new Date(today);
@@ -356,7 +357,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const tomorrowStr = useMemo(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
+    return localDateString(tomorrow);
   }, []);
 
   const tomorrowsAssignedOrders = useMemo(
