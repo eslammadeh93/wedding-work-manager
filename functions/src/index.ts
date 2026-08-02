@@ -134,12 +134,15 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
   const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
   const name = typeof data.name === 'string' ? data.name.trim() : '';
   const slug = typeof data.slug === 'string' ? data.slug.trim().toLowerCase() : '';
+  const companyCode = typeof data.companyCode === 'string' ? data.companyCode.trim() : '';
+  const ownerName = typeof data.ownerName === 'string' ? data.ownerName.trim() : '';
+  const ownerEmail = typeof data.ownerEmail === 'string' ? data.ownerEmail.trim().toLowerCase() : '';
   const plan = typeof data.plan === 'string' ? data.plan.trim() : '';
   const status = data.status;
   const subscriptionStart = typeof data.subscriptionStart === 'string' ? data.subscriptionStart : '';
   const subscriptionEnd = typeof data.subscriptionEnd === 'string' ? data.subscriptionEnd : '';
   const startTime = Date.parse(subscriptionStart), endTime = Date.parse(subscriptionEnd);
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !name || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || !plan || !['trial','active','past_due','expired','suspended'].includes(String(status)) || !Number.isInteger(data.maxUsers) || Number(data.maxUsers) < 1 || !Array.isArray(data.features) || data.features.some(value => typeof value !== 'string' || !value.trim()) || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return { success: false, code: 'INVALID_INPUT', message: 'بيانات تحديث الشركة غير صالحة.' };
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !name || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || !/^\d{6}$/.test(companyCode) || !ownerName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail) || !plan || !['trial','active','past_due','expired','suspended'].includes(String(status)) || !Number.isInteger(data.maxUsers) || Number(data.maxUsers) < 1 || !Array.isArray(data.features) || data.features.some(value => typeof value !== 'string' || !value.trim()) || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return { success: false, code: 'INVALID_INPUT', message: 'بيانات تحديث الشركة غير صالحة.' };
   const companyRef = db.doc(`companies/${companyId}`);
   try {
     await db.runTransaction(async tx => {
@@ -147,19 +150,37 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
       if (!company.exists) throw new Error('COMPANY_NOT_FOUND');
       if (Number(data.maxUsers) < Number(company.data()?.memberCount || 0)) throw new Error('MAX_USERS_TOO_LOW');
       const oldSlug = String(company.data()?.slug || '');
+      const oldCode = String(company.data()?.companyCode || '');
+      let newCodeRef: FirebaseFirestore.DocumentReference | undefined;
+      let oldCodeRef: FirebaseFirestore.DocumentReference | undefined;
+      let shouldDeleteOldCodeIndex = false;
+      if (companyCode !== oldCode) {
+        newCodeRef = db.doc(`companyIndexes/code_${companyCode}`);
+        oldCodeRef = /^\d{6}$/.test(oldCode) ? db.doc(`companyIndexes/code_${oldCode}`) : undefined;
+        const [codeIndex, codeMatches, oldCodeIndex] = await Promise.all([
+          tx.get(newCodeRef),
+          tx.get(db.collection('companies').where('companyCode', '==', companyCode).limit(1)),
+          oldCodeRef ? tx.get(oldCodeRef) : Promise.resolve(undefined),
+        ]);
+        const conflictingCompany = !codeMatches.empty && codeMatches.docs[0].id !== companyId;
+        if ((codeIndex.exists && codeIndex.data()?.companyId !== companyId) || conflictingCompany) throw new Error('COMPANY_CODE_EXISTS');
+        shouldDeleteOldCodeIndex = Boolean(oldCodeRef && oldCodeIndex?.exists && oldCodeIndex.data()?.companyId === companyId);
+      }
       if (slug !== oldSlug) {
         const slugRef = db.doc(`companyIndexes/slug_${slug}`);
         if ((await tx.get(slugRef)).exists) throw new Error('SLUG_EXISTS');
         tx.create(slugRef, { companyId, value: slug, createdAt: FieldValue.serverTimestamp() });
         if (oldSlug) tx.delete(db.doc(`companyIndexes/slug_${oldSlug}`));
       }
-      tx.update(companyRef, { name, slug, plan, status, subscriptionStart, subscriptionEnd, maxUsers: data.maxUsers, features: data.features!.map(value => String(value).trim()).filter(Boolean), updatedAt: FieldValue.serverTimestamp() });
+      if (shouldDeleteOldCodeIndex && oldCodeRef) tx.delete(oldCodeRef);
+      if (newCodeRef) tx.set(newCodeRef, { companyId, value: companyCode, createdAt: FieldValue.serverTimestamp() });
+      tx.update(companyRef, { name, slug, companyCode, ownerName, ownerEmail, plan, status, subscriptionStart, subscriptionEnd, maxUsers: data.maxUsers, features: data.features!.map(value => String(value).trim()).filter(Boolean), updatedAt: FieldValue.serverTimestamp() });
     });
     return { success: true, code: 'OK', message: 'تم تحديث الشركة بنجاح.' };
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
-    const code = reason === 'SLUG_EXISTS' ? 'SLUG_EXISTS' : reason === 'MAX_USERS_TOO_LOW' ? 'INVALID_INPUT' : 'UNKNOWN_ERROR';
-    return { success: false, code, message: reason === 'SLUG_EXISTS' ? 'Slug مستخدم بالفعل.' : reason === 'MAX_USERS_TOO_LOW' ? 'لا يمكن أن يقل maxUsers عن عدد أعضاء الشركة الحالي.' : 'تعذر تحديث الشركة.' };
+    const code = reason === 'SLUG_EXISTS' ? 'SLUG_EXISTS' : reason === 'COMPANY_CODE_EXISTS' ? 'COMPANY_CODE_EXISTS' : reason === 'MAX_USERS_TOO_LOW' ? 'INVALID_INPUT' : 'UNKNOWN_ERROR';
+    return { success: false, code, message: reason === 'SLUG_EXISTS' ? 'Slug مستخدم بالفعل.' : reason === 'COMPANY_CODE_EXISTS' ? 'رمز الشركة مستخدم بالفعل.' : reason === 'MAX_USERS_TOO_LOW' ? 'لا يمكن أن يقل maxUsers عن عدد أعضاء الشركة الحالي.' : 'تعذر تحديث الشركة.' };
   }
 });
 

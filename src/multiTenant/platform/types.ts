@@ -32,7 +32,7 @@ export interface CreateCompanyRequest {
   status: Extract<CompanyStatus, 'trial' | 'active'>;
 }
 
-export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; plan: string; status: CompanyStatus; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
+export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: CompanyStatus; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
 
 export interface CompanyManagementRequest {
   companyId: string;
