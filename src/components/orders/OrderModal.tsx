@@ -25,10 +25,15 @@ const WorkerSearchableSelect: React.FC<{
     return (workers || []).filter((w) => w.status === 'active');
   }, [workers]);
 
+  // When the field contains the currently assigned worker, opening the menu
+  // must show every active worker. Only text explicitly changed by the user
+  // is treated as a search query.
+  const filterQuery = search === selectedWorkerName ? '' : search.trim().toLowerCase();
   const filtered = activeWorkers.filter(
     (w) =>
-      w.fullName.toLowerCase().includes(search.toLowerCase()) ||
-      (w.jobTitle && w.jobTitle.toLowerCase().includes(search.toLowerCase()))
+      !filterQuery ||
+      w.fullName.toLowerCase().includes(filterQuery) ||
+      (w.jobTitle && w.jobTitle.toLowerCase().includes(filterQuery))
   );
 
   React.useEffect(() => {
