@@ -1,13 +1,17 @@
 import * as crypto from 'node:crypto';
-import * as admin from 'firebase-admin';
+import { initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
-import { logger } from 'firebase-functions';
-import { CompanyProvisioningService, type CreateCompanyResponse } from './companyProvisioning.js';
-import { CompanyMemberService, type ChangeCompanyMemberRoleRequest, type ChangeCompanyMemberRoleResponse, type CreateCompanyMemberRequest, type CreateCompanyMemberResponse, type DisableCompanyMemberRequest, type DisableCompanyMemberResponse, type ReactivateCompanyMemberRequest, type ReactivateCompanyMemberResponse, type ResetWorkerLoginCodeRequest, type ResetWorkerLoginCodeResponse, type SendCompanyMemberPasswordResetRequest, type SendCompanyMemberPasswordResetResponse, type UpdateCompanyMemberRequest, type UpdateCompanyMemberResponse } from './companyMembers.js';
+import * as logger from 'firebase-functions/logger';
+import { CompanyProvisioningService } from './companyProvisioning.js';
+import { CompanyMemberService } from './companyMembers.js';
+import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse } from './apiTypes.js';
 import { createInitialPlatformOwner as provisionInitialPlatformOwner, seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
-admin.initializeApp();
-const db = admin.firestore();
+initializeApp();
+const db = getFirestore();
+const auth = getAuth();
 type WorkerLoginResponse = { success: boolean; code: 'OK' | 'INVALID_CREDENTIALS' | 'LOCKED' | 'INVALID_REQUEST'; message: string; customToken?: string; retryAfterSeconds?: number };
 type RateLimit = { failures: number; lockedUntilMs: number | null };
 const GENERIC_FAILURE = 'بيانات الدخول غير صحيحة.';
@@ -34,12 +38,12 @@ async function registerFailure(key: string): Promise<RateLimit> {
     const ref = db.doc(`workerLoginRateLimits/${key}`), snapshot = await transaction.get(ref);
     const failures = Number((snapshot.data() as Partial<RateLimit> | undefined)?.failures || 0) + 1;
     const duration = failureLockDuration(failures), lockedUntilMs = duration ? Date.now() + duration * 1000 : null;
-    transaction.set(ref, { failures, lockedUntilMs, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(ref, { failures, lockedUntilMs, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return { failures, lockedUntilMs };
   });
 }
 async function clearFailures(key: string): Promise<void> {
-  await db.doc(`workerLoginRateLimits/${key}`).set({ failures: 0, lockedUntilMs: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await db.doc(`workerLoginRateLimits/${key}`).set({ failures: 0, lockedUntilMs: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 }
 
 /** Stored format: scrypt$N$r$p$base64Salt$base64Hash. */
@@ -80,7 +84,7 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
     const member = uid ? await company.ref.collection('members').doc(uid).get() : null;
     if (!member?.exists || member.data()?.role !== 'worker' || member.data()?.status !== 'active') throw new Error('invalid');
     await clearFailures(rateKey);
-    return { success: true, code: 'OK', message: 'تم تسجيل الدخول بنجاح.', customToken: await admin.auth().createCustomToken(uid, { companyId: company.id, role: 'worker', workerId: worker.id }) };
+    return { success: true, code: 'OK', message: 'تم تسجيل الدخول بنجاح.', customToken: await auth.createCustomToken(uid, { companyId: company.id, role: 'worker', workerId: worker.id }) };
   } catch (error) {
     logger.warn('Worker login rejected', { rateKey, reason: error instanceof Error ? error.message : 'unknown' });
     const next = await registerFailure(rateKey), retryAfterSeconds = next.lockedUntilMs ? Math.max(0, Math.ceil((next.lockedUntilMs - Date.now()) / 1000)) : undefined;
@@ -117,14 +121,14 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
   try {
     const platformUser = await db.doc(`platformUsers/${uid}`).get();
     if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
-    return await new CompanyProvisioningService({ db, auth: admin.auth() }).create(request.data, uid);
+    return await new CompanyProvisioningService({ db, auth }).create(request.data, uid);
   } catch (error) {
     logger.error('Company provisioning authorization failed', { uid, reason: error instanceof Error ? error.message : 'unknown' });
     return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   }
 });
 
-const memberService = new CompanyMemberService({ db, auth: admin.auth(), emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
+const memberService = new CompanyMemberService({ db, auth, emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
 const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' };
 type MemberRequest = { auth?: { uid: string }; data: unknown };
 export const createCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));

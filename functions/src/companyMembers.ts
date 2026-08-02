@@ -1,28 +1,14 @@
 import * as crypto from 'node:crypto';
-import * as admin from 'firebase-admin';
+import type { Auth } from 'firebase-admin/auth';
+import { FieldValue } from 'firebase-admin/firestore';
 
-export type CompanyMemberError = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'COMPANY_NOT_FOUND' | 'COMPANY_INACTIVE' | 'MEMBER_NOT_FOUND' | 'MEMBER_DISABLED' | 'EMAIL_EXISTS' | 'USERNAME_EXISTS' | 'MAX_USERS_REACHED' | 'ROLE_NOT_ALLOWED' | 'SELF_ROLE_CHANGE_FORBIDDEN' | 'SELF_DISABLE_FORBIDDEN' | 'CANNOT_MANAGE_COMPANY_ADMIN' | 'LAST_COMPANY_ADMIN' | 'AUTH_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'WORKER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'RESET_NOT_SUPPORTED' | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
-export type ManagedRole = 'manager' | 'employee' | 'worker';
-export type CompanyRole = ManagedRole | 'company_super_admin';
-export type CompanyMemberResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberError; message: string; data?: T };
-export interface CreateCompanyMemberRequest { name: string; role: ManagedRole; email?: string; username?: string; loginCode?: string; phone?: string; companyId?: string; }
-export interface UpdateCompanyMemberRequest { uid: string; name?: string; phone?: string; displaySettings?: Record<string, boolean | string | number>; companyId?: string; }
-export interface ChangeCompanyMemberRoleRequest { uid: string; role: ManagedRole; companyId?: string; }
-export interface DisableCompanyMemberRequest { uid: string; companyId?: string; }
-export interface ReactivateCompanyMemberRequest { uid: string; companyId?: string; }
-export interface SendCompanyMemberPasswordResetRequest { uid: string; companyId?: string; }
-export interface ResetWorkerLoginCodeRequest { workerId: string; loginCode: string; companyId?: string; }
-export type CreateCompanyMemberResponse = CompanyMemberResponse<{ uid: string; workerId?: string } | Record<string, never>>;
-export type UpdateCompanyMemberResponse = CompanyMemberResponse;
-export type ChangeCompanyMemberRoleResponse = CompanyMemberResponse;
-export type DisableCompanyMemberResponse = CompanyMemberResponse;
-export type ReactivateCompanyMemberResponse = CompanyMemberResponse;
-export type SendCompanyMemberPasswordResetResponse = CompanyMemberResponse<{ testResetLink?: string }>;
-export type ResetWorkerLoginCodeResponse = CompanyMemberResponse;
+const admin = { firestore: { FieldValue } };
+import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CompanyMemberError, CompanyMemberResponse, CompanyRole, CreateCompanyMemberRequest, CreateCompanyMemberResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ManagedRole, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse } from './apiTypes.js';
+export type * from './apiTypes.js';
 
 type AuthContext = { uid: string } | undefined;
 type MemberDoc = { uid: string; companyId?: string; name?: string; email?: string; role?: CompanyRole; status?: string; workerId?: string; phone?: string };
-type Deps = { db: FirebaseFirestore.Firestore; auth: admin.auth.Auth; emulator?: boolean };
+type Deps = { db: FirebaseFirestore.Firestore; auth: Auth; emulator?: boolean };
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const workerName = /^[a-z0-9_-]{2,80}$/i;
 const ok = <T = Record<string, never>>(message: string, data?: T): CompanyMemberResponse<T> => data === undefined ? { success: true, code: 'OK', message } : { success: true, code: 'OK', message, data };
@@ -55,7 +41,7 @@ export class CompanyMemberService {
   }
   private async rateLimit(companyId: string, actor: string, action: string): Promise<CompanyMemberResponse | null> {
     const ref = this.deps.db.doc(`companyMemberRateLimits/${crypto.createHash('sha256').update(`${companyId}\0${actor}\0${action}`).digest('hex')}`);
-    const allowed = await this.deps.db.runTransaction(async tx => { const snapshot = await tx.get(ref); const data = snapshot.data() || {}; const now = Date.now(); const windowStartedAt = typeof data.windowStartedAt === 'number' ? data.windowStartedAt : now; const inWindow = now - windowStartedAt < 60_000; const count = inWindow ? Number(data.count || 0) : 0; if (count >= 10) return false; tx.set(ref, { count: count + 1, windowStartedAt: inWindow ? windowStartedAt : now, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }); return true; });
+    const allowed = await this.deps.db.runTransaction(async tx => { const snapshot = await tx.get(ref); const data = snapshot.data() || {}; const now = Date.now(); const windowStartedAt = typeof data.windowStartedAt === 'number' ? data.windowStartedAt : now; const inWindow = now - windowStartedAt < 60_000; const count = inWindow ? Number(data.count || 0) : 0; if (count >= 10) return false; tx.set(ref, { count: count + 1, windowStartedAt: inWindow ? windowStartedAt : now, updatedAt: FieldValue.serverTimestamp() }, { merge: true }); return true; });
     return allowed ? null : fail('FORBIDDEN', 'تم تجاوز الحد المؤقت لهذه العملية. حاول لاحقاً.');
   }
   private async audit(companyId: string, action: string, performedBy: string, targetUid: string, targetRole?: string, metadata: Record<string, unknown> = {}): Promise<void> {

@@ -1,20 +1,8 @@
-import * as admin from 'firebase-admin';
-import { logger } from 'firebase-functions';
-
-export type CreateCompanyError =
-  | 'OK' | 'UNAUTHORIZED' | 'INVALID_INPUT' | 'COMPANY_EXISTS' | 'SLUG_EXISTS'
-  | 'COMPANY_CODE_EXISTS' | 'EMAIL_EXISTS' | 'AUTH_CREATION_FAILED'
-  | 'COMPANY_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'AUDIT_LOG_FAILED'
-  | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
-
-export interface CreateCompanyRequest {
-  companyName: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; ownerPassword: string;
-  plan: string; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[];
-}
-
-export interface CreateCompanyResponse {
-  success: boolean; code: CreateCompanyError; message: string; companyId?: string; ownerUid?: string;
-}
+import type { Auth } from 'firebase-admin/auth';
+import { FieldValue } from 'firebase-admin/firestore';
+import * as logger from 'firebase-functions/logger';
+import type { CreateCompanyError, CreateCompanyRequest, CreateCompanyResponse } from './apiTypes.js';
+export type { CreateCompanyError, CreateCompanyRequest, CreateCompanyResponse } from './apiTypes.js';
 
 type Transaction = {
   get: (ref: FirebaseFirestore.DocumentReference | FirebaseFirestore.Query) => Promise<FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QuerySnapshot>;
@@ -25,7 +13,7 @@ type Transaction = {
 
 export type ProvisioningDependencies = {
   db: FirebaseFirestore.Firestore;
-  auth: admin.auth.Auth;
+  auth: Auth;
   now?: () => number;
 };
 
@@ -89,7 +77,7 @@ export class CompanyProvisioningService {
         const [slugIndex, codeIndex] = await Promise.all([transaction.get(slugRef), transaction.get(codeRef)]);
         if ((slugIndex as FirebaseFirestore.DocumentSnapshot).exists) throw new ProvisioningFailure('SLUG_EXISTS', 'Slug مستخدم بالفعل.');
         if ((codeIndex as FirebaseFirestore.DocumentSnapshot).exists) throw new ProvisioningFailure('COMPANY_CODE_EXISTS', 'Company code مستخدم بالفعل.');
-        const timestamp = admin.firestore.FieldValue.serverTimestamp();
+        const timestamp = FieldValue.serverTimestamp();
         transaction.create(slugRef, { companyId: companyRef.id, value: request.slug, createdAt: timestamp });
         transaction.create(codeRef, { companyId: companyRef.id, value: request.companyCode, createdAt: timestamp });
         transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: request.companyCode, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: 'active', memberCount: 1, createdAt: timestamp, updatedAt: timestamp });

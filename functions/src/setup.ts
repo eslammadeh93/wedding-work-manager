@@ -1,4 +1,7 @@
-import * as admin from 'firebase-admin';
+import { getAuth } from 'firebase-admin/auth';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+
+const admin = { firestore: { FieldValue } };
 import * as crypto from 'node:crypto';
 import { hashWorkerLoginCode } from './companyMembers.js';
 
@@ -29,7 +32,7 @@ export async function createInitialPlatformOwner(input: unknown): Promise<SetupR
   const password = typeof data.password === 'string' ? data.password : '';
   const name = typeof data.name === 'string' ? data.name.trim() : '';
   if (!emailPattern.test(email) || !name || password.length < 12) return fail('INVALID_INPUT', 'الاسم والبريد وكلمة مرور من 12 حرفاً على الأقل مطلوبة.');
-  const db = admin.firestore(), auth = admin.auth();
+  const db = getFirestore(), auth = getAuth();
   const existingOwners = await db.collection('platformUsers').where('role', '==', 'platform_owner').limit(1).get();
   if (!existingOwners.empty) return fail('OWNER_EXISTS', 'يوجد platform_owner بالفعل؛ لا يمكن إنشاء آخر عبر مسار الإعداد الأولي.');
   let uid: string | undefined;
@@ -56,7 +59,7 @@ const seedCompanies: SeedCompany[] = [
 export async function seedTestMultiTenantData(input: unknown): Promise<SetupResponse> {
   if (!testDataEnvironmentAllowed() || !setupSecretValid(input)) return fail('UNAUTHORIZED', 'بيانات الاختبار غير مصرح بها.');
   if ((input as { confirmSeed?: unknown } | undefined)?.confirmSeed !== true) return fail('CONFIRMATION_REQUIRED', 'أرسل confirmSeed=true لتشغيل بيانات الاختبار.');
-  const db = admin.firestore(), auth = admin.auth();
+  const db = getFirestore(), auth = getAuth();
   const batch = db.batch();
   const credentials: Record<string, string> = {};
   for (const companySeed of seedCompanies) {
