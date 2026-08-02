@@ -99,8 +99,9 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
 
   useEffect(() => {
-    if (createOrderRequest > 0) setIsCreateOpen(true);
-  }, [createOrderRequest]);
+    if (!isWorker && createOrderRequest > 0) setIsCreateOpen(true);
+    if (isWorker) setIsCreateOpen(false);
+  }, [createOrderRequest, isWorker]);
 
   // Helper date parsing
   const getBookingDate = (ord: Order) => ord.bookingDate || ord.createdAt.split('T')[0];
@@ -1068,7 +1069,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       )}
 
       {/* Create Modal */}
-      {isCreateOpen && (
+      {isCreateOpen && !isWorker && (
         <OrderModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
       )}
 

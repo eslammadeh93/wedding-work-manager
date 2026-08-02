@@ -121,6 +121,7 @@ function AppContent() {
   // Set default active tab to dashboard (or orders for workers) when logged in
   useEffect(() => {
     if (user && profile) {
+      setCreateOrderRequest(0);
       if (profile.role === 'worker') {
         setActiveTab('orders');
       } else {
@@ -128,6 +129,12 @@ function AppContent() {
       }
     }
   }, [user?.uid, profile?.role]);
+
+  // A dashboard "create order" request is a one-shot signal. Clear it as
+  // soon as Orders is left so reopening the section never reopens the modal.
+  useEffect(() => {
+    if (activeTab !== 'orders') setCreateOrderRequest(0);
+  }, [activeTab]);
 
   // Role guard for current active tab
   useEffect(() => {
