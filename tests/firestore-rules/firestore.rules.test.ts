@@ -5,7 +5,7 @@ import {
   assertFails, assertSucceeds, initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 const projectId = 'wedding-manager-rules';
 let env: RulesTestEnvironment;
@@ -67,6 +67,7 @@ test('7 manager has the same operational access as the company owner', async () 
 test('8 employee reads and writes orders and customers per matrix', async () => { await assertSucceeds(getDoc(doc(db('companyAEmployee'), `${company('companyA')}/customers/customerA`))); await assertSucceeds(setDoc(doc(db('companyAEmployee'), `${company('companyA')}/orders/employee`), { companyId: 'companyA' })); });
 test('9 employee cannot write inventory', async () => assertFails(updateDoc(doc(db('companyAEmployee'), `${company('companyA')}/inventory/itemA`), { quantity: 3 })));
 test('10 worker reads assigned order', async () => assertSucceeds(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderA`))));
+test('10b worker queries only assigned orders', async () => assertSucceeds(getDocs(query(collection(db('companyAWorker1'), `${company('companyA')}/orders`), where('workerId', '==', 'worker1')))));
 test('11 worker cannot read another worker order', async () => assertFails(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderOtherWorker`))));
 test('12 worker cannot update order status', async () => assertFails(updateDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderA`), { status: 'done' })));
 test('13 worker cannot read customers', async () => assertFails(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/customers/customerA`))));
