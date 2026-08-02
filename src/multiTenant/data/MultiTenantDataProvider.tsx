@@ -28,13 +28,15 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     clear(); setLoadError(null);
     let companyId: string;
     try { companyId = trustedCompanyIdFromSession(authSession); } catch (error) { setLoading(false); if (authSession?.userType === 'company') setLoadError(error instanceof Error ? error.message : 'تعذر تحميل البيانات.'); return; }
-    setLoading(true); const workerOnly = authSession?.role === 'worker'; const hasWorkerId = Boolean(profile?.workerId); let remaining = workerOnly ? (hasWorkerId ? 2 : 1) : 9; let failed = false;
+    setLoading(true); const workerOnly = authSession?.role === 'worker'; const hasWorkerId = Boolean(profile?.workerId); let remaining = workerOnly ? 1 : 9; let failed = false;
     const ready = () => { remaining -= 1; if (remaining === 0 && !failed) setLoading(false); };
     const onError = (result: DataOperationResult<never>) => { failed = true; setLoading(false); setLoadError(result.message || 'تعذر تحميل البيانات.'); };
     const listen = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void) => companyDataService.subscribe<T>(companyId, name, (items) => { set(items); ready(); }, onError);
-    const orderListener = workerOnly && !hasWorkerId ? () => { setOrders([]); } : companyDataService.subscribe<Order>(companyId, 'orders', (items) => { setOrders(sortCreated(items)); ready(); }, onError, workerOnly ? { field: 'workerId', value: profile!.workerId! } : undefined);
+    const orderListener = workerOnly && !hasWorkerId
+      ? (() => { setOrders([]); ready(); return () => undefined; })()
+      : companyDataService.subscribe<Order>(companyId, 'orders', (items) => { setOrders(sortCreated(items)); ready(); }, onError, workerOnly ? { field: 'workerId', value: profile!.workerId! } : undefined);
     const settingsListener = companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError);
-    const unsubs = workerOnly ? [orderListener, settingsListener] : [
+    const unsubs = workerOnly ? [orderListener] : [
       orderListener, listen<Customer>('customers', setCustomers), listen<Worker>('workers', (items) => setWorkers(sortCreated(items))),
       listen<InventoryItem>('inventory', setInventory), listen<Expense>('expenses', (items) => setExpenses(sortCreated(items))), listen<CategoryItem>('categories', setCategories),
       listen<ActivityLogRecord>('activityLogs', (items) => setActivityLogs([...items].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))))), listen<AppNotification>('notifications', setNotifications), settingsListener,

@@ -18,13 +18,12 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
-import { useAuth } from '../../context/AuthContext';
 import { Worker } from '../../types';
+import { companyMembersService } from '../../multiTenant/companyMembersService';
 
 export const WorkersModule: React.FC = () => {
   const { t } = useLanguage();
-  const { workers, addWorker, updateWorker, deleteWorker, toggleWorkerStatus } = useData();
-  const { provisionWorkerAccount } = useAuth();
+  const { workers, updateWorker, toggleWorkerStatus } = useData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -43,7 +42,6 @@ export const WorkersModule: React.FC = () => {
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isMigratingAccounts, setIsMigratingAccounts] = useState(false);
 
   const filteredWorkers = useMemo(() => {
     return workers.filter((worker) => {
@@ -77,7 +75,7 @@ export const WorkersModule: React.FC = () => {
     setEditingWorker(worker);
     setFullName(worker.fullName);
     setUsername(worker.username);
-    setLoginCode(worker.loginCode);
+    setLoginCode('');
     setJobTitle(worker.jobTitle || '');
     setPhone(worker.phone || '');
     setNotes(worker.notes || '');
@@ -94,7 +92,7 @@ export const WorkersModule: React.FC = () => {
     const cleanUsername = username.trim().toLowerCase();
     const cleanCode = loginCode.trim();
 
-    if (!fullName.trim() || !cleanUsername || !cleanCode) {
+    if (!fullName.trim() || !cleanUsername || (!editingWorker && !cleanCode)) {
       setFormError('يرجى ملء جميع الحقول المطلوبة (الاسم الكامل، اسم المستخدم، وكود الدخول)');
       return;
     }
@@ -112,31 +110,22 @@ export const WorkersModule: React.FC = () => {
     setIsSaving(true);
     try {
       if (editingWorker) {
-        if (editingWorker.authUid && (editingWorker.username !== cleanUsername || editingWorker.loginCode !== cleanCode)) {
-          throw new Error('لا يمكن تغيير اسم المستخدم أو كود الدخول بعد تأمين الحساب. أنشئ حساب عامل جديداً عند الحاجة.');
-        }
+        if (editingWorker.username !== cleanUsername) throw new Error('لا يمكن تغيير اسم المستخدم بعد إنشاء العامل.');
         await updateWorker(editingWorker.id, {
           fullName: fullName.trim(),
           username: cleanUsername,
-          loginCode: cleanCode,
           jobTitle: jobTitle.trim(),
           phone: phone.trim(),
           notes: notes.trim(),
           status,
         });
+        if (cleanCode) {
+          const reset = await companyMembersService.resetWorkerLoginCode({ workerId: editingWorker.id, loginCode: cleanCode });
+          if (!reset.success) throw new Error(reset.message);
+        }
       } else {
-        const workerData = {
-          fullName: fullName.trim(),
-          username: cleanUsername,
-          loginCode: cleanCode,
-          jobTitle: jobTitle.trim(),
-          phone: phone.trim(),
-          notes: notes.trim(),
-          status,
-        };
-        const workerId = await addWorker(workerData);
-        const authUid = await provisionWorkerAccount({ id: workerId, ...workerData, createdAt: '', updatedAt: '' });
-        await updateWorker(workerId, { authUid });
+        const result = await companyMembersService.create({ name: fullName.trim(), username: cleanUsername, loginCode: cleanCode, jobTitle: jobTitle.trim(), phone: phone.trim(), notes: notes.trim(), role: 'worker' });
+        if (!result.success) throw new Error(result.message);
       }
 
       setIsModalOpen(false);
@@ -147,30 +136,14 @@ export const WorkersModule: React.FC = () => {
     }
   };
 
-  const handleMigrateWorkerAccounts = async () => {
-    const pendingWorkers = workers.filter((worker) => !worker.authUid);
-    if (!pendingWorkers.length) return;
-    if (!window.confirm(`سيتم تأمين ${pendingWorkers.length} حساب عامل. هل تريد المتابعة؟`)) return;
-    setIsMigratingAccounts(true);
-    const failures: string[] = [];
-    try {
-      for (const worker of pendingWorkers) {
-        try {
-          const authUid = await provisionWorkerAccount(worker);
-          await updateWorker(worker.id, { authUid });
-        } catch {
-          failures.push(worker.fullName);
-        }
-      }
-      alert(failures.length ? `تم تأمين الحسابات، وتعذر ترحيل: ${failures.join('، ')}` : 'تم تأمين جميع حسابات العمال بنجاح.');
-    } finally {
-      setIsMigratingAccounts(false);
-    }
-  };
-
   const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`هل أنت تأكد من رغبتك في حذف العامل "${name}"؟`)) {
-      await deleteWorker(id);
+      try {
+        const result = await companyMembersService.deleteWorker({ workerId: id });
+        if (!result.success) throw new Error(result.message);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'تعذر حذف العامل بالكامل.');
+      }
     }
   };
 
@@ -198,16 +171,6 @@ export const WorkersModule: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          {workers.some((worker) => !worker.authUid) && (
-            <button
-              type="button"
-              onClick={handleMigrateWorkerAccounts}
-              disabled={isMigratingAccounts}
-              className="px-4 py-2.5 border border-amber-500/50 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-xl disabled:opacity-60"
-            >
-              {isMigratingAccounts ? 'جارٍ تأمين الحسابات...' : 'تأمين حسابات العمال'}
-            </button>
-          )}
           <button
             onClick={handleOpenAddModal}
             className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
@@ -319,7 +282,7 @@ export const WorkersModule: React.FC = () => {
                       <span>{t('loginCode')}:</span>
                     </span>
                     <span className="font-mono font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-md dir-ltr">
-                      {worker.loginCode}
+                      محفوظ بأمان
                     </span>
                   </div>
 
@@ -412,7 +375,7 @@ export const WorkersModule: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    required
+                    required={!editingWorker}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="ahmed123"
@@ -429,7 +392,7 @@ export const WorkersModule: React.FC = () => {
                     required
                     value={loginCode}
                     onChange={(e) => setLoginCode(e.target.value)}
-                    placeholder="1234"
+                    placeholder={editingWorker ? 'اتركه فارغًا للإبقاء على الكود الحالي' : '6 أرقام على الأقل'}
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
@@ -469,6 +432,7 @@ export const WorkersModule: React.FC = () => {
                 </label>
                 <select
                   value={status}
+                  disabled={!editingWorker}
                   onChange={(e) => setStatus(e.target.value as any)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
                 >
