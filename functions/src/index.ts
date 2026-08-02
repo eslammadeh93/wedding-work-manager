@@ -4,6 +4,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
 import { CompanyProvisioningService, type CreateCompanyResponse } from './companyProvisioning.js';
 import { CompanyMemberService, type ChangeCompanyMemberRoleRequest, type ChangeCompanyMemberRoleResponse, type CreateCompanyMemberRequest, type CreateCompanyMemberResponse, type DisableCompanyMemberRequest, type DisableCompanyMemberResponse, type ReactivateCompanyMemberRequest, type ReactivateCompanyMemberResponse, type ResetWorkerLoginCodeRequest, type ResetWorkerLoginCodeResponse, type SendCompanyMemberPasswordResetRequest, type SendCompanyMemberPasswordResetResponse, type UpdateCompanyMemberRequest, type UpdateCompanyMemberResponse } from './companyMembers.js';
+import { createInitialPlatformOwner as provisionInitialPlatformOwner, seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -71,11 +72,10 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
     const workers = await company.ref.collection('workers').where('username', '==', username).limit(2).get();
     if (workers.size !== 1) throw new Error('invalid');
     const worker = workers.docs[0], workerData = worker.data();
-    // New workers keep secrets out of the readable worker profile. The fallback is
-    // backend-only compatibility for pre-migration records; clients never read it.
     const secret = await company.ref.collection('workerSecrets').doc(worker.id).get();
-    const loginCodeHash = secret.exists ? secret.data()?.loginCodeHash : workerData.loginCodeHash;
-    if (workerData.status !== 'active' || !verifyLoginCode(loginCode, loginCodeHash)) throw new Error('invalid');
+    // New tenant workers never inherit legacy credentials. Their hash must exist
+    // only in workerSecrets; a readable workers document is never a fallback.
+    if (workerData.status !== 'active' || !secret.exists || !verifyLoginCode(loginCode, secret.data()?.loginCodeHash)) throw new Error('invalid');
     const uid = typeof workerData.authUid === 'string' ? workerData.authUid : '';
     const member = uid ? await company.ref.collection('members').doc(uid).get() : null;
     if (!member?.exists || member.data()?.role !== 'worker' || member.data()?.status !== 'active') throw new Error('invalid');
@@ -97,9 +97,21 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: proc
   }
 });
 
-/** Emulator-only privileged provisioning endpoint. Callable is used so Auth claims are verified by Firebase. */
+/** Setup is deliberately limited to the local emulator or an explicitly configured staging environment. */
+export const createInitialPlatformOwner = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request) => {
+  if (!setupEnvironmentAllowed()) return { success: false, code: 'SETUP_DISABLED', message: 'إعداد المنصة غير متاح في هذه البيئة.' };
+  return provisionInitialPlatformOwner(request.data);
+});
+
+/** Creates only synthetic, isolated tenant records and is never available in production. */
+export const seedTestMultiTenantData = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request) => {
+  if (!testDataEnvironmentAllowed()) return { success: false, code: 'SEED_DISABLED', message: 'بيانات الاختبار غير متاحة في هذه البيئة.' };
+  return provisionTestMultiTenantData(request.data);
+});
+
+/** Privileged provisioning endpoint, available only after an explicit local/staging setup gate. */
 export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateCompanyResponse> => {
-  if (process.env.FUNCTIONS_EMULATOR !== 'true') return { success: false, code: 'UNKNOWN_ERROR', message: 'هذه العملية متاحة في Firebase Emulator فقط.' };
+  if (!setupEnvironmentAllowed()) return { success: false, code: 'UNKNOWN_ERROR', message: 'هذه العملية متاحة في Emulator أو Staging المصرح فقط.' };
   const uid = request.auth?.uid;
   if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   try {

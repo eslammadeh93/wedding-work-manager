@@ -1,6 +1,6 @@
 /**
  * SaaS tenancy contracts. These are intentionally separate from the legacy
- * application models until the non-destructive migration phase begins.
+ * application models. Legacy records remain separate, read-only archives.
  */
 export type RecordTimestamp = string | Date;
 

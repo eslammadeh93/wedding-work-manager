@@ -86,4 +86,6 @@ test('26 update rejects changing companyId', async () => assertFails(updateDoc(d
 test('27 update rejects changing created metadata', async () => assertFails(updateDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/orders/orderA`), { createdBy: 'attacker' })));
 test('28 notification targetUid restricts reads', async () => { await assertSucceeds(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/notifications/n1`))); await assertFails(getDoc(doc(db('companyAWorker2'), `${company('companyA')}/notifications/n1`))); });
 test('29 worker document containing loginCodeHash is never readable', async () => { await assertSucceeds(getDoc(doc(db('companyAManager'), `${company('companyA')}/workers/worker1`))); await assertFails(getDoc(doc(db('companyAManager'), `${company('companyA')}/workers/legacyHash`))); });
-test('30 unknown path is denied', async () => assertFails(getDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/unknown/private`))));
+test('30 workerSecrets are never client-readable', async () => assertFails(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/workerSecrets/worker1`))));
+test('31 legacy archive is read-only', async () => assertFails(setDoc(doc(db('companyAManager'), 'orders/legacy-write'), { workerId: 'worker1' })));
+test('32 unknown path is denied', async () => assertFails(getDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/unknown/private`))));

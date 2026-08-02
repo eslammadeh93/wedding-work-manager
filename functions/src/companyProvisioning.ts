@@ -8,7 +8,7 @@ export type CreateCompanyError =
   | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
 
 export interface CreateCompanyRequest {
-  companyName: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string;
+  companyName: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; ownerPassword: string;
   plan: string; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[];
 }
 
@@ -36,10 +36,10 @@ const failure = (code: CreateCompanyError, message: string): CreateCompanyRespon
 export function validateCreateCompanyRequest(input: unknown): CreateCompanyRequest | CreateCompanyResponse {
   if (!input || typeof input !== 'object') return failure('INVALID_INPUT', 'بيانات الطلب غير صحيحة.');
   const value = input as Partial<CreateCompanyRequest>;
-  const strings = ['companyName', 'slug', 'companyCode', 'ownerName', 'ownerEmail', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
+  const strings = ['companyName', 'slug', 'companyCode', 'ownerName', 'ownerEmail', 'ownerPassword', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
   if (strings.some(key => typeof value[key] !== 'string' || !value[key]?.trim())) return failure('INVALID_INPUT', 'جميع الحقول النصية المطلوبة يجب أن تكون موجودة.');
   const normalized = { ...value, companyName: value.companyName!.trim(), ownerName: value.ownerName!.trim(), ownerEmail: value.ownerEmail!.trim().toLowerCase(), slug: value.slug!.trim().toLowerCase(), companyCode: value.companyCode!.trim().toLowerCase(), plan: value.plan!.trim() } as CreateCompanyRequest;
-  if (!emailPattern.test(normalized.ownerEmail) || !validKey(normalized.slug) || !validKey(normalized.companyCode)) return failure('INVALID_INPUT', 'البريد الإلكتروني أو slug أو companyCode غير صالح.');
+  if (!emailPattern.test(normalized.ownerEmail) || normalized.ownerPassword.length < 12 || !validKey(normalized.slug) || !validKey(normalized.companyCode)) return failure('INVALID_INPUT', 'بيانات المالك أو slug أو companyCode غير صالحة.');
   if (!Number.isInteger(value.maxUsers) || value.maxUsers! <= 0 || !Array.isArray(value.features) || value.features.some(feature => typeof feature !== 'string' || !feature.trim())) return failure('INVALID_INPUT', 'maxUsers أو features غير صالح.');
   const start = Date.parse(normalized.subscriptionStart), end = Date.parse(normalized.subscriptionEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return failure('INVALID_INPUT', 'تواريخ الاشتراك غير صالحة.');
@@ -72,7 +72,7 @@ export class CompanyProvisioningService {
       if (!slugMatches.empty) return failure('SLUG_EXISTS', 'Slug مستخدم بالفعل.');
       if (!codeMatches.empty) return failure('COMPANY_CODE_EXISTS', 'Company code مستخدم بالفعل.');
       try {
-        const user = await auth.createUser({ displayName: request.ownerName, email: request.ownerEmail, emailVerified: false });
+        const user = await auth.createUser({ displayName: request.ownerName, email: request.ownerEmail, password: request.ownerPassword, emailVerified: false });
         ownerUid = user.uid;
       } catch (error) {
         if ((error as { code?: string }).code === 'auth/email-already-exists') return failure('EMAIL_EXISTS', 'البريد الإلكتروني مستخدم بالفعل.');

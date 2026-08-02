@@ -155,20 +155,21 @@ service cloud.firestore {
       match /{privateCollection}/{document=**} { allow read, write: if false; }
     }
 
-    // TEMPORARY LEGACY RULES — remove after migration verification. VITE_USE_MULTI_TENANT_DATA remains false.
+    // TEMPORARY LEGACY ARCHIVE RULES. Root collections are read-only archives;
+    // the multi-tenant application never queries or falls back to them.
     function legacyProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function legacyManager() { return isSignedIn() && legacyProfile().role in ['super_admin', 'admin', 'manager'] && legacyProfile().isActive == true; }
     function legacyWorker() { return isSignedIn() && legacyProfile().role == 'worker' && legacyProfile().isActive == true; }
-    match /users/{uid} { allow get: if isSelf(uid) || legacyManager(); allow list: if legacyManager(); allow create, update, delete: if legacyManager(); }
-    match /orders/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if legacyManager(); }
-    match /activityLogs/{id} { allow read, update, delete: if legacyManager(); allow create: if legacyWorker() && request.resource.data.workerId == legacyProfile().workerId && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.workerId == legacyProfile().workerId; }
-    match /workers/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.authUid == request.auth.uid); allow write: if legacyManager(); }
-    match /settings/company { allow read: if isSignedIn(); allow write: if legacyManager(); }
-    match /customers/{id} { allow read, write: if legacyManager(); }
-    match /inventory/{id} { allow read, write: if legacyManager(); }
-    match /expenses/{id} { allow read, write: if legacyManager(); }
-    match /categories/{id} { allow read, write: if legacyManager(); }
-    match /notifications/{id} { allow read, write: if legacyManager(); }
+    match /users/{uid} { allow get: if isSelf(uid) || legacyManager(); allow list: if legacyManager(); allow write: if false; }
+    match /orders/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if false; }
+    match /activityLogs/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if false; }
+    match /workers/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.authUid == request.auth.uid); allow write: if false; }
+    match /settings/company { allow read: if isSignedIn(); allow write: if false; }
+    match /customers/{id} { allow read: if legacyManager(); allow write: if false; }
+    match /inventory/{id} { allow read: if legacyManager(); allow write: if false; }
+    match /expenses/{id} { allow read: if legacyManager(); allow write: if false; }
+    match /categories/{id} { allow read: if legacyManager(); allow write: if false; }
+    match /notifications/{id} { allow read: if legacyManager(); allow write: if false; }
     // Explicit default deny: no broad wildcard allow rule.
     match /{document=**} { allow read, write: if false; }
   }

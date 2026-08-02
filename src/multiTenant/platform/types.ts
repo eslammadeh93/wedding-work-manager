@@ -22,6 +22,7 @@ export interface CreateCompanyRequest {
   companyCode: string;
   ownerName: string;
   ownerEmail: string;
+  ownerPassword: string;
   plan: string;
   subscriptionStart: string;
   subscriptionEnd: string;

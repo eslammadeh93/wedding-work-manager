@@ -4,7 +4,7 @@ import { validateCreateCompanyRequest } from './companyProvisioning.js';
 
 const validRequest = {
   companyName: 'Acme Events', slug: 'acme-events', companyCode: 'acme', ownerName: 'Owner',
-  ownerEmail: 'owner@example.test', plan: 'trial', subscriptionStart: '2026-01-01',
+  ownerEmail: 'owner@example.test', ownerPassword: 'Strong-owner-123!', plan: 'trial', subscriptionStart: '2026-01-01',
   subscriptionEnd: '2026-02-01', maxUsers: 2, features: ['orders'],
 };
 

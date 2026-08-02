@@ -127,7 +127,7 @@ export interface Order {
 
 export interface Worker {
   id: string;
-  /** Firebase Authentication UID created during worker-account migration. */
+  /** Firebase Authentication UID for legacy-mode worker accounts only. */
   authUid?: string;
   fullName: string;
   username: string;
