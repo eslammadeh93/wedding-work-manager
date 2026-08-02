@@ -130,10 +130,12 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: fals
 
 export const getWorkerOrders = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async request => {
   if (!request.auth?.uid) return { success: false, code: 'UNAUTHORIZED', message: 'يجب تسجيل الدخول أولاً.' };
-  const memberships = await db.collectionGroup('members').where('uid', '==', request.auth.uid).limit(2).get();
-  if (memberships.size !== 1) return { success: false, code: 'UNAUTHORIZED', message: 'عضوية العامل غير صالحة.' };
-  const member = memberships.docs[0]; const memberData = member.data(); const companyRef = member.ref.parent.parent;
-  if (!companyRef || memberData.role !== 'worker' || memberData.status !== 'active' || typeof memberData.workerId !== 'string') return { success: false, code: 'FORBIDDEN', message: 'حساب العامل غير صالح.' };
+  const companyId = typeof request.auth.token.companyId === 'string' ? request.auth.token.companyId : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId)) return { success: false, code: 'UNAUTHORIZED', message: 'عضوية العامل غير صالحة.' };
+  const companyRef = db.collection('companies').doc(companyId);
+  const member = await companyRef.collection('members').doc(request.auth.uid).get();
+  const memberData = member.data() || {};
+  if (!member.exists || memberData.uid !== request.auth.uid || memberData.companyId !== companyId || memberData.role !== 'worker' || memberData.status !== 'active' || typeof memberData.workerId !== 'string') return { success: false, code: 'FORBIDDEN', message: 'حساب العامل غير صالح.' };
   const company = await companyRef.get();
   if (!company.exists || !['active', 'trial'].includes(String(company.data()?.status))) return { success: false, code: 'FORBIDDEN', message: 'الشركة غير متاحة.' };
   const orders = await companyRef.collection('orders').where('workerId', '==', memberData.workerId).get();

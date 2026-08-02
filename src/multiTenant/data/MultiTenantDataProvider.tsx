@@ -45,11 +45,11 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
           return () => { cancelled = true; };
         })()
       : companyDataService.subscribe<Order>(companyId, 'orders', (items) => { setOrders(sortCreated(items)); ready(); }, onError);
-    const settingsListener = companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError);
     const unsubs = workerOnly ? [orderListener] : [
       orderListener, listen<Customer>('customers', setCustomers), listen<Worker>('workers', (items) => setWorkers(sortCreated(items))),
       listen<InventoryItem>('inventory', setInventory), listen<Expense>('expenses', (items) => setExpenses(sortCreated(items))), listen<CategoryItem>('categories', setCategories),
-      listen<ActivityLogRecord>('activityLogs', (items) => setActivityLogs([...items].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))))), listen<AppNotification>('notifications', setNotifications), settingsListener,
+      listen<ActivityLogRecord>('activityLogs', (items) => setActivityLogs([...items].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))))), listen<AppNotification>('notifications', setNotifications),
+      companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError),
     ];
     return () => { unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
   }, [authSession?.uid, authSession?.companyId, authSession?.role, clear, profile?.workerId, retryVersion]);
