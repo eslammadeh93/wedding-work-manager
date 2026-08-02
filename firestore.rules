@@ -42,7 +42,7 @@ service cloud.firestore {
     }
     function hasCompanyPermission(companyId, permission) {
       return canReadOperations(companyId) && (
-        memberRole(companyId) in ['company_super_admin', 'manager']
+        memberRole(companyId) == 'company_super_admin'
         || (permission == 'orders:read' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])
@@ -55,6 +55,11 @@ service cloud.firestore {
         || (permission == 'expenses:write' && memberRole(companyId) == 'company_super_admin')
         || (permission == 'categories:read' && memberRole(companyId) == 'manager')
         || (permission == 'categories:write' && memberRole(companyId) == 'manager')
+        || (permission == 'activity_logs:read' && memberRole(companyId) == 'manager')
+        || (permission == 'settings:read' && memberRole(companyId) == 'manager')
+        || (permission == 'settings:write' && memberRole(companyId) == 'manager')
+        || (permission == 'members:read' && memberRole(companyId) == 'manager')
+        || (permission == 'members:write' && memberRole(companyId) == 'manager')
         || (permission == 'activity_logs:read' && memberRole(companyId) == 'company_super_admin')
         || (permission == 'settings:read' && memberRole(companyId) == 'company_super_admin')
         || (permission == 'settings:write' && memberRole(companyId) == 'company_super_admin')

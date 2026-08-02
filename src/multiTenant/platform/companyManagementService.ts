@@ -1,4 +1,4 @@
-import type { CompanyManagementRequest, CreateCompanyRequest, UpdateCompanyRequest } from './types';
+import type { CompanyManagementRequest, CreateAdditionalCompanyOwnerRequest, CreateCompanyRequest, UpdateCompanyRequest } from './types';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase/config';
 
@@ -20,6 +20,11 @@ export const companyManagementService = {
   },
   async updateCompany(request: UpdateCompanyRequest): Promise<void> {
     const call = httpsCallable<UpdateCompanyRequest, { success: boolean; message: string }>(functions, 'updateCompany');
+    const result = await call(request);
+    if (!result.data.success) throw new Error(result.data.message);
+  },
+  async createAdditionalOwner(request: CreateAdditionalCompanyOwnerRequest): Promise<void> {
+    const call = httpsCallable<CreateAdditionalCompanyOwnerRequest, { success: boolean; message: string }>(functions, 'createAdditionalCompanyOwner');
     const result = await call(request);
     if (!result.data.success) throw new Error(result.data.message);
   },

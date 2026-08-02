@@ -11,6 +11,7 @@ import {
   HardHat,
   UsersRound,
   UserRound,
+  Wallet,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -59,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'orders', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'] },
     { id: 'customers', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'] },
     { id: 'inventory', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'] },
+    { id: 'expenses', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'] },
     { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'] },
     { id: 'members', label: 'إدارة المديرين', icon: UsersRound, roles: ['super_admin', 'manager'] },
     { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'] },

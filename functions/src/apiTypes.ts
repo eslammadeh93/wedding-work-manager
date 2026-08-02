@@ -38,4 +38,6 @@ export type CreateCompanyError = 'OK' | 'UNAUTHORIZED' | 'INVALID_INPUT' | 'COMP
 export interface CreateCompanyRequest { companyName: string; slug: string; ownerName: string; ownerEmail: string; ownerPassword: string; plan: string; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
 export interface CreateCompanyResponse { success: boolean; code: CreateCompanyError; message: string; companyId?: string; ownerUid?: string; }
 export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: 'trial' | 'active' | 'past_due' | 'expired' | 'suspended'; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
+export interface CreateAdditionalCompanyOwnerRequest { companyId: string; name: string; email: string; temporaryPassword: string; }
+export interface CreateAdditionalCompanyOwnerResponse { success: boolean; code: 'OK' | 'INVALID_INPUT' | 'UNAUTHORIZED' | 'EMAIL_EXISTS' | 'COMPANY_NOT_FOUND' | 'MAX_USERS_REACHED' | 'UNKNOWN_ERROR'; message: string; }
 export interface UpdateCompanyResponse { success: boolean; code: CreateCompanyError; message: string; }

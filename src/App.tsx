@@ -245,7 +245,7 @@ function AppContent() {
             {activeTab === 'workers' && <WorkersModule />}
             {activeTab === 'customers' && <CustomersModule />}
             {activeTab === 'inventory' && <InventoryModule />}
-            {activeTab === 'expenses' && <ExpensesModule />}
+            {activeTab === 'expenses' && (USE_MULTI_TENANT_DATA ? <CompanySessionRouteGuard roles={['company_super_admin']} permission="company:expenses:read"><ExpensesModule /></CompanySessionRouteGuard> : <ExpensesModule />)}
             {activeTab === 'calendar' && <CalendarModule />}
             {activeTab === 'reports' && <ReportsModule />}
             {activeTab === 'activityLog' && <ActivityLogModule />}

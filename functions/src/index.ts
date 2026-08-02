@@ -6,7 +6,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService, hashWorkerLoginCode } from './companyMembers.js';
-import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateCompanyRequest, UpdateCompanyResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
+import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateAdditionalCompanyOwnerRequest, CreateAdditionalCompanyOwnerResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateCompanyRequest, UpdateCompanyResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
 import type { MarkCompanyNotificationsReadRequest, MarkCompanyNotificationsReadResponse, RecordOrderActivityRequest, RecordOrderActivityResponse, SetWorkerStatusRequest, SetWorkerStatusResponse, UpdateWorkerOrderStatusRequest, UpdateWorkerOrderStatusResponse, UpdateWorkerRequest, UpdateWorkerResponse } from './apiTypes.js';
 import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
@@ -223,6 +223,49 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
     const reason = error instanceof Error ? error.message : '';
     const code = reason === 'SLUG_EXISTS' ? 'SLUG_EXISTS' : reason === 'COMPANY_CODE_EXISTS' ? 'COMPANY_CODE_EXISTS' : reason === 'MAX_USERS_TOO_LOW' ? 'INVALID_INPUT' : 'UNKNOWN_ERROR';
     return { success: false, code, message: reason === 'SLUG_EXISTS' ? 'Slug مستخدم بالفعل.' : reason === 'COMPANY_CODE_EXISTS' ? 'رمز الشركة مستخدم بالفعل.' : reason === 'MAX_USERS_TOO_LOW' ? 'لا يمكن أن يقل maxUsers عن عدد أعضاء الشركة الحالي.' : 'تعذر تحديث الشركة.' };
+  }
+});
+
+export const createAdditionalCompanyOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateAdditionalCompanyOwnerResponse> => {
+  const actorUid = request.auth?.uid;
+  if (!actorUid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const platformUser = await db.doc(`platformUsers/${actorUid}`).get();
+  if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const data = (request.data || {}) as Partial<CreateAdditionalCompanyOwnerRequest>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
+  const temporaryPassword = typeof data.temporaryPassword === 'string' ? data.temporaryPassword : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || temporaryPassword.length < 12 || temporaryPassword.length > 128) return { success: false, code: 'INVALID_INPUT', message: 'بيانات الشريك غير صالحة.' };
+  const companyRef = db.doc(`companies/${companyId}`);
+  const company = await companyRef.get();
+  if (!company.exists) return { success: false, code: 'COMPANY_NOT_FOUND', message: 'الشركة غير موجودة.' };
+  if (Number(company.data()?.memberCount || 0) >= Number(company.data()?.maxUsers || 0)) return { success: false, code: 'MAX_USERS_REACHED', message: 'تم الوصول للحد الأقصى لمستخدمي الشركة.' };
+  try {
+    await auth.getUserByEmail(email);
+    return { success: false, code: 'EMAIL_EXISTS', message: 'البريد الإلكتروني مستخدم بالفعل.' };
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'auth/user-not-found') return { success: false, code: 'UNKNOWN_ERROR', message: 'تعذر التحقق من البريد الإلكتروني.' };
+  }
+  let newUid = '';
+  try {
+    const user = await auth.createUser({ displayName: name, email, password: temporaryPassword, emailVerified: false });
+    newUid = user.uid;
+    await auth.setCustomUserClaims(newUid, { companyId, role: 'company_super_admin' });
+    await db.runTransaction(async tx => {
+      const freshCompany = await tx.get(companyRef);
+      if (!freshCompany.exists) throw new Error('COMPANY_NOT_FOUND');
+      if (Number(freshCompany.data()?.memberCount || 0) >= Number(freshCompany.data()?.maxUsers || 0)) throw new Error('MAX_USERS_REACHED');
+      const timestamp = FieldValue.serverTimestamp();
+      tx.create(companyRef.collection('members').doc(newUid), { uid: newUid, companyId, companyCode: freshCompany.data()?.companyCode || null, name, email, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
+      tx.update(companyRef, { memberCount: FieldValue.increment(1), activeMemberCount: FieldValue.increment(1), updatedAt: timestamp });
+      tx.create(companyRef.collection('activityLogs').doc(), { companyId, action: 'additional_company_owner_created', actorUid, targetUid: newUid, createdAt: timestamp });
+    });
+    return { success: true, code: 'OK', message: 'تم إنشاء حساب شريك بصلاحية صاحب المشروع.' };
+  } catch (error) {
+    if (newUid) await auth.deleteUser(newUid).catch(rollbackError => logger.error('Additional owner rollback failed', { reason: rollbackError instanceof Error ? rollbackError.message : 'unknown' }));
+    const reason = error instanceof Error ? error.message : '';
+    return { success: false, code: reason === 'COMPANY_NOT_FOUND' ? 'COMPANY_NOT_FOUND' : reason === 'MAX_USERS_REACHED' ? 'MAX_USERS_REACHED' : 'UNKNOWN_ERROR', message: reason === 'COMPANY_NOT_FOUND' ? 'الشركة غير موجودة.' : reason === 'MAX_USERS_REACHED' ? 'تم الوصول للحد الأقصى لمستخدمي الشركة.' : 'تعذر إنشاء حساب الشريك.' };
   }
 });
 

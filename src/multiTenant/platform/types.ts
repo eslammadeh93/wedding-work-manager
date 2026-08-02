@@ -33,6 +33,7 @@ export interface CreateCompanyRequest {
 }
 
 export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: CompanyStatus; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
+export interface CreateAdditionalCompanyOwnerRequest { companyId: string; name: string; email: string; temporaryPassword: string; }
 
 export interface CompanyManagementRequest {
   companyId: string;
