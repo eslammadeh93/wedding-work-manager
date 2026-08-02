@@ -226,7 +226,10 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
 });
 
 const memberService = new CompanyMemberService({ db, auth, emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
-const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', invoker: 'public' as const };
+// These callables are invoked by the current Render frontend, which does not
+// provide App Check yet. Transport is public for CORS; every operation still
+// enforces Firebase Auth, active tenant membership, role checks, and rate limits.
+const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: false, invoker: 'public' as const };
 type MemberRequest = { auth?: { uid: string }; data: unknown };
 // Render does not currently provide an App Check token. Firebase Auth plus
 // the active tenant membership and role checks remain mandatory in the service.
