@@ -3,8 +3,9 @@ import test from 'node:test';
 import { canManageCompanyMember, hashWorkerLoginCode } from './companyMembers.js';
 
 test('company_super_admin can create manager', () => assert.equal(canManageCompanyMember('company_super_admin', 'manager', 'create'), true));
-test('company_super_admin can create employee', () => assert.equal(canManageCompanyMember('company_super_admin', 'employee', 'create'), true));
-test('company_super_admin can create worker', () => assert.equal(canManageCompanyMember('company_super_admin', 'worker', 'create'), true));
+test('manager administration cannot create employee', () => assert.equal(canManageCompanyMember('company_super_admin', 'employee', 'create'), false));
+test('manager administration cannot create worker', () => assert.equal(canManageCompanyMember('company_super_admin', 'worker', 'create'), false));
+test('manager can manage another manager', () => assert.equal(canManageCompanyMember('manager', 'manager', 'update'), true));
 test('manager cannot create company_super_admin', () => assert.equal(canManageCompanyMember('manager', 'company_super_admin', 'create'), false));
 test('manager cannot update company_super_admin', () => assert.equal(canManageCompanyMember('manager', 'company_super_admin', 'update'), false));
 test('a member cannot change its own role through policy', () => assert.equal(canManageCompanyMember('employee', 'employee', 'role'), false));

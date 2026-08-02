@@ -11,6 +11,7 @@ export interface CompanyMemberListItem {
   role: CompanyMemberRole;
   status: AccountStatus;
   phone?: string | null;
+  jobTitle?: string | null;
   workerId?: string;
   createdAt?: RecordTimestamp;
   createdBy?: string;
@@ -24,25 +25,17 @@ export interface CompanyMemberListItem {
 export async function listCompanyMembers(trustedCompanyId: string): Promise<CompanyMemberListItem[]> {
   if (!USE_MULTI_TENANT_DATA || !trustedCompanyId) return [];
   const snapshot = await getDocs(collection(db, 'companies', trustedCompanyId, 'members'));
-  // Worker details are supplementary. A missing worker-read rule must not
-  // prevent the safe members list itself from loading.
-  let workerUsernames = new Map<string, unknown>();
-  try {
-    const workersSnapshot = await getDocs(collection(db, 'companies', trustedCompanyId, 'workers'));
-    workerUsernames = new Map(workersSnapshot.docs.map((worker) => [worker.id, worker.data().username]));
-  } catch {
-    // The list remains usable while the later rules phase is pending.
-  }
   return snapshot.docs.map((member) => {
     const data = member.data() as Omit<CompanyMemberListItem, 'uid'>;
     return {
       uid: member.id,
       name: typeof data.name === 'string' ? data.name : '',
       email: typeof data.email === 'string' ? data.email : null,
-      username: typeof data.username === 'string' ? data.username : typeof workerUsernames.get(data.workerId || '') === 'string' ? workerUsernames.get(data.workerId || '') as string : null,
+      username: typeof data.username === 'string' ? data.username : null,
       role: data.role,
       status: data.status,
       phone: typeof data.phone === 'string' ? data.phone : null,
+      jobTitle: typeof data.jobTitle === 'string' ? data.jobTitle : null,
       workerId: typeof data.workerId === 'string' ? data.workerId : undefined,
       createdAt: data.createdAt,
       createdBy: typeof data.createdBy === 'string' ? data.createdBy : undefined,

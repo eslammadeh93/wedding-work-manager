@@ -26,17 +26,17 @@ const ExpensesModule = lazy(() => import('./components/expenses/ExpensesModule')
 const CalendarModule = lazy(() => import('./components/calendar/CalendarModule').then(({ CalendarModule }) => ({ default: CalendarModule })));
 const ReportsModule = lazy(() => import('./components/reports/ReportsModule').then(({ ReportsModule }) => ({ default: ReportsModule })));
 const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityLogModule').then(({ ActivityLogModule }) => ({ default: ActivityLogModule })));
-const UsersModule = lazy(() => import('./components/users/UsersModule').then(({ UsersModule }) => ({ default: UsersModule })));
 const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
+const ProfileModule = lazy(() => import('./components/profile/ProfileModule').then(({ ProfileModule }) => ({ default: ProfileModule })));
 
 function UnauthorizedPlatform() {
   return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب المنصة فقط.</p></div></div>;
 }
 
 function UnauthorizedCompanyMembers() {
-  return <div dir="rtl" className="min-h-64 flex items-center justify-center text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب الشركة فقط.</p></div></div>;
+  return <div dir="rtl" className="min-h-64 flex items-center justify-center text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب الشركة والمديرين فقط.</p></div></div>;
 }
 
 /** Kept outside the legacy tree so platform code is only requested after verification. */
@@ -68,12 +68,12 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'سجل النشاط';
       case 'calendar':
         return 'التقويم';
-      case 'users':
-        return 'المستخدمين';
       case 'settings':
         return 'الإعدادات';
       case 'members':
-        return 'إدارة الفريق';
+        return 'إدارة المديرين';
+      case 'profile':
+        return 'الملف الشخصي';
       default:
         return 'لوحة التحكم';
     }
@@ -97,12 +97,12 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Activity Log';
       case 'calendar':
         return 'Calendar';
-      case 'users':
-        return 'Users';
       case 'settings':
         return 'Settings';
       case 'members':
-        return 'Team Management';
+        return 'Managers';
+      case 'profile':
+        return 'Profile';
       default:
         return 'Dashboard';
     }
@@ -143,11 +143,6 @@ function AppContent() {
       const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'calendar'];
       if (!allowedEmployeeTabs.includes(activeTab)) {
         setActiveTab('orders');
-      }
-    } else if (role === 'manager') {
-      const restrictedManagerTabs: ActiveTab[] = ['expenses', 'reports', 'activityLog', 'users', 'settings'];
-      if (restrictedManagerTabs.includes(activeTab)) {
-        setActiveTab('dashboard');
       }
     }
   }, [profile?.role, activeTab]);
@@ -248,9 +243,9 @@ function AppContent() {
             {activeTab === 'calendar' && <CalendarModule />}
             {activeTab === 'reports' && <ReportsModule />}
             {activeTab === 'activityLog' && <ActivityLogModule />}
-            {activeTab === 'users' && <UsersModule />}
             {activeTab === 'settings' && <SettingsModule />}
             {USE_MULTI_TENANT_DATA && activeTab === 'members' && <CompanySessionRouteGuard permission="company:members:read" fallback={<UnauthorizedCompanyMembers />}><CompanyMembersModule /></CompanySessionRouteGuard>}
+            {USE_MULTI_TENANT_DATA && activeTab === 'profile' && <ProfileModule />}
           </Suspense>
         </main>
       </div>

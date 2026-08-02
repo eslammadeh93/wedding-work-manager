@@ -42,7 +42,7 @@ service cloud.firestore {
     }
     function hasCompanyPermission(companyId, permission) {
       return canReadOperations(companyId) && (
-        memberRole(companyId) == 'company_super_admin'
+        memberRole(companyId) in ['company_super_admin', 'manager']
         || (permission == 'orders:read' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])

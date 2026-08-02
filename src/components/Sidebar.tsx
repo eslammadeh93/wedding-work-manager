@@ -4,16 +4,13 @@ import {
   ClipboardList,
   Users,
   Boxes,
-  Receipt,
-  CalendarDays,
   BarChart3,
   Settings as SettingsIcon,
-  ShieldCheck,
   X,
   Crown,
   HardHat,
-  History,
   UsersRound,
+  UserRound,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -31,9 +28,9 @@ export type ActiveTab =
   | 'calendar'
   | 'reports'
   | 'activityLog'
-  | 'users'
   | 'settings'
-  | 'members';
+  | 'members'
+  | 'profile';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -57,24 +54,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const userRole = profile?.role || 'employee';
 
-  const allNavItems: { id: ActiveTab; labelKey: keyof typeof import('../i18n/translations').translations['en']; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[] }[] = [
+  const allNavItems: { id: ActiveTab; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[] }[] = [
     { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'] },
     { id: 'orders', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'] },
-    { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'] },
     { id: 'customers', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'] },
     { id: 'inventory', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'] },
-    { id: 'expenses', labelKey: 'expenses', icon: Receipt, roles: ['super_admin', 'admin'] },
-    { id: 'calendar', labelKey: 'calendar', icon: CalendarDays, roles: ['super_admin', 'admin', 'manager', 'employee'] },
-    { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin'] },
-    { id: 'activityLog', labelKey: 'activityLog', icon: History, roles: ['super_admin', 'admin'] },
-    { id: 'users', labelKey: 'users', icon: ShieldCheck, roles: ['super_admin', 'admin'] },
-    { id: 'settings', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin'] },
+    { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'] },
+    { id: 'members', label: 'إدارة المديرين', icon: UsersRound, roles: ['super_admin', 'manager'] },
+    { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'] },
+    { id: 'settings', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'] },
+    { id: 'profile', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 
-  const navItems = allNavItems.filter((item) => item.roles.includes(userRole));
   const showCompanyMembers = USE_MULTI_TENANT_DATA
     && authSession?.userType === 'company'
     && hasPermission(authSession.role, 'company:members:read');
+  const navItems = allNavItems.filter((item) => item.roles.includes(userRole) && (item.id !== 'members' || showCompanyMembers) && (item.id !== 'profile' || authSession?.userType === 'company'));
 
   const handleTabClick = (id: ActiveTab) => {
     setActiveTab(id);
@@ -136,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <div className="flex items-center gap-3">
                   <Icon className={`w-4 h-4 ${isActive ? 'text-amber-500 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'}`} />
-                  <span>{t(item.labelKey)}</span>
+                  <span>{item.label || (item.labelKey ? t(item.labelKey) : '')}</span>
                 </div>
                 {item.badge !== undefined && item.badge > 0 && (
                   <span
@@ -152,19 +147,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
-          {showCompanyMembers && (
-            <button
-              onClick={() => { window.history.pushState({}, '', '/company/members'); handleTabClick('members'); }}
-              className={`w-full flex items-center gap-3 px-3.5 py-3 sm:py-2.5 rounded-xl font-medium text-xs transition-all cursor-pointer min-h-[44px] ${
-                activeTab === 'members'
-                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-extrabold border-l-2 border-amber-500 rtl:border-l-0 rtl:border-r-2 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              <UsersRound className={`w-4 h-4 ${activeTab === 'members' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`} />
-              <span>إدارة الفريق</span>
-            </button>
-          )}
         </nav>
 
         {/* Sidebar Footer info */}
