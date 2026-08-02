@@ -33,10 +33,8 @@ function CreateCompanyForm({ close }: { close: () => void }) {
 
 export function PlatformModule() {
   const { authSession, logout } = useAuth(); const { companies, loading, error, reload } = usePlatformCompanies();
-  const currentPlatformPath = () => window.location.hash.startsWith('#/platform') ? window.location.hash.slice(1) : window.location.pathname;
-  const [path, setPath] = useState(currentPlatformPath); const [menu, setMenu] = useState(false); const [creating, setCreating] = useState(false);
-  useEffect(() => { const sync = () => setPath(currentPlatformPath()); window.addEventListener('popstate', sync); window.addEventListener('hashchange', sync); return () => { window.removeEventListener('popstate', sync); window.removeEventListener('hashchange', sync); }; }, []);
-  const go = (target: string) => { window.location.hash = target; setPath(target); setMenu(false); };
+  const [path, setPath] = useState('/platform'); const [menu, setMenu] = useState(false); const [creating, setCreating] = useState(false);
+  const go = (target: string) => { setPath(target); setMenu(false); };
   const view: View = path === '/platform/companies' ? 'companies' : path.startsWith('/platform/companies/') ? 'detail' : 'overview'; const companyId = view === 'detail' ? decodeURIComponent(path.split('/').pop() || '') : ''; const selected = companies.find((company) => company.id === companyId);
   const overview = useMemo(() => summarizeCompanies(companies), [companies]);
   const nav = <nav className="space-y-1"><button onClick={() => go('/platform')} className="w-full rounded-xl px-3 py-2 text-right text-sm hover:bg-amber-100 dark:hover:bg-slate-800">لوحة التحكم</button><button onClick={() => go('/platform/companies')} className="w-full rounded-xl px-3 py-2 text-right text-sm hover:bg-amber-100 dark:hover:bg-slate-800">الشركات</button></nav>;

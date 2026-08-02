@@ -112,7 +112,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
 function AppContent() {
   const { user, profile, authSession, loading, usersInitialized } = useAuth();
   const { language } = useLanguage();
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => USE_MULTI_TENANT_DATA && (window.location.pathname === '/company/members' || window.location.hash === '#/company/members') ? 'members' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
@@ -168,12 +168,11 @@ function AppContent() {
 
   // With the flag off this branch is never selected: no platform module,
   // routes, navigation, or queries are activated in the legacy application.
-  if (USE_MULTI_TENANT_DATA && (window.location.pathname.startsWith('/platform') || window.location.hash.startsWith('#/platform'))) {
+  if (USE_MULTI_TENANT_DATA && authSession?.userType === 'platform') {
     return <PlatformEntry />;
   }
 
   const handleNavigate = (tab: ActiveTab) => {
-    if (activeTab === 'members' && tab !== 'members' && USE_MULTI_TENANT_DATA) window.history.replaceState({}, '', '/');
     setActiveTab(tab);
   };
 

@@ -72,8 +72,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = allNavItems.filter((item) => item.roles.includes(userRole) && (item.id !== 'members' || showCompanyMembers) && (item.id !== 'profile' || authSession?.userType === 'company'));
 
   const handleTabClick = (id: ActiveTab) => {
-    if (USE_MULTI_TENANT_DATA && id === 'members') window.location.hash = '/company/members';
-    else if (window.location.hash === '#/company/members') window.history.replaceState({}, '', '/');
     setActiveTab(id);
     onClose();
   };
