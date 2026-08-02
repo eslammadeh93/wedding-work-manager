@@ -52,7 +52,6 @@ const WorkerSearchableSelect: React.FC<{
         value={search}
         onChange={(e) => {
           setSearch(e.target.value);
-          onSelectWorker('', e.target.value);
           setIsOpen(true);
         }}
         onFocus={() => setIsOpen(true)}
@@ -68,6 +67,13 @@ const WorkerSearchableSelect: React.FC<{
 
       {isOpen && (
         <div className="absolute z-50 w-full mt-1 max-h-52 overflow-y-auto bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xl py-1">
+          <button
+            type="button"
+            onClick={() => { onSelectWorker('', ''); setSearch(''); setIsOpen(false); }}
+            className="w-full px-3.5 py-2.5 text-right text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 border-b border-slate-100 dark:border-slate-700"
+          >
+            إلغاء إسناد العامل
+          </button>
           {filtered.length > 0 ? (
             filtered.map((w) => (
               <button
@@ -451,7 +457,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                 <Wrench className="w-3.5 h-3.5 text-amber-500" />
-                <span>{t('executor')} / العامل المسند</span>
+                <span>{isEdit ? 'تغيير العامل المسند' : `${t('executor')} / العامل المسند`}</span>
               </label>
               <WorkerSearchableSelect
                 selectedWorkerId={workerId}
@@ -462,6 +468,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 }}
                 workers={workers}
               />
+              <p className="mt-1 text-[11px] text-slate-500">اكتب للبحث ثم اختر العامل من القائمة حتى يتم حفظ الـWorker ID الصحيح.</p>
             </div>
 
             <div>
