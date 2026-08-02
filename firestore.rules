@@ -6,7 +6,8 @@ service cloud.firestore {
     function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
     function platformProfile() { return get(/databases/$(database)/documents/platformUsers/$(request.auth.uid)); }
     function platformProfileIsActive() {
-      return isSignedIn() && platformProfile().exists()
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/platformUsers/$(request.auth.uid))
         && platformProfile().data.role == 'platform_owner'
         && platformProfile().data.status == 'active';
     }
@@ -18,7 +19,10 @@ service cloud.firestore {
     function companyMember(companyId) {
       return get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
     }
-    function isCompanyMember(companyId) { return isSignedIn() && companyMember(companyId).exists(); }
+    function isCompanyMember(companyId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
+    }
     function memberIsActive(companyId) { return isCompanyMember(companyId) && companyMember(companyId).data.status == 'active'; }
     function memberRole(companyId) { return companyMember(companyId).data.role; }
     function isCompanySuperAdmin(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'company_super_admin'; }
@@ -26,7 +30,8 @@ service cloud.firestore {
     function isEmployee(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'employee'; }
     function isWorker(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'worker'; }
     function companyIsAccessible(companyId) {
-      return get(/databases/$(database)/documents/companies/$(companyId)).exists()
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/companies/$(companyId))
         && get(/databases/$(database)/documents/companies/$(companyId)).data.status in ['trial', 'active', 'past_due', 'expired'];
     }
     function canReadOperations(companyId) { return memberIsActive(companyId) && companyIsAccessible(companyId); }
