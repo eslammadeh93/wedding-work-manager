@@ -5,7 +5,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
-import { CompanyMemberService } from './companyMembers.js';
+import { CompanyMemberService, hashWorkerLoginCode } from './companyMembers.js';
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateCompanyRequest, UpdateCompanyResponse } from './apiTypes.js';
 import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
@@ -69,20 +69,47 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
   if (currentLimit.lockedUntilMs && currentLimit.lockedUntilMs > now) return { success: false, code: 'LOCKED', message: GENERIC_FAILURE, retryAfterSeconds: Math.ceil((currentLimit.lockedUntilMs - now) / 1000) };
   try {
     const companies = await db.collection('companies').where('companyCode', '==', companyCode).limit(2).get();
-    if (companies.size !== 1) throw new Error('invalid');
+    if (companies.size !== 1) throw new Error('company_not_found');
     const company = companies.docs[0], companyData = company.data();
     const subscriptionDeadline = timestampMillis(companyData.gracePeriodEnd || companyData.subscriptionEnd);
-    if (companyData.status === 'suspended' || companyData.status === 'expired' || (subscriptionDeadline !== null && Date.now() > subscriptionDeadline)) throw new Error('invalid');
+    if (companyData.status === 'suspended' || companyData.status === 'expired' || (subscriptionDeadline !== null && Date.now() > subscriptionDeadline)) throw new Error('company_inactive');
     const workers = await company.ref.collection('workers').where('username', '==', username).limit(2).get();
-    if (workers.size !== 1) throw new Error('invalid');
+    if (workers.size !== 1) throw new Error('username_not_found');
     const worker = workers.docs[0], workerData = worker.data();
     const secret = await company.ref.collection('workerSecrets').doc(worker.id).get();
-    // New tenant workers never inherit legacy credentials. Their hash must exist
-    // only in workerSecrets; a readable workers document is never a fallback.
-    if (workerData.status !== 'active' || !secret.exists || !verifyLoginCode(loginCode, secret.data()?.loginCodeHash)) throw new Error('invalid');
-    const uid = typeof workerData.authUid === 'string' ? workerData.authUid : '';
-    const member = uid ? await company.ref.collection('members').doc(uid).get() : null;
-    if (!member?.exists || member.data()?.role !== 'worker' || member.data()?.status !== 'active') throw new Error('invalid');
+    let uid = typeof workerData.authUid === 'string' ? workerData.authUid : '';
+    if (workerData.status !== 'active') throw new Error('worker_inactive');
+    let linkedAuthUser: Awaited<ReturnType<typeof auth.getUser>> | undefined;
+    if (!uid) {
+      linkedAuthUser = await auth.getUserByEmail(`${username}@worker.local`).catch(() => undefined);
+      uid = linkedAuthUser?.uid || '';
+      if (!uid) throw new Error('auth_uid_missing');
+    }
+    let member = await company.ref.collection('members').doc(uid).get();
+    if (!secret.exists) {
+      const legacyCode = typeof workerData.loginCode === 'string' ? workerData.loginCode : '';
+      const sameLength = Buffer.byteLength(legacyCode) === Buffer.byteLength(loginCode);
+      const matchesLegacyCode = sameLength && legacyCode.length > 0 && crypto.timingSafeEqual(Buffer.from(legacyCode), Buffer.from(loginCode));
+      if (!matchesLegacyCode) throw new Error('login_code_invalid');
+      const authUser = linkedAuthUser || await auth.getUser(uid);
+      if (authUser.email?.toLowerCase() !== `${username}@worker.local`) throw new Error('auth_user_mismatch');
+      const existingClaims = authUser.customClaims || {};
+      const timestamp = FieldValue.serverTimestamp();
+      await db.runTransaction(async tx => {
+        const freshWorker = await tx.get(worker.ref), freshSecret = await tx.get(company.ref.collection('workerSecrets').doc(worker.id));
+        const freshAuthUid = freshWorker.data()?.authUid;
+        if (!freshWorker.exists || (typeof freshAuthUid === 'string' && freshAuthUid !== uid)) throw new Error('worker_changed');
+        if (!freshSecret.exists) tx.create(freshSecret.ref, { loginCodeHash: hashWorkerLoginCode(loginCode), loginCodeVersion: 1, createdAt: timestamp, updatedAt: timestamp, migratedFromLegacy: true });
+        tx.set(company.ref.collection('members').doc(uid), { uid, companyId: company.id, companyCode, name: String(workerData.fullName || workerData.name || username), email: null, role: 'worker', status: 'active', workerId: worker.id, phone: workerData.phone || null, updatedAt: timestamp, ...(!member.exists ? { createdAt: timestamp } : {}) }, { merge: true });
+        tx.set(worker.ref, { companyId: company.id, companyCode, username, usernameNormalized: username, authUid: uid, status: 'active', loginCode: FieldValue.delete(), updatedAt: timestamp }, { merge: true });
+      });
+      await auth.setCustomUserClaims(uid, { ...existingClaims, companyId: company.id, role: 'worker', workerId: worker.id });
+      member = await company.ref.collection('members').doc(uid).get();
+      logger.info('Legacy worker credentials migrated', { stage: 'migration_complete', usernameNormalized: true, secretCreated: true, membershipActive: member.data()?.status === 'active' });
+    } else if (!verifyLoginCode(loginCode, secret.data()?.loginCodeHash)) {
+      throw new Error('login_code_invalid');
+    }
+    if (!member.exists || member.data()?.role !== 'worker' || member.data()?.status !== 'active' || member.data()?.companyId !== company.id || member.data()?.workerId !== worker.id) throw new Error('membership_invalid');
     await clearFailures(rateKey);
     return { success: true, code: 'OK', message: 'تم تسجيل الدخول بنجاح.', customToken: await auth.createCustomToken(uid, { companyId: company.id, role: 'worker', workerId: worker.id }) };
   } catch (error) {
@@ -92,7 +119,7 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
   }
 }
 
-export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', invoker: 'public' }, async request => {
+export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async request => {
   try {
     return await handleWorkerLogin(request);
   } catch {
