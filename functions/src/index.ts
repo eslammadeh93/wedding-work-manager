@@ -7,6 +7,7 @@ import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService, hashWorkerLoginCode } from './companyMembers.js';
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateCompanyRequest, UpdateCompanyResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
+import type { MarkCompanyNotificationsReadRequest, MarkCompanyNotificationsReadResponse, RecordOrderActivityRequest, RecordOrderActivityResponse, SetWorkerStatusRequest, SetWorkerStatusResponse, UpdateWorkerOrderStatusRequest, UpdateWorkerOrderStatusResponse, UpdateWorkerRequest, UpdateWorkerResponse } from './apiTypes.js';
 import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
 initializeApp();
@@ -230,7 +231,7 @@ const memberService = new CompanyMemberService({ db, auth, emulator: process.env
 // provide App Check yet. Transport is public for CORS; every operation still
 // enforces Firebase Auth, active tenant membership, role checks, and rate limits.
 const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: false, invoker: 'public' as const };
-type MemberRequest = { auth?: { uid: string }; data: unknown };
+type MemberRequest = { auth?: { uid: string; token?: Record<string, unknown> }; data: unknown };
 // Render does not currently provide an App Check token. Firebase Auth plus
 // the active tenant membership and role checks remain mandatory in the service.
 export const createCompanyMember = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));
@@ -245,3 +246,8 @@ export const deleteCompanyMember = onCall(memberFunctionOptions, (request: Membe
 // requires Firebase Auth, an active membership, and a permitted manager role.
 export const deleteWorker = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<DeleteWorkerResponse> => memberService.deleteWorker(request.data as DeleteWorkerRequest, request.auth));
 export const updateOwnCompanyProfile = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<UpdateOwnCompanyProfileResponse> => memberService.updateOwnProfile(request.data as UpdateOwnCompanyProfileRequest, request.auth));
+export const updateWorker = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateWorkerResponse> => memberService.updateWorker(request.data as UpdateWorkerRequest, request.auth));
+export const setWorkerStatus = onCall(memberFunctionOptions, (request: MemberRequest): Promise<SetWorkerStatusResponse> => memberService.setWorkerStatus(request.data as SetWorkerStatusRequest, request.auth));
+export const recordOrderActivity = onCall(memberFunctionOptions, (request: MemberRequest): Promise<RecordOrderActivityResponse> => memberService.recordOrderActivity(request.data as RecordOrderActivityRequest, request.auth));
+export const updateWorkerOrderStatus = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateWorkerOrderStatusResponse> => memberService.updateWorkerOrderStatus(request.data as UpdateWorkerOrderStatusRequest, request.auth));
+export const markCompanyNotificationsRead = onCall(memberFunctionOptions, (request: MemberRequest): Promise<MarkCompanyNotificationsReadResponse> => memberService.markNotificationsRead(request.data as MarkCompanyNotificationsReadRequest, request.auth));

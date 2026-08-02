@@ -23,7 +23,7 @@ import { companyMembersService } from '../../multiTenant/companyMembersService';
 
 export const WorkersModule: React.FC = () => {
   const { t } = useLanguage();
-  const { workers, updateWorker, toggleWorkerStatus } = useData();
+  const { workers } = useData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -110,15 +110,16 @@ export const WorkersModule: React.FC = () => {
     setIsSaving(true);
     try {
       if (editingWorker) {
-        if (editingWorker.username !== cleanUsername) throw new Error('لا يمكن تغيير اسم المستخدم بعد إنشاء العامل.');
-        await updateWorker(editingWorker.id, {
-          fullName: fullName.trim(),
+        const updated = await companyMembersService.updateWorker({
+          workerId: editingWorker.id,
+          name: fullName.trim(),
           username: cleanUsername,
           jobTitle: jobTitle.trim(),
           phone: phone.trim(),
           notes: notes.trim(),
-          status,
         });
+        if (!updated.success) throw new Error(updated.message);
+        if (editingWorker.status !== status) { const changed = await companyMembersService.setWorkerStatus({ workerId: editingWorker.id, status }); if (!changed.success) throw new Error(changed.message); }
         if (cleanCode) {
           const reset = await companyMembersService.resetWorkerLoginCode({ workerId: editingWorker.id, loginCode: cleanCode });
           if (!reset.success) throw new Error(reset.message);
@@ -148,8 +149,11 @@ export const WorkersModule: React.FC = () => {
   };
 
   const handleToggleStatus = async (worker: Worker) => {
-    const newStatus = worker.status === 'active' ? 'inactive' : 'active';
-    await toggleWorkerStatus(worker.id, newStatus);
+    try {
+      const newStatus = worker.status === 'active' ? 'inactive' : 'active';
+      const result = await companyMembersService.setWorkerStatus({ workerId: worker.id, status: newStatus });
+      if (!result.success) throw new Error(result.message);
+    } catch (error) { alert(error instanceof Error ? error.message : 'تعذر تحديث حالة العامل.'); }
   };
 
   return (

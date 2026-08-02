@@ -4,6 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 const admin = { firestore: { FieldValue } };
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CompanyMemberError, CompanyMemberResponse, CompanyRole, CreateCompanyMemberRequest, CreateCompanyMemberResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ManagedRole, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
+import type { MarkCompanyNotificationsReadRequest, MarkCompanyNotificationsReadResponse, RecordOrderActivityRequest, RecordOrderActivityResponse, SetWorkerStatusRequest, SetWorkerStatusResponse, UpdateWorkerOrderStatusRequest, UpdateWorkerOrderStatusResponse, UpdateWorkerRequest, UpdateWorkerResponse } from './apiTypes.js';
 export type * from './apiTypes.js';
 
 type AuthContext = { uid: string; token?: Record<string, unknown> } | undefined;
@@ -123,6 +124,75 @@ export class CompanyMemberService {
     return ok('تم حذف العامل وحسابه وبيانات دخوله بالكامل.');
   }
   async resetWorkerCode(input: unknown, auth: AuthContext): Promise<ResetWorkerLoginCodeResponse> { const context = await this.authorize(auth); if ('success' in context) return context; const data = (input || {}) as ResetWorkerLoginCodeRequest; const workerId = normalize(data.workerId); if (!workerId || !this.validCode(typeof data.loginCode === 'string' ? data.loginCode : '')) return fail('INVALID_INPUT', 'كود العامل يجب أن يحتوي على ستة أحرف على الأقل ورقم واحد.'); const worker = context.company.ref.collection('workers').doc(workerId); const snapshot = await worker.get(); if (!snapshot.exists) return fail('MEMBER_NOT_FOUND', 'العامل غير موجود.'); const rate = await this.rateLimit(context.company.id, auth!.uid, 'worker-code'); if (rate) return rate; await context.company.ref.collection('workerSecrets').doc(workerId).set({ loginCodeHash: hashWorkerLoginCode(data.loginCode), loginCodeVersion: admin.firestore.FieldValue.increment(1), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }); await this.audit(context.company.id, 'worker_login_code_reset', auth!.uid, String(snapshot.data()?.authUid || ''), 'worker', { workerId }); return ok('تمت إعادة تعيين كود العامل.'); }
+  async updateWorker(input: unknown, auth: AuthContext): Promise<UpdateWorkerResponse> {
+    const context = await this.authorize(auth); if ('success' in context) return context;
+    const data = (input || {}) as UpdateWorkerRequest; const workerId = normalize(data.workerId);
+    const name = normalize(data.name); const username = normalize(data.username).toLowerCase();
+    if (!workerId || (data.name !== undefined && !name) || (data.username !== undefined && !workerName.test(username))) return fail('INVALID_INPUT', 'بيانات العامل غير صالحة.');
+    const workerRef = context.company.ref.collection('workers').doc(workerId); const worker = await workerRef.get();
+    if (!worker.exists) return fail('MEMBER_NOT_FOUND', 'العامل غير موجود.');
+    if (username && username !== worker.data()?.username) { const duplicate = await context.company.ref.collection('workers').where('usernameNormalized', '==', username).limit(1).get(); if (!duplicate.empty) return fail('USERNAME_EXISTS', 'اسم المستخدم مستخدم داخل هذه الشركة.'); }
+    const authUid = normalize(worker.data()?.authUid); const memberRef = authUid ? context.company.ref.collection('members').doc(authUid) : undefined;
+    const fields: Record<string, unknown> = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (data.name !== undefined) { fields.name = name; fields.fullName = name; }
+    if (data.username !== undefined) { fields.username = username; fields.usernameNormalized = username; }
+    if (data.phone !== undefined) fields.phone = normalize(data.phone);
+    if (data.jobTitle !== undefined) fields.jobTitle = normalize(data.jobTitle);
+    if (data.notes !== undefined) fields.notes = normalize(data.notes);
+    await workerRef.set(fields, { merge: true });
+    if (memberRef) await memberRef.set({ ...(name ? { name } : {}), ...(data.phone !== undefined ? { phone: normalize(data.phone) || null } : {}), ...(data.jobTitle !== undefined ? { jobTitle: normalize(data.jobTitle) || null } : {}), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    if (authUid && name) await this.deps.auth.updateUser(authUid, { displayName: name });
+    await this.audit(context.company.id, 'company_worker_updated', auth!.uid, authUid, 'worker', { workerId, fields: Object.keys(fields).filter(key => key !== 'updatedAt') });
+    return ok('تم تحديث العامل.');
+  }
+  async setWorkerStatus(input: unknown, auth: AuthContext): Promise<SetWorkerStatusResponse> {
+    const context = await this.authorize(auth); if ('success' in context) return context;
+    const data = (input || {}) as SetWorkerStatusRequest; const workerId = normalize(data.workerId);
+    if (!workerId || !['active', 'inactive'].includes(String(data.status))) return fail('INVALID_INPUT', 'حالة العامل غير صالحة.');
+    const workerRef = context.company.ref.collection('workers').doc(workerId); const worker = await workerRef.get();
+    if (!worker.exists) return fail('MEMBER_NOT_FOUND', 'العامل غير موجود.');
+    const authUid = normalize(worker.data()?.authUid); if (!authUid) return fail('MEMBER_NOT_FOUND', 'عضوية العامل غير مكتملة.');
+    const memberRef = context.company.ref.collection('members').doc(authUid); const member = await memberRef.get();
+    if (!member.exists || member.data()?.role !== 'worker') return fail('MEMBER_NOT_FOUND', 'عضوية العامل غير موجودة.');
+    const active = data.status === 'active';
+    try { await this.deps.auth.updateUser(authUid, { disabled: !active }); await this.deps.db.runTransaction(async tx => { tx.update(workerRef, { status: data.status, updatedAt: admin.firestore.FieldValue.serverTimestamp() }); tx.update(memberRef, { status: active ? 'active' : 'disabled', updatedAt: admin.firestore.FieldValue.serverTimestamp() }); }); }
+    catch (error) { try { await this.deps.auth.updateUser(authUid, { disabled: member.data()?.status !== 'active' }); } catch { /* preserve original failure */ } return fail('UNKNOWN_ERROR', error instanceof Error ? error.message : 'تعذر تحديث حالة العامل.'); }
+    await this.audit(context.company.id, active ? 'company_worker_reactivated' : 'company_worker_disabled', auth!.uid, authUid, 'worker', { workerId });
+    return ok(active ? 'تمت إعادة تفعيل العامل.' : 'تم تعطيل العامل.');
+  }
+  async recordOrderActivity(input: unknown, auth: AuthContext): Promise<RecordOrderActivityResponse> {
+    const context = await this.caller(auth); if ('success' in context) return context;
+    const data = (input || {}) as RecordOrderActivityRequest; const orderId = normalize(data.orderId);
+    if (!orderId || !['opened', 'arrived', 'finished'].includes(String(data.action))) return fail('INVALID_INPUT', 'بيانات النشاط غير صالحة.');
+    const actor = context.member.data() as MemberDoc; const orderRef = context.company.ref.collection('orders').doc(orderId); const order = await orderRef.get();
+    if (!order.exists) return fail('MEMBER_NOT_FOUND', 'الطلب غير موجود.');
+    if (actor.role === 'worker' && order.data()?.workerId !== actor.workerId) return fail('FORBIDDEN', 'الطلب غير مسند لهذا العامل.');
+    if (!['worker', 'manager', 'company_super_admin'].includes(String(actor.role))) return fail('FORBIDDEN', 'ليس لديك صلاحية تسجيل هذا النشاط.');
+    const rate = await this.rateLimit(context.company.id, auth!.uid, 'order-activity'); if (rate) return rate;
+    await context.company.ref.collection('activityLogs').add({ orderId, orderNumber: String(order.data()?.orderNumber || ''), workerId: String(actor.workerId || ''), workerName: String(actor.name || ''), action: data.action, customerName: String(order.data()?.customerName || ''), eventDate: String(order.data()?.eventDate || order.data()?.weddingDate || order.data()?.bookingDate || ''), performedBy: auth!.uid, timestamp: admin.firestore.FieldValue.serverTimestamp() });
+    return ok('تم تسجيل النشاط.');
+  }
+  async updateWorkerOrderStatus(input: unknown, auth: AuthContext): Promise<UpdateWorkerOrderStatusResponse> {
+    const context = await this.caller(auth); if ('success' in context) return context;
+    const actor = context.member.data() as MemberDoc; const data = (input || {}) as UpdateWorkerOrderStatusRequest; const orderId = normalize(data.orderId);
+    if (actor.role !== 'worker' || !actor.workerId) return fail('FORBIDDEN', 'هذه العملية متاحة للعامل فقط.');
+    if (!orderId || !['preparing', 'in_progress', 'completed'].includes(String(data.status))) return fail('INVALID_INPUT', 'حالة الطلب غير مسموحة للعامل.');
+    const orderRef = context.company.ref.collection('orders').doc(orderId); const order = await orderRef.get();
+    if (!order.exists) return fail('MEMBER_NOT_FOUND', 'الطلب غير موجود.');
+    if (order.data()?.workerId !== actor.workerId) return fail('FORBIDDEN', 'الطلب غير مسند لهذا العامل.');
+    const rate = await this.rateLimit(context.company.id, auth!.uid, 'worker-order-status'); if (rate) return rate;
+    await orderRef.update({ orderStatus: data.status, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    await this.audit(context.company.id, 'worker_order_status_updated', auth!.uid, auth!.uid, 'worker', { orderId, status: data.status });
+    return ok('تم تحديث حالة الطلب.');
+  }
+  async markNotificationsRead(input: unknown, auth: AuthContext): Promise<MarkCompanyNotificationsReadResponse> {
+    const context = await this.caller(auth); if ('success' in context) return context;
+    const ids = Array.from(new Set(((input || {}) as MarkCompanyNotificationsReadRequest).notificationIds?.map(normalize).filter(Boolean) || []));
+    if (!ids.length || ids.length > 100) return fail('INVALID_INPUT', 'الإشعارات المطلوبة غير صالحة.');
+    const owner = context.member.data()?.role === 'company_super_admin'; const batch = this.deps.db.batch();
+    for (const id of ids) { const ref = context.company.ref.collection('notifications').doc(id); const snapshot = await ref.get(); if (!snapshot.exists) continue; if (!owner && snapshot.data()?.targetUid !== auth!.uid) return fail('FORBIDDEN', 'لا يمكنك تعديل إشعار مستخدم آخر.'); batch.update(ref, { read: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() }); }
+    await batch.commit(); return ok('تم تحديث الإشعارات.');
+  }
   private async rollback(uid: string | undefined, refs: FirebaseFirestore.DocumentReference[]): Promise<boolean> { try { if (refs.length) await this.deps.db.runTransaction(async tx => refs.forEach(ref => tx.delete(ref))); if (uid) await this.deps.auth.deleteUser(uid); return true; } catch { return false; } }
 }
 class MemberFailure extends Error { constructor(readonly code: CompanyMemberError, message: string) { super(message); } }

@@ -12,6 +12,11 @@ export interface SendCompanyMemberPasswordResetRequest { uid: string; companyId?
 export interface ResetWorkerLoginCodeRequest { workerId: string; loginCode: string; companyId?: string; }
 export interface DeleteCompanyMemberRequest { uid: string; companyId?: string; }
 export interface DeleteWorkerRequest { workerId: string; companyId?: string; }
+export interface UpdateWorkerRequest { workerId: string; name?: string; username?: string; phone?: string; jobTitle?: string; notes?: string; }
+export interface SetWorkerStatusRequest { workerId: string; status: 'active' | 'inactive'; }
+export interface RecordOrderActivityRequest { orderId: string; action: 'opened' | 'arrived' | 'finished'; }
+export interface UpdateWorkerOrderStatusRequest { orderId: string; status: 'preparing' | 'in_progress' | 'completed'; }
+export interface MarkCompanyNotificationsReadRequest { notificationIds: string[]; }
 export interface UpdateOwnCompanyProfileRequest { name?: string; phone?: string; newPassword?: string; }
 export type CreateCompanyMemberResponse = CompanyMemberResponse<{ uid: string; workerId?: string; companyCode?: string } | Record<string, never>>;
 export type UpdateCompanyMemberResponse = CompanyMemberResponse;
@@ -22,6 +27,11 @@ export type SendCompanyMemberPasswordResetResponse = CompanyMemberResponse<{ tes
 export type ResetWorkerLoginCodeResponse = CompanyMemberResponse;
 export type DeleteCompanyMemberResponse = CompanyMemberResponse;
 export type DeleteWorkerResponse = CompanyMemberResponse;
+export type UpdateWorkerResponse = CompanyMemberResponse;
+export type SetWorkerStatusResponse = CompanyMemberResponse;
+export type RecordOrderActivityResponse = CompanyMemberResponse;
+export type UpdateWorkerOrderStatusResponse = CompanyMemberResponse;
+export type MarkCompanyNotificationsReadResponse = CompanyMemberResponse;
 export type UpdateOwnCompanyProfileResponse = CompanyMemberResponse;
 
 export type CreateCompanyError = 'OK' | 'UNAUTHORIZED' | 'INVALID_INPUT' | 'COMPANY_EXISTS' | 'SLUG_EXISTS' | 'COMPANY_CODE_EXISTS' | 'EMAIL_EXISTS' | 'AUTH_CREATION_FAILED' | 'COMPANY_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
