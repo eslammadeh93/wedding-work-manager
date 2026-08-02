@@ -6,7 +6,7 @@ const admin = { firestore: { FieldValue } };
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CompanyMemberError, CompanyMemberResponse, CompanyRole, CreateCompanyMemberRequest, CreateCompanyMemberResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ManagedRole, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
 export type * from './apiTypes.js';
 
-type AuthContext = { uid: string } | undefined;
+type AuthContext = { uid: string; token?: Record<string, unknown> } | undefined;
 type MemberDoc = { uid: string; companyId?: string; name?: string; email?: string; role?: CompanyRole; status?: string; workerId?: string; phone?: string };
 type Deps = { db: FirebaseFirestore.Firestore; auth: Auth; emulator?: boolean };
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,22 +21,23 @@ export const canManageCompanyMember = (actorRole: CompanyRole, targetRole: Compa
 export class CompanyMemberService {
   constructor(private readonly deps: Deps) {}
 
-  private async caller(auth: AuthContext): Promise<{ company: FirebaseFirestore.DocumentSnapshot; member: FirebaseFirestore.QueryDocumentSnapshot } | CompanyMemberResponse> {
+  private async caller(auth: AuthContext): Promise<{ company: FirebaseFirestore.DocumentSnapshot; member: FirebaseFirestore.DocumentSnapshot } | CompanyMemberResponse> {
     if (!auth?.uid) return fail('UNAUTHORIZED', 'يجب تسجيل الدخول أولاً.');
-    const matches = await this.deps.db.collectionGroup('members').where('uid', '==', auth.uid).get();
-    const active = matches.docs.filter(doc => doc.data().status === 'active');
-    if (active.length !== 1) return fail('UNAUTHORIZED', 'عضوية الشركة غير صالحة أو غير مفعلة.');
-    const member = active[0]; const companyRef = member.ref.parent.parent;
-    if (!companyRef) return fail('UNAUTHORIZED', 'عضوية الشركة غير صالحة.');
+    const companyId = typeof auth.token?.companyId === 'string' ? auth.token.companyId : '';
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId)) return fail('UNAUTHORIZED', 'عضوية الشركة غير صالحة أو غير مفعلة.');
+    const companyRef = this.deps.db.collection('companies').doc(companyId);
+    const member = await companyRef.collection('members').doc(auth.uid).get();
+    const memberData = member.data();
+    if (!member.exists || memberData?.uid !== auth.uid || memberData?.companyId !== companyId || memberData?.status !== 'active') return fail('UNAUTHORIZED', 'عضوية الشركة غير صالحة أو غير مفعلة.');
     const company = await companyRef.get();
     if (!company.exists) return fail('COMPANY_NOT_FOUND', 'الشركة غير موجودة.');
     if (!['active', 'trial'].includes(String(company.data()?.status))) return fail('COMPANY_INACTIVE', 'حالة الشركة لا تسمح بإدارة الأعضاء.');
     return { company, member };
   }
-  private async authorize(auth: AuthContext): Promise<{ company: FirebaseFirestore.DocumentSnapshot; member: FirebaseFirestore.QueryDocumentSnapshot } | CompanyMemberResponse> {
+  private async authorize(auth: AuthContext): Promise<{ company: FirebaseFirestore.DocumentSnapshot; member: FirebaseFirestore.DocumentSnapshot } | CompanyMemberResponse> {
     const context = await this.caller(auth);
     if ('success' in context) return context;
-    if (!hasMemberWritePermission(context.member.data().role as CompanyRole)) return fail('FORBIDDEN', 'ليس لديك صلاحية إدارة أعضاء الشركة.');
+    if (!hasMemberWritePermission(context.member.data()?.role as CompanyRole)) return fail('FORBIDDEN', 'ليس لديك صلاحية إدارة أعضاء الشركة.');
     return context;
   }
   private async rateLimit(companyId: string, actor: string, action: string): Promise<CompanyMemberResponse | null> {
