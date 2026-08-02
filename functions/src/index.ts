@@ -238,5 +238,7 @@ export const reactivateCompanyMember = onCall(memberFunctionOptions, (request: M
 export const sendCompanyMemberPasswordReset = onCall(memberFunctionOptions, (request: MemberRequest): Promise<SendCompanyMemberPasswordResetResponse> => memberService.passwordReset(request.data as SendCompanyMemberPasswordResetRequest, request.auth));
 export const resetWorkerLoginCode = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ResetWorkerLoginCodeResponse> => memberService.resetWorkerCode(request.data as ResetWorkerLoginCodeRequest, request.auth));
 export const deleteCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DeleteCompanyMemberResponse> => memberService.deleteMember(request.data as DeleteCompanyMemberRequest, request.auth));
-export const deleteWorker = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DeleteWorkerResponse> => memberService.deleteWorker(request.data as DeleteWorkerRequest, request.auth));
+// Render does not currently provide an App Check token. The service still
+// requires Firebase Auth, an active membership, and a permitted manager role.
+export const deleteWorker = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<DeleteWorkerResponse> => memberService.deleteWorker(request.data as DeleteWorkerRequest, request.auth));
 export const updateOwnCompanyProfile = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<UpdateOwnCompanyProfileResponse> => memberService.updateOwnProfile(request.data as UpdateOwnCompanyProfileRequest, request.auth));
