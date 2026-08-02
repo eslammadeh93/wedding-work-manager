@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
@@ -13,7 +13,7 @@ import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { LoginPage } from './components/auth/LoginPage';
 
-import { Menu, Crown, Loader2, Moon, Sun } from 'lucide-react';
+import { Menu, Crown, Loader2 } from 'lucide-react';
 
 // Load each workspace only when it is opened. This keeps PDF/Excel and other
 // heavy feature code out of the application's initial download.
@@ -40,16 +40,11 @@ function UnauthorizedCompanyMembers() {
 }
 
 /** Kept outside the legacy tree so platform code is only requested after verification. */
-function PlatformThemeQuickToggle() {
-  const { darkMode, toggleDarkMode } = useTheme();
-  return <button type="button" onClick={toggleDarkMode} aria-label={darkMode ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'} title={darkMode ? 'الوضع الفاتح' : 'الوضع الداكن'} className="platform-theme-toggle fixed left-16 top-2.5 z-30 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700">{darkMode ? <Sun size={19}/> : <Moon size={19}/>}</button>;
-}
-
 function PlatformEntry() {
   const { user, authSession, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>;
   if (!user || authSession?.userType !== 'platform' || authSession.role !== 'platform_owner') return <UnauthorizedPlatform />;
-  return <PlatformRouteGuard fallback={<UnauthorizedPlatform />}><PlatformErrorBoundary><div className="platform-ui"><PlatformThemeQuickToggle/><Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>}><PlatformModule /></Suspense></div></PlatformErrorBoundary></PlatformRouteGuard>;
+  return <PlatformRouteGuard fallback={<UnauthorizedPlatform />}><PlatformErrorBoundary><div className="platform-ui"><Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>}><PlatformModule /></Suspense></div></PlatformErrorBoundary></PlatformRouteGuard>;
 }
 
 const getPageTitle = (tab: ActiveTab, lang: string): string => {

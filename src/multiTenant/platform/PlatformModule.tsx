@@ -1,79 +1,1243 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ChevronRight, CircleAlert, Crown, LogOut, Mail, Menu, Pencil, Plus, Users, X } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { companyManagementService, PlatformProvisioningUnavailableError } from './companyManagementService';
-import { daysUntil, formatPlatformDate, listPlatformCompanies, listPlatformCompanyMembers, platformDateInputValue, summarizeCompanies } from './platformService';
-import type { CreateAdditionalCompanyOwnerRequest, CreateCompanyRequest, PlatformCompany, PlatformCompanyMember, UpdateCompanyRequest } from './types';
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  ChevronRight,
+  Crown,
+  Mail,
+  Pencil,
+  Plus,
+  Users,
+  X,
+} from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
+import {
+  companyManagementService,
+  PlatformProvisioningUnavailableError,
+} from "./companyManagementService";
+import {
+  daysUntil,
+  formatPlatformDate,
+  listPlatformCompanies,
+  listPlatformCompanyMembers,
+  platformDateInputValue,
+  summarizeCompanies,
+} from "./platformService";
+import type {
+  CreateAdditionalCompanyOwnerRequest,
+  CreateCompanyRequest,
+  PlatformCompany,
+  PlatformCompanyMember,
+  UpdateCompanyRequest,
+} from "./types";
+import { PlatformLayout } from "./PlatformLayout";
+import { platformRouteForPath } from "./routes";
+import { PlatformPermissionGuard } from "./permissions/PlatformPermissionGuard";
+import { PlatformPageHeader } from "./shared/PlatformPageHeader";
+import { StatCard } from "./shared/StatCard";
+import { LoadingState } from "./shared/LoadingState";
+import { EmptyState } from "./shared/EmptyState";
+import { ErrorState } from "./shared/ErrorState";
+import { DataTable, type DataTableColumn } from "./shared/DataTable";
+import { FilterBar } from "./shared/FilterBar";
+import { Pagination } from "./shared/Pagination";
+import { PlatformButton } from "./shared/PlatformButton";
+import { PlatformSection } from "./shared/PlatformSection";
 
-type View = 'overview' | 'companies' | 'detail';
-const statusLabel: Record<string, string> = { active: 'نشطة', trial: 'تجريبية', past_due: 'متأخرة', expired: 'منتهية', suspended: 'موقوفة' };
-const statusClass: Record<string, string> = { active: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-100', trial: 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-white', past_due: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-100', expired: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-white', suspended: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-100' };
-const fieldClass = 'w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/25';
+type View = "overview" | "companies" | "detail" | "placeholder";
+const statusLabel: Record<string, string> = {
+  active: "نشطة",
+  trial: "تجريبية",
+  past_due: "متأخرة",
+  expired: "منتهية",
+  suspended: "موقوفة",
+};
+const statusClass: Record<string, string> = {
+  active:
+    "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-100",
+  trial: "bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-white",
+  past_due: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-100",
+  expired: "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-white",
+  suspended:
+    "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-100",
+};
+const fieldClass =
+  "w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/25";
 
 function usePlatformCompanies() {
   const [companies, setCompanies] = useState<PlatformCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const reload = async () => { setLoading(true); setError(null); try { setCompanies(await listPlatformCompanies()); } catch { setError('تعذر تحميل بيانات الشركات. حاول مرة أخرى.'); } finally { setLoading(false); } };
-  useEffect(() => { void reload(); }, []);
+  const reload = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setCompanies(await listPlatformCompanies());
+    } catch {
+      setError("تعذر تحميل بيانات الشركات. حاول مرة أخرى.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void reload();
+  }, []);
   return { companies, loading, error, reload };
 }
 
-function Empty({ text }: { text: string }) { return <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center text-sm text-slate-500">{text}</div>; }
-function Loading() { return <div className="p-10 text-center text-sm text-slate-500">جارٍ تحميل بيانات المنصة…</div>; }
-function Status({ status }: { status: string }) { return <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusClass[status] || 'bg-slate-100 text-slate-700'}`}>{statusLabel[status] || status}</span>; }
+function Status({ status }: { status: string }) {
+  return (
+    <span
+      className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusClass[status] || "bg-slate-100 text-slate-700"}`}
+    >
+      {statusLabel[status] || status}
+    </span>
+  );
+}
 
 function CreateCompanyForm({ close }: { close: () => void }) {
-  const [data, setData] = useState<CreateCompanyRequest>({ companyName: '', slug: '', ownerName: '', ownerEmail: '', ownerPassword: '', plan: 'basic', subscriptionStart: '', subscriptionEnd: '', maxUsers: 1, features: [], status: 'trial' });
-  const [errors, setErrors] = useState<Record<string, string>>({}); const [submitting, setSubmitting] = useState(false); const [message, setMessage] = useState<string | null>(null);
-  const update = (key: keyof CreateCompanyRequest, value: string | number) => setData((previous) => ({ ...previous, [key]: value }));
-  const submit = async (event: FormEvent) => { event.preventDefault(); const next: Record<string, string> = {}; if (!data.companyName.trim()) next.companyName = 'اسم الشركة مطلوب.'; if (!data.ownerName.trim()) next.ownerName = 'اسم المالك مطلوب.'; if (!/^\S+@\S+\.\S+$/.test(data.ownerEmail)) next.ownerEmail = 'أدخل بريدًا إلكترونيًا صالحًا.'; if (data.ownerPassword.length < 12) next.ownerPassword = 'كلمة مرور المالك يجب أن تكون 12 حرفاً على الأقل.'; if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.slug)) next.slug = 'استخدم حروفًا إنجليزية صغيرة وأرقامًا وشرطة فقط.'; if (!Number.isInteger(data.maxUsers) || data.maxUsers < 1) next.maxUsers = 'يجب أن يكون رقمًا صحيحًا أكبر من صفر.'; if (!data.subscriptionStart || !data.subscriptionEnd || data.subscriptionEnd < data.subscriptionStart) next.subscriptionEnd = 'تاريخ النهاية يجب ألا يسبق تاريخ البداية.'; setErrors(next); if (Object.keys(next).length) return; setSubmitting(true); setMessage(null); try { await companyManagementService.createCompanyWithOwner(data); setMessage('تم إنشاء الشركة بنجاح.'); } catch (error) { setMessage(error instanceof PlatformProvisioningUnavailableError ? error.message : 'تعذر إرسال الطلب.'); } finally { setSubmitting(false); } };
-  return <form onSubmit={submit} className="space-y-3" noValidate>{message && <p className="rounded-xl bg-amber-100 p-3 text-sm text-amber-900">{message}</p>}<div className="grid gap-3 sm:grid-cols-2">{([['companyName','اسم الشركة'],['slug','المعرّف slug'],['ownerName','اسم المالك'],['ownerEmail','بريد المالك'],['ownerPassword','كلمة مرور المالك']] as const).map(([key,label]) => <label key={key} className="text-sm font-bold">{label}<input className={fieldClass} type={key === 'ownerEmail' ? 'email' : key === 'ownerPassword' ? 'password' : 'text'} value={String(data[key])} onChange={(e) => update(key, e.target.value)} />{errors[key] && <small className="text-rose-600">{errors[key]}</small>}</label>)}<label className="text-sm font-bold">الباقة<select className={fieldClass} value={data.plan} onChange={(e) => update('plan', e.target.value)}><option value="basic">Basic</option><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select></label><label className="text-sm font-bold">الحالة<select className={fieldClass} value={data.status} onChange={(e) => update('status', e.target.value)}><option value="trial">تجريبية</option><option value="active">نشطة</option></select></label><label className="text-sm font-bold">بداية الاشتراك<input className={fieldClass} type="date" value={data.subscriptionStart} onChange={(e) => update('subscriptionStart', e.target.value)} /></label><label className="text-sm font-bold">نهاية الاشتراك<input className={fieldClass} type="date" value={data.subscriptionEnd} onChange={(e) => update('subscriptionEnd', e.target.value)} />{errors.subscriptionEnd && <small className="text-rose-600">{errors.subscriptionEnd}</small>}</label><label className="text-sm font-bold">الحد الأقصى للمستخدمين<input className={fieldClass} type="number" min="1" value={data.maxUsers} onChange={(e) => update('maxUsers', Number(e.target.value))} />{errors.maxUsers && <small className="text-rose-600">{errors.maxUsers}</small>}</label><label className="text-sm font-bold">المزايا (مفصولة بفاصلة)<input className={fieldClass} onChange={(e) => setData((p) => ({ ...p, features: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) }))} /></label></div><p className="text-xs text-slate-500">سيتم توليد رمز شركة رقمي فريد من 6 أرقام تلقائيًا.</p><div className="flex gap-2"><button disabled={submitting} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{submitting ? 'جارٍ الإرسال…' : 'إرسال طلب الإنشاء'}</button><button type="button" onClick={close} className="rounded-xl border px-4 py-2 text-sm">إلغاء</button></div></form>;
+  const [data, setData] = useState<CreateCompanyRequest>({
+    companyName: "",
+    slug: "",
+    ownerName: "",
+    ownerEmail: "",
+    ownerPassword: "",
+    plan: "basic",
+    subscriptionStart: "",
+    subscriptionEnd: "",
+    maxUsers: 1,
+    features: [],
+    status: "trial",
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const update = (key: keyof CreateCompanyRequest, value: string | number) =>
+    setData((previous) => ({ ...previous, [key]: value }));
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const next: Record<string, string> = {};
+    if (!data.companyName.trim()) next.companyName = "اسم الشركة مطلوب.";
+    if (!data.ownerName.trim()) next.ownerName = "اسم المالك مطلوب.";
+    if (!/^\S+@\S+\.\S+$/.test(data.ownerEmail))
+      next.ownerEmail = "أدخل بريدًا إلكترونيًا صالحًا.";
+    if (data.ownerPassword.length < 12)
+      next.ownerPassword = "كلمة مرور المالك يجب أن تكون 12 حرفاً على الأقل.";
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.slug))
+      next.slug = "استخدم حروفًا إنجليزية صغيرة وأرقامًا وشرطة فقط.";
+    if (!Number.isInteger(data.maxUsers) || data.maxUsers < 1)
+      next.maxUsers = "يجب أن يكون رقمًا صحيحًا أكبر من صفر.";
+    if (
+      !data.subscriptionStart ||
+      !data.subscriptionEnd ||
+      data.subscriptionEnd < data.subscriptionStart
+    )
+      next.subscriptionEnd = "تاريخ النهاية يجب ألا يسبق تاريخ البداية.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      await companyManagementService.createCompanyWithOwner(data);
+      setMessage("تم إنشاء الشركة بنجاح.");
+    } catch (error) {
+      setMessage(
+        error instanceof PlatformProvisioningUnavailableError
+          ? error.message
+          : "تعذر إرسال الطلب.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} className="space-y-3" noValidate>
+      {message && (
+        <p className="rounded-xl bg-amber-100 p-3 text-sm text-amber-900">
+          {message}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(
+          [
+            ["companyName", "اسم الشركة"],
+            ["slug", "المعرّف slug"],
+            ["ownerName", "اسم المالك"],
+            ["ownerEmail", "بريد المالك"],
+            ["ownerPassword", "كلمة مرور المالك"],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key} className="text-sm font-bold">
+            {label}
+            <input
+              className={fieldClass}
+              type={
+                key === "ownerEmail"
+                  ? "email"
+                  : key === "ownerPassword"
+                    ? "password"
+                    : "text"
+              }
+              value={String(data[key])}
+              onChange={(e) => update(key, e.target.value)}
+            />
+            {errors[key] && (
+              <small className="text-rose-600">{errors[key]}</small>
+            )}
+          </label>
+        ))}
+        <label className="text-sm font-bold">
+          الباقة
+          <select
+            className={fieldClass}
+            value={data.plan}
+            onChange={(e) => update("plan", e.target.value)}
+          >
+            <option value="basic">Basic</option>
+            <option value="pro">Pro</option>
+            <option value="enterprise">Enterprise</option>
+          </select>
+        </label>
+        <label className="text-sm font-bold">
+          الحالة
+          <select
+            className={fieldClass}
+            value={data.status}
+            onChange={(e) => update("status", e.target.value)}
+          >
+            <option value="trial">تجريبية</option>
+            <option value="active">نشطة</option>
+          </select>
+        </label>
+        <label className="text-sm font-bold">
+          بداية الاشتراك
+          <input
+            className={fieldClass}
+            type="date"
+            value={data.subscriptionStart}
+            onChange={(e) => update("subscriptionStart", e.target.value)}
+          />
+        </label>
+        <label className="text-sm font-bold">
+          نهاية الاشتراك
+          <input
+            className={fieldClass}
+            type="date"
+            value={data.subscriptionEnd}
+            onChange={(e) => update("subscriptionEnd", e.target.value)}
+          />
+          {errors.subscriptionEnd && (
+            <small className="text-rose-600">{errors.subscriptionEnd}</small>
+          )}
+        </label>
+        <label className="text-sm font-bold">
+          الحد الأقصى للمستخدمين
+          <input
+            className={fieldClass}
+            type="number"
+            min="1"
+            value={data.maxUsers}
+            onChange={(e) => update("maxUsers", Number(e.target.value))}
+          />
+          {errors.maxUsers && (
+            <small className="text-rose-600">{errors.maxUsers}</small>
+          )}
+        </label>
+        <label className="text-sm font-bold">
+          المزايا (مفصولة بفاصلة)
+          <input
+            className={fieldClass}
+            onChange={(e) =>
+              setData((p) => ({
+                ...p,
+                features: e.target.value
+                  .split(",")
+                  .map((x) => x.trim())
+                  .filter(Boolean),
+              }))
+            }
+          />
+        </label>
+      </div>
+      <p className="text-xs text-slate-500">
+        سيتم توليد رمز شركة رقمي فريد من 6 أرقام تلقائيًا.
+      </p>
+      <div className="flex gap-2">
+        <button
+          disabled={submitting}
+          className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+        >
+          {submitting ? "جارٍ الإرسال…" : "إرسال طلب الإنشاء"}
+        </button>
+        <button
+          type="button"
+          onClick={close}
+          className="rounded-xl border px-4 py-2 text-sm"
+        >
+          إلغاء
+        </button>
+      </div>
+    </form>
+  );
 }
 
 export function PlatformModule() {
-  const { authSession, logout } = useAuth(); const { companies, loading, error, reload } = usePlatformCompanies();
-  const [path, setPath] = useState('/platform'); const [menu, setMenu] = useState(false); const [creating, setCreating] = useState(false);
-  const go = (target: string) => { setPath(target); setMenu(false); };
-  const view: View = path === '/platform/companies' ? 'companies' : path.startsWith('/platform/companies/') ? 'detail' : 'overview'; const companyId = view === 'detail' ? decodeURIComponent(path.split('/').pop() || '') : ''; const selected = companies.find((company) => company.id === companyId);
+  const { authSession, logout } = useAuth();
+  const { companies, loading, error, reload } = usePlatformCompanies();
+  const [path, setPath] = useState("/platform");
+  const [menu, setMenu] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const go = (target: string) => {
+    setPath(target);
+    setMenu(false);
+  };
+  const view: View =
+    path === "/platform/companies"
+      ? "companies"
+      : path.startsWith("/platform/companies/")
+        ? "detail"
+        : path === "/platform"
+          ? "overview"
+          : "placeholder";
+  const companyId =
+    view === "detail" ? decodeURIComponent(path.split("/").pop() || "") : "";
+  const selected = companies.find((company) => company.id === companyId);
   const overview = useMemo(() => summarizeCompanies(companies), [companies]);
-  const nav = <nav className="space-y-1"><button onClick={() => go('/platform')} className="w-full rounded-xl px-3 py-2 text-right text-sm hover:bg-amber-100 dark:hover:bg-slate-800">لوحة التحكم</button><button onClick={() => go('/platform/companies')} className="w-full rounded-xl px-3 py-2 text-right text-sm hover:bg-amber-100 dark:hover:bg-slate-800">الشركات</button></nav>;
-  const card = (label: string, value: number | null) => <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-2xl font-black text-amber-700">{value ?? 'غير متاح'}</p></div>;
-  return <div dir="rtl" className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100"><aside className="fixed inset-y-0 right-0 z-20 hidden w-64 border-l border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 lg:block"><div className="mb-8 flex items-center gap-2 font-black"><Crown className="text-amber-600" /> منصة الإدارة</div>{nav}</aside><header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900 lg:mr-64"><button onClick={() => setMenu(true)} className="lg:hidden"><Menu /></button><div><p className="font-bold">{authSession?.displayName || 'صاحب المنصة'}</p><p className="text-xs text-slate-500">platform_owner</p></div><button onClick={() => void logout()} className="flex items-center gap-2 text-sm text-rose-700"><LogOut size={17} />تسجيل الخروج</button></header>{menu && <div className="fixed inset-0 z-30 bg-slate-950/30 lg:hidden"><aside className="h-full w-72 bg-white p-5 dark:bg-slate-900"><button onClick={() => setMenu(false)} className="mb-6"><X /></button>{nav}</aside></div>}<main className="mx-auto max-w-7xl p-4 sm:p-6 lg:mr-64">{error ? <div className="rounded-2xl bg-rose-50 p-5 text-rose-800"><CircleAlert className="mb-2" />{error}<button onClick={() => void reload()} className="mr-3 underline">إعادة المحاولة</button></div> : loading ? <Loading /> : <>{view === 'overview' && <section><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-black">لوحة المنصة</h1><p className="text-sm text-slate-500">نظرة عامة على الاشتراكات والشركات.</p></div><button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white"><Plus size={17} />إنشاء شركة</button></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{card('إجمالي الشركات', overview.totalCompanies)}{card('الشركات النشطة', overview.activeCompanies)}{card('الشركات التجريبية', overview.trialCompanies)}{card('متأخرة في الدفع', overview.pastDueCompanies)}{card('المنتهية', overview.expiredCompanies)}{card('الموقوفة', overview.suspendedCompanies)}{card('إجمالي الأعضاء', overview.totalMembers)}{card('تنتهي قريبًا', overview.expiringSoonCompanies.length)}</div><section className="mt-7 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900"><h2 className="mb-4 font-black">الشركات القريبة من انتهاء الاشتراك</h2>{overview.expiringSoonCompanies.length === 0 ? <Empty text="لا توجد شركات قريبة من انتهاء الاشتراك." /> : <div className="space-y-2">{overview.expiringSoonCompanies.map((company) => <div key={company.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800"><span className="font-bold">{company.name}</span><span>{company.plan}</span><Status status={company.status} /><span>{formatPlatformDate(company.subscriptionEnd)}</span><span>{daysUntil(company.subscriptionEnd)} يوم</span><button onClick={() => go(`/platform/companies/${company.id}`)} className="text-amber-700">فتح التفاصيل <ChevronRight className="inline" size={16} /></button></div>)}</div>}</section></section>}{view === 'companies' && <Companies companies={companies} go={go} openCreate={() => setCreating(true)} />}{view === 'detail' && <CompanyDetail company={selected} back={() => go('/platform/companies')} />}</>}{creating && <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-950/40 p-4"><div className="mx-auto mt-8 max-w-2xl rounded-2xl bg-slate-50 p-5 shadow-xl dark:bg-slate-950"><div className="mb-4 flex justify-between"><h2 className="font-black">إنشاء شركة</h2><button onClick={() => setCreating(false)}><X /></button></div><CreateCompanyForm close={() => setCreating(false)} /></div></div>}</main></div>;
+  const route = platformRouteForPath(path);
+  return (
+    <PlatformLayout
+      currentPath={path}
+      displayName={authSession?.displayName || "صاحب المنصة"}
+      role={String(authSession?.role || "platform_owner")}
+      menuOpen={menu}
+      onMenuOpen={() => setMenu(true)}
+      onMenuClose={() => setMenu(false)}
+      onNavigate={go}
+      onLogout={() => void logout()}
+    >
+      {route ? (
+        <PlatformPermissionGuard
+          permission={route.permission}
+          fallback={<ErrorState message="لا تملك صلاحية فتح هذا القسم." />}
+        >
+          {error ? (
+            <ErrorState message={error} onRetry={() => void reload()} />
+          ) : loading ? (
+            <LoadingState text="جارٍ تحميل بيانات المنصة…" />
+          ) : (
+            <>
+              {view === "overview" && (
+                <section>
+                  <PlatformPageHeader
+                    title="لوحة المنصة"
+                    description="نظرة عامة على الاشتراكات والشركات."
+                    actions={
+                      <PlatformButton onClick={() => setCreating(true)}>
+                        <Plus size={17} />
+                        إنشاء شركة
+                      </PlatformButton>
+                    }
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatCard
+                      label="إجمالي الشركات"
+                      value={overview.totalCompanies}
+                    />
+                    <StatCard
+                      label="الشركات النشطة"
+                      value={overview.activeCompanies}
+                    />
+                    <StatCard
+                      label="الشركات التجريبية"
+                      value={overview.trialCompanies}
+                    />
+                    <StatCard
+                      label="متأخرة في الدفع"
+                      value={overview.pastDueCompanies}
+                    />
+                    <StatCard
+                      label="المنتهية"
+                      value={overview.expiredCompanies}
+                    />
+                    <StatCard
+                      label="الموقوفة"
+                      value={overview.suspendedCompanies}
+                    />
+                    <StatCard
+                      label="إجمالي الأعضاء"
+                      value={overview.totalMembers ?? "غير متاح"}
+                    />
+                    <StatCard
+                      label="تنتهي قريبًا"
+                      value={overview.expiringSoonCompanies.length}
+                    />
+                  </div>
+                  <PlatformSection className="mt-7">
+                    <h2 className="mb-4 font-black">
+                      الشركات القريبة من انتهاء الاشتراك
+                    </h2>
+                    {overview.expiringSoonCompanies.length === 0 ? (
+                      <EmptyState text="لا توجد شركات قريبة من انتهاء الاشتراك." />
+                    ) : (
+                      <div className="space-y-2">
+                        {overview.expiringSoonCompanies.map((company) => (
+                          <div
+                            key={company.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800"
+                          >
+                            <span className="font-bold">{company.name}</span>
+                            <span>{company.plan}</span>
+                            <Status status={company.status} />
+                            <span>
+                              {formatPlatformDate(company.subscriptionEnd)}
+                            </span>
+                            <span>
+                              {daysUntil(company.subscriptionEnd)} يوم
+                            </span>
+                            <button
+                              onClick={() =>
+                                go(`/platform/companies/${company.id}`)
+                              }
+                              className="text-amber-700"
+                            >
+                              فتح التفاصيل{" "}
+                              <ChevronRight className="inline" size={16} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </PlatformSection>
+                </section>
+              )}
+              {view === "companies" && (
+                <Companies
+                  companies={companies}
+                  go={go}
+                  openCreate={() => setCreating(true)}
+                />
+              )}
+              {view === "detail" && (
+                <CompanyDetail
+                  company={selected}
+                  back={() => go("/platform/companies")}
+                />
+              )}
+              {view === "placeholder" && (
+                <section>
+                  <PlatformPageHeader title={route.label} />
+                  <EmptyState text={`${route.label} — قريبًا`} />
+                </section>
+              )}
+            </>
+          )}
+        </PlatformPermissionGuard>
+      ) : (
+        <ErrorState message="المسار المطلوب غير موجود." />
+      )}
+      {creating && (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-950/40 p-4">
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl bg-slate-50 p-5 shadow-xl dark:bg-slate-950">
+            <div className="mb-4 flex justify-between">
+              <h2 className="font-black">إنشاء شركة</h2>
+              <button onClick={() => setCreating(false)}>
+                <X />
+              </button>
+            </div>
+            <CreateCompanyForm close={() => setCreating(false)} />
+          </div>
+        </div>
+      )}
+    </PlatformLayout>
+  );
 }
 
 function companyUpdateInitial(company: PlatformCompany): UpdateCompanyRequest {
-  return { companyId: company.id, name: company.name, slug: company.slug, companyCode: company.companyCode || '', ownerName: company.ownerName || '', ownerEmail: company.ownerEmail || '', plan: company.plan, status: company.status, subscriptionStart: platformDateInputValue(company.subscriptionStart), subscriptionEnd: platformDateInputValue(company.subscriptionEnd), maxUsers: company.maxUsers, features: company.features || [] };
+  return {
+    companyId: company.id,
+    name: company.name,
+    slug: company.slug,
+    companyCode: company.companyCode || "",
+    ownerName: company.ownerName || "",
+    ownerEmail: company.ownerEmail || "",
+    plan: company.plan,
+    status: company.status,
+    subscriptionStart: platformDateInputValue(company.subscriptionStart),
+    subscriptionEnd: platformDateInputValue(company.subscriptionEnd),
+    maxUsers: company.maxUsers,
+    features: company.features || [],
+  };
 }
 
-function Companies({ companies, go, openCreate }: { companies: PlatformCompany[]; go: (path: string) => void; openCreate: () => void }) {
-  const [search, setSearch] = useState(''); const [status, setStatus] = useState(''); const [plan, setPlan] = useState(''); const [sort, setSort] = useState('name');
-  const [localCompanies, setLocalCompanies] = useState(companies); const [editing, setEditing] = useState<PlatformCompany | null>(null); const [saving, setSaving] = useState(false); const [editError, setEditError] = useState(''); const [message, setMessage] = useState('');
+function Companies({
+  companies,
+  go,
+  openCreate,
+}: {
+  companies: PlatformCompany[];
+  go: (path: string) => void;
+  openCreate: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [plan, setPlan] = useState("");
+  const [sort, setSort] = useState("name");
+  const [localCompanies, setLocalCompanies] = useState(companies);
+  const [editing, setEditing] = useState<PlatformCompany | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [message, setMessage] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   useEffect(() => setLocalCompanies(companies), [companies]);
-  const filtered = localCompanies.filter((c) => (!search || [c.name,c.companyCode,c.slug].some((v) => v?.toLowerCase().includes(search.toLowerCase()))) && (!status || c.status === status) && (!plan || c.plan === plan)).sort((a,b) => sort === 'name' ? a.name.localeCompare(b.name) : String(sort === 'createdAt' ? b.createdAt : b.subscriptionEnd).localeCompare(String(sort === 'createdAt' ? a.createdAt : a.subscriptionEnd)));
-  const save = async (next: UpdateCompanyRequest) => { setSaving(true); setEditError(''); try { await companyManagementService.updateCompany(next); setLocalCompanies(current => current.map(company => company.id === next.companyId ? { ...company, ...next } : company)); setEditing(null); setMessage('تم تحديث الشركة بنجاح.'); } catch (error) { setEditError(error instanceof Error ? error.message : 'تعذر تحديث الشركة.'); } finally { setSaving(false); } };
-  return <section><div className="mb-5 flex flex-wrap justify-between gap-3"><h1 className="text-2xl font-black">الشركات</h1><button onClick={openCreate} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white">إنشاء شركة</button></div>{message && <p className="mb-4 rounded-xl bg-emerald-100 p-3 text-emerald-800">{message}</p>}<div className="mb-4 grid gap-2 sm:grid-cols-4"><input className={fieldClass} placeholder="بحث بالاسم أو الرمز أو slug" value={search} onChange={(e) => setSearch(e.target.value)} /><select className={fieldClass} value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option>{Object.entries(statusLabel).map(([key,value]) => <option key={key} value={key}>{value}</option>)}</select><select className={fieldClass} value={plan} onChange={(e) => setPlan(e.target.value)}><option value="">كل الباقات</option>{[...new Set(localCompanies.map((c) => c.plan))].map((x) => <option key={x}>{x}</option>)}</select><select className={fieldClass} value={sort} onChange={(e) => setSort(e.target.value)}><option value="name">الاسم</option><option value="createdAt">تاريخ الإنشاء</option><option value="subscriptionEnd">نهاية الاشتراك</option></select></div>{filtered.length === 0 ? <Empty text="لا توجد شركات مطابقة." /> : <div className="overflow-x-auto rounded-2xl bg-white shadow-sm dark:bg-slate-900"><table className="w-full min-w-[900px] text-right text-sm"><thead className="bg-slate-100 text-xs dark:bg-slate-800"><tr>{['الشركة','الرمز / slug','الباقة','الحالة','البداية','النهاية','maxUsers','الأعضاء','الإنشاء','الإجراءات'].map((x) => <th key={x} className="p-3">{x}</th>)}</tr></thead><tbody>{filtered.map((c) => <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800 hover:bg-amber-50/60 dark:hover:bg-slate-800/60"><td className="p-3 font-bold"><button onClick={() => go(`/platform/companies/${c.id}`)} className="text-right text-amber-700 hover:underline">{c.name}</button></td><td className="p-3">{c.companyCode}<br/><small>{c.slug}</small></td><td className="p-3">{c.plan}</td><td className="p-3"><Status status={c.status} /></td><td className="p-3">{formatPlatformDate(c.subscriptionStart)}</td><td className="p-3">{formatPlatformDate(c.subscriptionEnd)}</td><td className="p-3">{c.maxUsers}</td><td className="p-3">{c.memberCount ?? 'غير متاح'}</td><td className="p-3">{formatPlatformDate(c.createdAt)}</td><td className="p-3"><div className="flex gap-3"><button onClick={() => { setEditing(c); setEditError(''); }} className="flex items-center gap-1 font-bold text-amber-700"><Pencil size={14}/>تعديل</button><button onClick={() => go(`/platform/companies/${c.id}`)} className="text-slate-600">تفاصيل</button></div></td></tr>)}</tbody></table></div>}{editing && <CompanyEditModal company={editing} initial={companyUpdateInitial(editing)} saving={saving} error={editError} close={() => !saving && setEditing(null)} save={save} />}</section>;
+  const filtered = localCompanies
+    .filter(
+      (c) =>
+        (!search ||
+          [c.name, c.companyCode, c.slug].some((v) =>
+            v?.toLowerCase().includes(search.toLowerCase()),
+          )) &&
+        (!status || c.status === status) &&
+        (!plan || c.plan === plan),
+    )
+    .sort((a, b) =>
+      sort === "name"
+        ? a.name.localeCompare(b.name)
+        : String(
+            sort === "createdAt" ? b.createdAt : b.subscriptionEnd,
+          ).localeCompare(
+            String(sort === "createdAt" ? a.createdAt : a.subscriptionEnd),
+          ),
+    );
+  useEffect(() => setPage(1), [search, status, plan, sort]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pagedCompanies = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const save = async (next: UpdateCompanyRequest) => {
+    setSaving(true);
+    setEditError("");
+    try {
+      await companyManagementService.updateCompany(next);
+      setLocalCompanies((current) =>
+        current.map((company) =>
+          company.id === next.companyId ? { ...company, ...next } : company,
+        ),
+      );
+      setEditing(null);
+      setMessage("تم تحديث الشركة بنجاح.");
+    } catch (error) {
+      setEditError(
+        error instanceof Error ? error.message : "تعذر تحديث الشركة.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  const columns: readonly DataTableColumn<PlatformCompany>[] = [
+    {
+      key: "company",
+      header: "الشركة",
+      className: "font-bold",
+      render: (company) => (
+        <button
+          onClick={() => go(`/platform/companies/${company.id}`)}
+          className="text-right text-amber-700 hover:underline"
+        >
+          {company.name}
+        </button>
+      ),
+    },
+    {
+      key: "identity",
+      header: "الرمز / slug",
+      render: (company) => (
+        <>
+          {company.companyCode}
+          <br />
+          <small>{company.slug}</small>
+        </>
+      ),
+    },
+    { key: "plan", header: "الباقة", render: (company) => company.plan },
+    {
+      key: "status",
+      header: "الحالة",
+      render: (company) => <Status status={company.status} />,
+    },
+    {
+      key: "start",
+      header: "البداية",
+      render: (company) => formatPlatformDate(company.subscriptionStart),
+    },
+    {
+      key: "end",
+      header: "النهاية",
+      render: (company) => formatPlatformDate(company.subscriptionEnd),
+    },
+    {
+      key: "maxUsers",
+      header: "maxUsers",
+      render: (company) => company.maxUsers,
+    },
+    {
+      key: "members",
+      header: "الأعضاء",
+      render: (company) => company.memberCount ?? "غير متاح",
+    },
+    {
+      key: "created",
+      header: "الإنشاء",
+      render: (company) => formatPlatformDate(company.createdAt),
+    },
+    {
+      key: "actions",
+      header: "الإجراءات",
+      render: (company) => (
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              setEditing(company);
+              setEditError("");
+            }}
+            className="flex items-center gap-1 font-bold text-amber-700"
+          >
+            <Pencil size={14} />
+            تعديل
+          </button>
+          <button
+            onClick={() => go(`/platform/companies/${company.id}`)}
+            className="text-slate-600"
+          >
+            تفاصيل
+          </button>
+        </div>
+      ),
+    },
+  ];
+  return (
+    <section>
+      <PlatformPageHeader
+        title="الشركات"
+        actions={
+          <PlatformButton onClick={openCreate}>إنشاء شركة</PlatformButton>
+        }
+      />
+      {message && (
+        <p className="mb-4 rounded-xl bg-emerald-100 p-3 text-emerald-800">
+          {message}
+        </p>
+      )}
+      <FilterBar>
+        <input
+          className={fieldClass}
+          placeholder="بحث بالاسم أو الرمز أو slug"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select
+          className={fieldClass}
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="">كل الحالات</option>
+          {Object.entries(statusLabel).map(([key, value]) => (
+            <option key={key} value={key}>
+              {value}
+            </option>
+          ))}
+        </select>
+        <select
+          className={fieldClass}
+          value={plan}
+          onChange={(e) => setPlan(e.target.value)}
+        >
+          <option value="">كل الباقات</option>
+          {[...new Set(localCompanies.map((c) => c.plan))].map((x) => (
+            <option key={x}>{x}</option>
+          ))}
+        </select>
+        <select
+          className={fieldClass}
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+        >
+          <option value="name">الاسم</option>
+          <option value="createdAt">تاريخ الإنشاء</option>
+          <option value="subscriptionEnd">نهاية الاشتراك</option>
+        </select>
+      </FilterBar>
+      {filtered.length === 0 ? (
+        <EmptyState text="لا توجد شركات مطابقة." />
+      ) : (
+        <>
+          <DataTable
+            rows={pagedCompanies}
+            columns={columns}
+            rowKey={(company) => company.id}
+          />
+          <Pagination
+            page={page}
+            pageCount={pageCount}
+            onPageChange={setPage}
+          />
+        </>
+      )}
+      {editing && (
+        <CompanyEditModal
+          company={editing}
+          initial={companyUpdateInitial(editing)}
+          saving={saving}
+          error={editError}
+          close={() => !saving && setEditing(null)}
+          save={save}
+        />
+      )}
+    </section>
+  );
 }
-function CompanyDetail({ company, back }: { company?: PlatformCompany; back: () => void }) {
-  const [current, setCurrent] = useState(company); const [editing, setEditing] = useState(false); const [addingOwner, setAddingOwner] = useState(false); const [saving, setSaving] = useState(false); const [message, setMessage] = useState(''); const [error, setError] = useState('');
-  const [tab, setTab] = useState<'details' | 'accounts'>('details'); const [members, setMembers] = useState<PlatformCompanyMember[]>([]); const [membersLoading, setMembersLoading] = useState(false); const [membersError, setMembersError] = useState('');
+function CompanyDetail({
+  company,
+  back,
+}: {
+  company?: PlatformCompany;
+  back: () => void;
+}) {
+  const [current, setCurrent] = useState(company);
+  const [editing, setEditing] = useState(false);
+  const [addingOwner, setAddingOwner] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<"details" | "accounts">("details");
+  const [members, setMembers] = useState<PlatformCompanyMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState("");
   useEffect(() => setCurrent(company), [company]);
-  const loadMembers = async () => { if (!company?.id) return; setMembersLoading(true); setMembersError(''); try { setMembers(await listPlatformCompanyMembers(company.id)); } catch { setMembersError('تعذر تحميل حسابات الشركة. تأكد من نشر قواعد Firestore الجديدة.'); } finally { setMembersLoading(false); } };
-  useEffect(() => { if (tab === 'accounts') void loadMembers(); }, [tab, company?.id]);
-  if (!current) return <section><button onClick={back} className="mb-4 text-amber-700">العودة للشركات</button><Empty text="لم يتم العثور على الشركة المطلوبة." /></section>;
-  const value = (input: unknown) => input === undefined || input === null || input === '' ? 'غير متوفر' : String(input);
-  const items: [string, unknown][] = [['رمز الشركة',current.companyCode],['Slug',current.slug],['اسم المالك',current.ownerName],['بريد المالك',current.ownerEmail],['الباقة',current.plan],['الحالة',current.status],['بداية الاشتراك',formatPlatformDate(current.subscriptionStart)],['نهاية الاشتراك',formatPlatformDate(current.subscriptionEnd)],['maxUsers',current.maxUsers],['عدد الأعضاء',current.memberCount ?? 'غير متوفر'],['تاريخ الإنشاء',formatPlatformDate(current.createdAt)],['أنشأ بواسطة',current.createdBy || 'غير متوفر'],['المزايا',current.features?.join('، ') || 'غير متوفر']];
+  const loadMembers = async () => {
+    if (!company?.id) return;
+    setMembersLoading(true);
+    setMembersError("");
+    try {
+      setMembers(await listPlatformCompanyMembers(company.id));
+    } catch {
+      setMembersError(
+        "تعذر تحميل حسابات الشركة. تأكد من نشر قواعد Firestore الجديدة.",
+      );
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (tab === "accounts") void loadMembers();
+  }, [tab, company?.id]);
+  if (!current)
+    return (
+      <section>
+        <button onClick={back} className="mb-4 text-amber-700">
+          العودة للشركات
+        </button>
+        <EmptyState text="لم يتم العثور على الشركة المطلوبة." />
+      </section>
+    );
+  const value = (input: unknown) =>
+    input === undefined || input === null || input === ""
+      ? "غير متوفر"
+      : String(input);
+  const items: [string, unknown][] = [
+    ["رمز الشركة", current.companyCode],
+    ["Slug", current.slug],
+    ["اسم المالك", current.ownerName],
+    ["بريد المالك", current.ownerEmail],
+    ["الباقة", current.plan],
+    ["الحالة", current.status],
+    ["بداية الاشتراك", formatPlatformDate(current.subscriptionStart)],
+    ["نهاية الاشتراك", formatPlatformDate(current.subscriptionEnd)],
+    ["maxUsers", current.maxUsers],
+    ["عدد الأعضاء", current.memberCount ?? "غير متوفر"],
+    ["تاريخ الإنشاء", formatPlatformDate(current.createdAt)],
+    ["أنشأ بواسطة", current.createdBy || "غير متوفر"],
+    ["المزايا", current.features?.join("، ") || "غير متوفر"],
+  ];
   const initial = companyUpdateInitial(current);
-  return <section><button onClick={back} className="mb-4 text-amber-700">العودة للشركات</button><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h1 className="text-2xl font-black">{current.name}</h1><div className="flex flex-wrap gap-2"><button onClick={() => { setAddingOwner(true); setError(''); }} className="flex items-center gap-2 rounded-xl border border-amber-600 px-4 py-2 text-sm font-bold text-amber-700"><Crown size={16}/>إضافة شريك كصاحب مشروع</button><button onClick={() => { setEditing(true); setError(''); }} className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white"><Pencil size={16}/>تعديل كل بيانات الشركة</button></div></div>{message && <p className="mb-4 rounded-xl bg-emerald-100 p-3 text-emerald-800">{message}</p>}<div className="mb-5 flex gap-2 rounded-2xl bg-slate-200/70 p-1.5 dark:bg-slate-900"><button onClick={() => setTab('details')} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${tab === 'details' ? 'bg-white text-amber-700 shadow-sm dark:bg-slate-800' : 'text-slate-500'}`}><Pencil size={16}/>البيانات الأساسية</button><button onClick={() => setTab('accounts')} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${tab === 'accounts' ? 'bg-white text-amber-700 shadow-sm dark:bg-slate-800' : 'text-slate-500'}`}><Users size={16}/>حسابات وإيميلات الشركة</button></div>{tab === 'details' ? <div className="grid gap-3 sm:grid-cols-2">{items.map(([label,item]) => <div key={label} className="rounded-xl bg-white p-4 shadow-sm dark:bg-slate-900"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 font-bold">{label === 'الحالة' ? <Status status={String(item)} /> : value(item)}</p></div>)}</div> : <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">{membersLoading ? <Loading/> : membersError ? <div className="rounded-xl bg-rose-50 p-4 text-rose-700">{membersError}<button onClick={() => void loadMembers()} className="mr-3 underline">إعادة المحاولة</button></div> : members.length === 0 ? <Empty text="لا توجد حسابات مسجلة لهذه الشركة."/> : <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-right text-sm"><thead className="bg-slate-100 text-xs dark:bg-slate-800"><tr><th className="p-3">الاسم</th><th className="p-3">البريد الإلكتروني</th><th className="p-3">الصلاحية</th><th className="p-3">الحالة</th><th className="p-3">الهاتف</th><th className="p-3">تاريخ الإنشاء</th></tr></thead><tbody>{members.map(member => <tr key={member.uid} className="border-t border-slate-100 dark:border-slate-800"><td className="p-3 font-bold">{member.name || '—'}</td><td className="p-3"><span className="flex items-center gap-2" dir="ltr"><Mail size={15} className="text-amber-600"/>{member.email || 'بدون بريد (عامل)'}</span></td><td className="p-3">{member.role}</td><td className="p-3">{member.status}</td><td className="p-3" dir="ltr">{member.phone || '—'}</td><td className="p-3">{formatPlatformDate(member.createdAt)}</td></tr>)}</tbody></table></div>}</div>}{editing && <CompanyEditModal company={current} initial={initial} saving={saving} error={error} close={() => !saving && setEditing(false)} save={async (next) => { setSaving(true); setError(''); try { await companyManagementService.updateCompany(next); setCurrent({ ...current, ...next }); setMessage('تم تحديث الشركة بنجاح.'); setEditing(false); } catch (failure) { setError(failure instanceof Error ? failure.message : 'تعذر تحديث الشركة.'); } finally { setSaving(false); } }} />}{addingOwner && <AdditionalOwnerModal companyId={current.id} close={() => setAddingOwner(false)} saved={() => { setAddingOwner(false); setMessage('تم إنشاء حساب الشريك بصلاحية صاحب المشروع.'); setCurrent({ ...current, memberCount: (current.memberCount || 0) + 1 }); if (tab === 'accounts') void loadMembers(); }} />}</section>;
+  return (
+    <section>
+      <button onClick={back} className="mb-4 text-amber-700">
+        العودة للشركات
+      </button>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-black">{current.name}</h1>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              setAddingOwner(true);
+              setError("");
+            }}
+            className="flex items-center gap-2 rounded-xl border border-amber-600 px-4 py-2 text-sm font-bold text-amber-700"
+          >
+            <Crown size={16} />
+            إضافة شريك كصاحب مشروع
+          </button>
+          <button
+            onClick={() => {
+              setEditing(true);
+              setError("");
+            }}
+            className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white"
+          >
+            <Pencil size={16} />
+            تعديل كل بيانات الشركة
+          </button>
+        </div>
+      </div>
+      {message && (
+        <p className="mb-4 rounded-xl bg-emerald-100 p-3 text-emerald-800">
+          {message}
+        </p>
+      )}
+      <div className="mb-5 flex gap-2 rounded-2xl bg-slate-200/70 p-1.5 dark:bg-slate-900">
+        <button
+          onClick={() => setTab("details")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${tab === "details" ? "bg-white text-amber-700 shadow-sm dark:bg-slate-800" : "text-slate-500"}`}
+        >
+          <Pencil size={16} />
+          البيانات الأساسية
+        </button>
+        <button
+          onClick={() => setTab("accounts")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${tab === "accounts" ? "bg-white text-amber-700 shadow-sm dark:bg-slate-800" : "text-slate-500"}`}
+        >
+          <Users size={16} />
+          حسابات وإيميلات الشركة
+        </button>
+      </div>
+      {tab === "details" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {items.map(([label, item]) => (
+            <div
+              key={label}
+              className="rounded-xl bg-white p-4 shadow-sm dark:bg-slate-900"
+            >
+              <p className="text-xs text-slate-500">{label}</p>
+              <p className="mt-1 font-bold">
+                {label === "الحالة" ? (
+                  <Status status={String(item)} />
+                ) : (
+                  value(item)
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl bg-white p-4 shadow-sm dark:bg-slate-900">
+          {membersLoading ? (
+            <LoadingState />
+          ) : membersError ? (
+            <div className="rounded-xl bg-rose-50 p-4 text-rose-700">
+              {membersError}
+              <button
+                onClick={() => void loadMembers()}
+                className="mr-3 underline"
+              >
+                إعادة المحاولة
+              </button>
+            </div>
+          ) : members.length === 0 ? (
+            <EmptyState text="لا توجد حسابات مسجلة لهذه الشركة." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[650px] text-right text-sm">
+                <thead className="bg-slate-100 text-xs dark:bg-slate-800">
+                  <tr>
+                    <th className="p-3">الاسم</th>
+                    <th className="p-3">البريد الإلكتروني</th>
+                    <th className="p-3">الصلاحية</th>
+                    <th className="p-3">الحالة</th>
+                    <th className="p-3">الهاتف</th>
+                    <th className="p-3">تاريخ الإنشاء</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map((member) => (
+                    <tr
+                      key={member.uid}
+                      className="border-t border-slate-100 dark:border-slate-800"
+                    >
+                      <td className="p-3 font-bold">{member.name || "—"}</td>
+                      <td className="p-3">
+                        <span className="flex items-center gap-2" dir="ltr">
+                          <Mail size={15} className="text-amber-600" />
+                          {member.email || "بدون بريد (عامل)"}
+                        </span>
+                      </td>
+                      <td className="p-3">{member.role}</td>
+                      <td className="p-3">{member.status}</td>
+                      <td className="p-3" dir="ltr">
+                        {member.phone || "—"}
+                      </td>
+                      <td className="p-3">
+                        {formatPlatformDate(member.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {editing && (
+        <CompanyEditModal
+          company={current}
+          initial={initial}
+          saving={saving}
+          error={error}
+          close={() => !saving && setEditing(false)}
+          save={async (next) => {
+            setSaving(true);
+            setError("");
+            try {
+              await companyManagementService.updateCompany(next);
+              setCurrent({ ...current, ...next });
+              setMessage("تم تحديث الشركة بنجاح.");
+              setEditing(false);
+            } catch (failure) {
+              setError(
+                failure instanceof Error
+                  ? failure.message
+                  : "تعذر تحديث الشركة.",
+              );
+            } finally {
+              setSaving(false);
+            }
+          }}
+        />
+      )}
+      {addingOwner && (
+        <AdditionalOwnerModal
+          companyId={current.id}
+          close={() => setAddingOwner(false)}
+          saved={() => {
+            setAddingOwner(false);
+            setMessage("تم إنشاء حساب الشريك بصلاحية صاحب المشروع.");
+            setCurrent({
+              ...current,
+              memberCount: (current.memberCount || 0) + 1,
+            });
+            if (tab === "accounts") void loadMembers();
+          }}
+        />
+      )}
+    </section>
+  );
 }
 
-function AdditionalOwnerModal({ companyId, close, saved }: { companyId: string; close: () => void; saved: () => void }) {
-  const [form, setForm] = useState<CreateAdditionalCompanyOwnerRequest>({ companyId, name: '', email: '', temporaryPassword: '' }); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
-  const submit = async (event: FormEvent) => { event.preventDefault(); setError(''); if (form.name.trim().length < 2 || !/^\S+@\S+\.\S+$/.test(form.email) || form.temporaryPassword.length < 12) { setError('أدخل الاسم والبريد وكلمة مرور مؤقتة من 12 حرفًا على الأقل.'); return; } setSaving(true); try { await companyManagementService.createAdditionalOwner(form); saved(); } catch (failure) { setError(failure instanceof Error ? failure.message : 'تعذر إنشاء حساب الشريك.'); } finally { setSaving(false); } };
-  return <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-950/50 p-4"><form onSubmit={submit} className="mx-auto mt-16 max-w-lg space-y-4 rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><div className="flex justify-between"><div><h2 className="font-black">إضافة شريك كصاحب مشروع</h2><p className="mt-1 text-xs text-slate-500">سيحصل الحساب على نفس صلاحية صاحب المشروع داخل هذه الشركة فقط.</p></div><button type="button" onClick={close}><X/></button></div><label className="block text-sm font-bold">اسم الشريك<input className={fieldClass} value={form.name} onChange={e => setForm(previous => ({ ...previous, name: e.target.value }))} required /></label><label className="block text-sm font-bold">البريد الإلكتروني<input type="email" className={fieldClass} value={form.email} onChange={e => setForm(previous => ({ ...previous, email: e.target.value }))} required /></label><label className="block text-sm font-bold">كلمة مرور مؤقتة<input type="password" minLength={12} className={fieldClass} value={form.temporaryPassword} onChange={e => setForm(previous => ({ ...previous, temporaryPassword: e.target.value }))} required /><small className="font-normal text-slate-500">لا تُخزّن في Firestore ولا تظهر بعد الإنشاء.</small></label>{error && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}<div className="flex gap-2"><button disabled={saving} className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white disabled:opacity-50">{saving ? 'جارٍ الإنشاء…' : 'إنشاء حساب الشريك'}</button><button type="button" onClick={close} className="rounded-xl border px-4 py-2">إلغاء</button></div></form></div>;
+function AdditionalOwnerModal({
+  companyId,
+  close,
+  saved,
+}: {
+  companyId: string;
+  close: () => void;
+  saved: () => void;
+}) {
+  const [form, setForm] = useState<CreateAdditionalCompanyOwnerRequest>({
+    companyId,
+    name: "",
+    email: "",
+    temporaryPassword: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (
+      form.name.trim().length < 2 ||
+      !/^\S+@\S+\.\S+$/.test(form.email) ||
+      form.temporaryPassword.length < 12
+    ) {
+      setError("أدخل الاسم والبريد وكلمة مرور مؤقتة من 12 حرفًا على الأقل.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await companyManagementService.createAdditionalOwner(form);
+      saved();
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : "تعذر إنشاء حساب الشريك.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-950/50 p-4">
+      <form
+        onSubmit={submit}
+        className="mx-auto mt-16 max-w-lg space-y-4 rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"
+      >
+        <div className="flex justify-between">
+          <div>
+            <h2 className="font-black">إضافة شريك كصاحب مشروع</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              سيحصل الحساب على نفس صلاحية صاحب المشروع داخل هذه الشركة فقط.
+            </p>
+          </div>
+          <button type="button" onClick={close}>
+            <X />
+          </button>
+        </div>
+        <label className="block text-sm font-bold">
+          اسم الشريك
+          <input
+            className={fieldClass}
+            value={form.name}
+            onChange={(e) =>
+              setForm((previous) => ({ ...previous, name: e.target.value }))
+            }
+            required
+          />
+        </label>
+        <label className="block text-sm font-bold">
+          البريد الإلكتروني
+          <input
+            type="email"
+            className={fieldClass}
+            value={form.email}
+            onChange={(e) =>
+              setForm((previous) => ({ ...previous, email: e.target.value }))
+            }
+            required
+          />
+        </label>
+        <label className="block text-sm font-bold">
+          كلمة مرور مؤقتة
+          <input
+            type="password"
+            minLength={12}
+            className={fieldClass}
+            value={form.temporaryPassword}
+            onChange={(e) =>
+              setForm((previous) => ({
+                ...previous,
+                temporaryPassword: e.target.value,
+              }))
+            }
+            required
+          />
+          <small className="font-normal text-slate-500">
+            لا تُخزّن في Firestore ولا تظهر بعد الإنشاء.
+          </small>
+        </label>
+        {error && (
+          <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <button
+            disabled={saving}
+            className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white disabled:opacity-50"
+          >
+            {saving ? "جارٍ الإنشاء…" : "إنشاء حساب الشريك"}
+          </button>
+          <button
+            type="button"
+            onClick={close}
+            className="rounded-xl border px-4 py-2"
+          >
+            إلغاء
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
-function CompanyEditModal({ company, initial, saving, error, close, save }: { company: PlatformCompany; initial: UpdateCompanyRequest; saving: boolean; error: string; close: () => void; save: (data: UpdateCompanyRequest) => Promise<void> }) {
-  const [form, setForm] = useState(initial); const update = <K extends keyof UpdateCompanyRequest>(key: K, value: UpdateCompanyRequest[K]) => setForm(previous => ({ ...previous, [key]: value }));
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-4"><form onSubmit={(event) => { event.preventDefault(); void save(form); }} className="mx-auto mt-8 max-w-2xl space-y-3 rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><div className="flex justify-between"><h2 className="font-black">تعديل الشركة</h2><button type="button" onClick={close}><X/></button></div><div className="grid gap-3 sm:grid-cols-2"><label>اسم الشركة<input className={fieldClass} value={form.name} onChange={e => update('name', e.target.value)} required /></label><label>Slug<input className={fieldClass} value={form.slug} onChange={e => update('slug', e.target.value.toLowerCase())} required /></label><label className="font-bold text-amber-600">كود الشركة (6 أرقام)<input className={`${fieldClass} border-amber-500`} inputMode="numeric" pattern="\d{6}" maxLength={6} placeholder="100001" value={form.companyCode} onChange={e => update('companyCode', e.target.value.replace(/\D/g, '').slice(0, 6))} required /><small className="mt-1 block text-xs font-normal text-slate-500">استبدل الكود القديم بكود رقمي فريد، مثل 100001.</small></label><label>اسم المالك<input className={fieldClass} value={form.ownerName} onChange={e => update('ownerName', e.target.value)} required /></label><label>بريد المالك<input type="email" className={fieldClass} value={form.ownerEmail} onChange={e => update('ownerEmail', e.target.value)} required /></label><label>الباقة<select className={fieldClass} value={form.plan} onChange={e => update('plan', e.target.value)}><option>basic</option><option>pro</option><option>enterprise</option></select></label><label>الحالة<select className={fieldClass} value={form.status} onChange={e => update('status', e.target.value as UpdateCompanyRequest['status'])}>{Object.keys(statusLabel).map(status => <option key={status} value={status}>{statusLabel[status]}</option>)}</select></label><label>تاريخ البداية<input type="date" className={fieldClass} value={form.subscriptionStart} onChange={e => update('subscriptionStart', e.target.value)} required /></label><label>تاريخ النهاية<input type="date" className={fieldClass} value={form.subscriptionEnd} onChange={e => update('subscriptionEnd', e.target.value)} required /></label><label>الحد الأقصى<input type="number" min="1" className={fieldClass} value={form.maxUsers} onChange={e => update('maxUsers', Number(e.target.value))} required /></label><label>المزايا<input className={fieldClass} value={form.features.join(', ')} onChange={e => update('features', e.target.value.split(',').map(value => value.trim()).filter(Boolean))} /></label></div><p className="text-xs text-slate-500">تعديل بريد المالك هنا يحدّث بيانات الشركة المعروضة فقط، ولا يغيّر حساب Firebase Auth.</p>{error && <p className="text-sm text-rose-600">{error}</p>}<button disabled={saving} className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white">{saving ? 'جارٍ الحفظ…' : 'حفظ التعديلات'}</button></form></div>;
+function CompanyEditModal({
+  company,
+  initial,
+  saving,
+  error,
+  close,
+  save,
+}: {
+  company: PlatformCompany;
+  initial: UpdateCompanyRequest;
+  saving: boolean;
+  error: string;
+  close: () => void;
+  save: (data: UpdateCompanyRequest) => Promise<void>;
+}) {
+  const [form, setForm] = useState(initial);
+  const update = <K extends keyof UpdateCompanyRequest>(
+    key: K,
+    value: UpdateCompanyRequest[K],
+  ) => setForm((previous) => ({ ...previous, [key]: value }));
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-4">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save(form);
+        }}
+        className="mx-auto mt-8 max-w-2xl space-y-3 rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"
+      >
+        <div className="flex justify-between">
+          <h2 className="font-black">تعديل الشركة</h2>
+          <button type="button" onClick={close}>
+            <X />
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label>
+            اسم الشركة
+            <input
+              className={fieldClass}
+              value={form.name}
+              onChange={(e) => update("name", e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Slug
+            <input
+              className={fieldClass}
+              value={form.slug}
+              onChange={(e) => update("slug", e.target.value.toLowerCase())}
+              required
+            />
+          </label>
+          <label className="font-bold text-amber-600">
+            كود الشركة (6 أرقام)
+            <input
+              className={`${fieldClass} border-amber-500`}
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              placeholder="100001"
+              value={form.companyCode}
+              onChange={(e) =>
+                update(
+                  "companyCode",
+                  e.target.value.replace(/\D/g, "").slice(0, 6),
+                )
+              }
+              required
+            />
+            <small className="mt-1 block text-xs font-normal text-slate-500">
+              استبدل الكود القديم بكود رقمي فريد، مثل 100001.
+            </small>
+          </label>
+          <label>
+            اسم المالك
+            <input
+              className={fieldClass}
+              value={form.ownerName}
+              onChange={(e) => update("ownerName", e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            بريد المالك
+            <input
+              type="email"
+              className={fieldClass}
+              value={form.ownerEmail}
+              onChange={(e) => update("ownerEmail", e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            الباقة
+            <select
+              className={fieldClass}
+              value={form.plan}
+              onChange={(e) => update("plan", e.target.value)}
+            >
+              <option>basic</option>
+              <option>pro</option>
+              <option>enterprise</option>
+            </select>
+          </label>
+          <label>
+            الحالة
+            <select
+              className={fieldClass}
+              value={form.status}
+              onChange={(e) =>
+                update(
+                  "status",
+                  e.target.value as UpdateCompanyRequest["status"],
+                )
+              }
+            >
+              {Object.keys(statusLabel).map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            تاريخ البداية
+            <input
+              type="date"
+              className={fieldClass}
+              value={form.subscriptionStart}
+              onChange={(e) => update("subscriptionStart", e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            تاريخ النهاية
+            <input
+              type="date"
+              className={fieldClass}
+              value={form.subscriptionEnd}
+              onChange={(e) => update("subscriptionEnd", e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            الحد الأقصى
+            <input
+              type="number"
+              min="1"
+              className={fieldClass}
+              value={form.maxUsers}
+              onChange={(e) => update("maxUsers", Number(e.target.value))}
+              required
+            />
+          </label>
+          <label>
+            المزايا
+            <input
+              className={fieldClass}
+              value={form.features.join(", ")}
+              onChange={(e) =>
+                update(
+                  "features",
+                  e.target.value
+                    .split(",")
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                )
+              }
+            />
+          </label>
+        </div>
+        <p className="text-xs text-slate-500">
+          تعديل بريد المالك هنا يحدّث بيانات الشركة المعروضة فقط، ولا يغيّر حساب
+          Firebase Auth.
+        </p>
+        {error && <p className="text-sm text-rose-600">{error}</p>}
+        <button
+          disabled={saving}
+          className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white"
+        >
+          {saving ? "جارٍ الحفظ…" : "حفظ التعديلات"}
+        </button>
+      </form>
+    </div>
+  );
 }

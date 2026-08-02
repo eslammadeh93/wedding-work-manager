@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
@@ -72,11 +72,11 @@
   background: #161214;
 }
 
-html[lang='en'] body,
-html[lang='en'] button,
-html[lang='en'] input,
-html[lang='en'] select,
-html[lang='en'] textarea {
+html[lang="en"] body,
+html[lang="en"] button,
+html[lang="en"] input,
+html[lang="en"] select,
+html[lang="en"] textarea {
   font-family: "Poppins", "Cairo", ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -107,6 +107,165 @@ body {
 }
 
 /* Platform dashboard contrast corrections for the burgundy dark palette. */
+.platform-ui {
+  --platform-space-1: 0.25rem;
+  --platform-space-2: 0.5rem;
+  --platform-space-3: 0.75rem;
+  --platform-space-4: 1rem;
+  --platform-space-5: 1.25rem;
+  --platform-radius-sm: 0.75rem;
+  --platform-radius-md: 1rem;
+  --platform-radius-lg: 1.25rem;
+  --platform-shadow-sm: 0 1px 3px rgb(34 24 29 / 0.08);
+  --platform-shadow-md: 0 10px 30px rgb(34 24 29 / 0.12);
+  --platform-surface: #fffefe;
+  --platform-surface-subtle: #f5f1ec;
+  --platform-surface-hover: #fbedf0;
+  --platform-border: #e8ddd4;
+  --platform-text: #3c2b31;
+  --platform-text-muted: #735f61;
+  --platform-active: #f5ebec;
+  --platform-active-strong: #8f3655;
+  --platform-success: #2f7659;
+  --platform-warning: #b18a4e;
+  --platform-error: #ad3547;
+  --platform-info: #2f6fd4;
+  --platform-transition: 180ms ease;
+}
+
+.dark .platform-ui {
+  --platform-surface: #22181d;
+  --platform-surface-subtle: #33252d;
+  --platform-surface-hover: #3c2b31;
+  --platform-border: #5a464b;
+  --platform-text: #f5f1ec;
+  --platform-text-muted: #d6c5b8;
+  --platform-active: #3c2b31;
+  --platform-active-strong: #e0c893;
+  --platform-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.25);
+  --platform-shadow-md: 0 12px 34px rgb(0 0 0 / 0.34);
+}
+
+.platform-card,
+.platform-section,
+.platform-table-container {
+  border: 1px solid var(--platform-border);
+  background: var(--platform-surface);
+  color: var(--platform-text);
+  box-shadow: var(--platform-shadow-sm);
+}
+
+.platform-card,
+.platform-table-container {
+  border-radius: var(--platform-radius-md);
+}
+.platform-section {
+  border-radius: var(--platform-radius-lg);
+  padding: var(--platform-space-5);
+}
+.platform-table-container {
+  overflow-x: auto;
+}
+
+.platform-button,
+.platform-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--platform-space-2);
+  min-height: 2.5rem;
+  border-radius: var(--platform-radius-sm);
+  font-weight: 700;
+  transition:
+    background-color var(--platform-transition),
+    border-color var(--platform-transition),
+    color var(--platform-transition),
+    box-shadow var(--platform-transition),
+    transform var(--platform-transition);
+}
+
+.platform-button {
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+}
+.platform-button--primary {
+  background: #6e1f38;
+  color: #fffefe;
+}
+.platform-button--primary:hover {
+  background: #54162b;
+}
+.platform-button--secondary {
+  border: 1px solid var(--platform-border);
+  background: var(--platform-surface);
+  color: var(--platform-text);
+}
+.platform-button--secondary:hover,
+.platform-button--ghost:hover,
+.platform-icon-button:hover {
+  background: var(--platform-surface-hover);
+}
+.platform-button--danger {
+  background: var(--platform-error);
+  color: #fffefe;
+}
+.platform-button--ghost {
+  color: var(--platform-text-muted);
+}
+.platform-icon-button {
+  width: 2.5rem;
+  border: 1px solid var(--platform-border);
+  background: var(--platform-surface);
+  color: var(--platform-text);
+}
+.platform-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--platform-surface-subtle);
+  color: var(--platform-text-muted);
+}
+
+.platform-button:focus-visible,
+.platform-icon-button:focus-visible,
+.platform-nav-item:focus-visible {
+  outline: 3px solid
+    color-mix(in srgb, var(--platform-active-strong) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.platform-button:disabled,
+.platform-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.platform-nav-item {
+  transition:
+    background-color var(--platform-transition),
+    color var(--platform-transition);
+}
+.platform-nav-item svg {
+  transition:
+    transform var(--platform-transition),
+    color var(--platform-transition);
+}
+.platform-nav-item:hover svg {
+  transform: scale(1.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-ui *,
+  .platform-ui *::before,
+  .platform-ui *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 .dark .platform-ui .text-amber-700,
 .dark .platform-ui .text-amber-600 {
   color: #f5f1ec;
@@ -142,33 +301,7 @@ body {
   background-color: #33252d;
 }
 
-.dark .platform-ui button.rounded-xl.border:not([class*='border-amber']) {
+.dark .platform-ui button.rounded-xl.border:not([class*="border-amber"]) {
   border-color: #5a464b;
   color: #f5f1ec;
-}
-
-/* Compact platform header controls: logout icon plus adjacent theme icon. */
-.platform-ui header > button:last-child {
-  width: 2.5rem;
-  height: 2.5rem;
-  padding: 0;
-  border: 1px solid #e8ddd4;
-  border-radius: 0.75rem;
-  justify-content: center;
-  font-size: 0;
-  background: #fffefe;
-}
-
-.platform-ui header > button:last-child:hover {
-  background: #fcedef;
-}
-
-.dark .platform-ui header > button:last-child {
-  border-color: #5a464b;
-  background: #33252d;
-  color: #f3a6b2;
-}
-
-.dark .platform-ui header > button:last-child:hover {
-  background: #3c2b31;
 }
