@@ -1,40 +1,175 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
-    function isManager() {
-      return signedIn() && profile().role in ['super_admin', 'admin', 'manager'] && profile().isActive == true;
+    // Multi-tenant rules.  Admin SDK / Cloud Functions bypass these rules.
+    function isSignedIn() { return request.auth != null; }
+    function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function platformProfile() { return get(/databases/$(database)/documents/platformUsers/$(request.auth.uid)); }
+    function platformProfileIsActive() {
+      return isSignedIn() && platformProfile().exists()
+        && platformProfile().data.role == 'platform_owner'
+        && platformProfile().data.status == 'active';
     }
-    function isWorker() { return signedIn() && profile().role == 'worker' && profile().isActive == true; }
-    function workerId() { return profile().workerId; }
-
-    match /users/{userId} {
-      allow get: if signedIn() && (request.auth.uid == userId || isManager());
-      allow list: if isManager();
-      allow create, update, delete: if isManager();
-    }
-
-    match /orders/{orderId} {
-      allow read: if isManager() || (isWorker() && resource.data.workerId == workerId());
-      allow write: if isManager();
+    function isPlatformOwner() {
+      return isSignedIn() && request.auth.token.platform_owner == true
+        && platformProfileIsActive();
     }
 
-    match /activityLogs/{logId} {
-      allow read, update, delete: if isManager();
-      allow create: if isWorker()
-        && request.resource.data.workerId == workerId()
-        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.workerId == workerId();
+    function companyMember(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
+    }
+    function isCompanyMember(companyId) { return isSignedIn() && companyMember(companyId).exists(); }
+    function memberIsActive(companyId) { return isCompanyMember(companyId) && companyMember(companyId).data.status == 'active'; }
+    function memberRole(companyId) { return companyMember(companyId).data.role; }
+    function isCompanySuperAdmin(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'company_super_admin'; }
+    function isManager(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'manager'; }
+    function isEmployee(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'employee'; }
+    function isWorker(companyId) { return memberIsActive(companyId) && memberRole(companyId) == 'worker'; }
+    function companyIsAccessible(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)).exists()
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.status in ['trial', 'active', 'past_due', 'expired'];
+    }
+    function canReadOperations(companyId) { return memberIsActive(companyId) && companyIsAccessible(companyId); }
+    // Conservative past_due policy: reads only until a backend policy explicitly changes it.
+    function canWriteOperations(companyId) {
+      return memberIsActive(companyId)
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.status in ['trial', 'active'];
+    }
+    function hasCompanyPermission(companyId, permission) {
+      return canReadOperations(companyId) && (
+        memberRole(companyId) == 'company_super_admin'
+        || (permission == 'orders:read' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'customers:write' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'workers:read' && memberRole(companyId) == 'manager')
+        || (permission == 'workers:write' && memberRole(companyId) == 'manager')
+        || (permission == 'inventory:read' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'inventory:write' && memberRole(companyId) == 'manager')
+        || (permission == 'expenses:read' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'expenses:write' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'categories:read' && memberRole(companyId) == 'manager')
+        || (permission == 'categories:write' && memberRole(companyId) == 'manager')
+        || (permission == 'activity_logs:read' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'settings:read' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'settings:write' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'members:read' && memberRole(companyId) == 'company_super_admin')
+        || (permission == 'notifications:read' && memberRole(companyId) in ['company_super_admin', 'manager', 'employee'])
+      );
+    }
+    function hasOnlyAllowedChangedFields(allowed) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+    function companyIdMatchesPath(companyId) {
+      return !('companyId' in request.resource.data) || request.resource.data.companyId == companyId;
+    }
+    function protectedOperationalFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['id', 'companyId', 'createdBy', 'createdAt']);
+    }
+    function safeWorkerDocument() { return !('loginCodeHash' in resource.data); }
+    function validInventory() {
+      return (!('quantity' in request.resource.data) || request.resource.data.quantity >= 0)
+        && (!('totalQuantity' in request.resource.data) || request.resource.data.totalQuantity >= 0)
+        && (!('availableQuantity' in request.resource.data) || request.resource.data.availableQuantity >= 0)
+        && (!('reservedQuantity' in request.resource.data) || request.resource.data.reservedQuantity >= 0)
+        && (!('reservedQuantity' in request.resource.data) || !('totalQuantity' in request.resource.data)
+          || request.resource.data.reservedQuantity <= request.resource.data.totalQuantity);
     }
 
-    match /workers/{workerId} {
-      allow read: if isManager() || (isWorker() && resource.data.authUid == request.auth.uid);
-      allow write: if isManager();
+    match /platformUsers/{uid} {
+      allow get: if isPlatformOwner() && (isSelf(uid) || platformProfileIsActive());
+      allow list: if isPlatformOwner();
+      allow write: if false;
+    }
+    match /platformAuditLogs/{logId} { allow read: if isPlatformOwner(); allow write: if false; }
+
+    match /companies/{companyId} {
+      allow read: if isPlatformOwner() || memberIsActive(companyId);
+      allow write: if false;
+
+      match /members/{uid} {
+        allow get: if isSelf(uid) && memberIsActive(companyId)
+          || hasCompanyPermission(companyId, 'members:read');
+        allow list: if hasCompanyPermission(companyId, 'members:read');
+        // Profile preference updates are backend-mediated in this phase.
+        allow write: if false;
+      }
+      match /orders/{orderId} {
+        allow read: if hasCompanyPermission(companyId, 'orders:read')
+          || (canReadOperations(companyId) && isWorker(companyId)
+            && resource.data.workerId == companyMember(companyId).data.workerId);
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write') && companyIdMatchesPath(companyId);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
+          && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
+      }
+      match /customers/{customerId} {
+        allow read: if hasCompanyPermission(companyId, 'customers:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write');
+      }
+      match /workers/{workerId} {
+        // A document containing loginCodeHash is deliberately unreadable: rules cannot hide fields.
+        allow read: if safeWorkerDocument() && (hasCompanyPermission(companyId, 'workers:read')
+          || (canReadOperations(companyId) && isWorker(companyId) && companyMember(companyId).data.workerId == workerId));
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'workers:write')
+          && companyIdMatchesPath(companyId) && !('loginCodeHash' in request.resource.data) && !('authUid' in request.resource.data);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'workers:write')
+          && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
+          && !('loginCodeHash' in request.resource.data) && !('authUid' in request.resource.data);
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'workers:write');
+      }
+      match /inventory/{itemId} {
+        allow read: if hasCompanyPermission(companyId, 'inventory:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write') && companyIdMatchesPath(companyId) && validInventory();
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && validInventory();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write');
+      }
+      match /expenses/{expenseId} {
+        allow read: if hasCompanyPermission(companyId, 'expenses:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && (!('linkedOrderId' in request.resource.data) || request.resource.data.linkedOrderId is string || request.resource.data.linkedOrderId == null);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && (!('linkedOrderId' in request.resource.data) || request.resource.data.linkedOrderId is string || request.resource.data.linkedOrderId == null);
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write');
+      }
+      match /categories/{categoryId} {
+        allow read: if hasCompanyPermission(companyId, 'categories:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'categories:write') && companyIdMatchesPath(companyId);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'categories:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'categories:write');
+      }
+      match /activityLogs/{logId} { allow read: if hasCompanyPermission(companyId, 'activity_logs:read'); allow write: if false; }
+      match /auditLogs/{logId} { allow read, write: if false; }
+      match /settings/{settingsId} {
+        allow read: if settingsId == 'main' && hasCompanyPermission(companyId, 'settings:read');
+        allow create: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write') && companyIdMatchesPath(companyId);
+        allow update: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write') && companyIdMatchesPath(companyId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['companyId']);
+        allow delete: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write');
+      }
+      match /notifications/{notificationId} {
+        allow read: if canReadOperations(companyId) && (isCompanySuperAdmin(companyId)
+          || resource.data.targetUid == request.auth.uid);
+        allow write: if false;
+      }
+      // Future private data (workerSecrets, attachments, payment history) is client-inaccessible.
+      match /{privateCollection}/{document=**} { allow read, write: if false; }
     }
 
-    match /settings/company { allow read: if signedIn(); allow write: if isManager(); }
-    match /{collection}/{document} {
-      allow read, write: if isManager();
-    }
+    // TEMPORARY LEGACY RULES — remove after migration verification. VITE_USE_MULTI_TENANT_DATA remains false.
+    function legacyProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function legacyManager() { return isSignedIn() && legacyProfile().role in ['super_admin', 'admin', 'manager'] && legacyProfile().isActive == true; }
+    function legacyWorker() { return isSignedIn() && legacyProfile().role == 'worker' && legacyProfile().isActive == true; }
+    match /users/{uid} { allow get: if isSelf(uid) || legacyManager(); allow list: if legacyManager(); allow create, update, delete: if legacyManager(); }
+    match /orders/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if legacyManager(); }
+    match /activityLogs/{id} { allow read, update, delete: if legacyManager(); allow create: if legacyWorker() && request.resource.data.workerId == legacyProfile().workerId && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.workerId == legacyProfile().workerId; }
+    match /workers/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.authUid == request.auth.uid); allow write: if legacyManager(); }
+    match /settings/company { allow read: if isSignedIn(); allow write: if legacyManager(); }
+    match /customers/{id} { allow read, write: if legacyManager(); }
+    match /inventory/{id} { allow read, write: if legacyManager(); }
+    match /expenses/{id} { allow read, write: if legacyManager(); }
+    match /categories/{id} { allow read, write: if legacyManager(); }
+    match /notifications/{id} { allow read, write: if legacyManager(); }
+    // Explicit default deny: no broad wildcard allow rule.
+    match /{document=**} { allow read, write: if false; }
   }
 }

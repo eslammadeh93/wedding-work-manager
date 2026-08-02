@@ -71,7 +71,11 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
     const workers = await company.ref.collection('workers').where('username', '==', username).limit(2).get();
     if (workers.size !== 1) throw new Error('invalid');
     const worker = workers.docs[0], workerData = worker.data();
-    if (workerData.status !== 'active' || !verifyLoginCode(loginCode, workerData.loginCodeHash)) throw new Error('invalid');
+    // New workers keep secrets out of the readable worker profile. The fallback is
+    // backend-only compatibility for pre-migration records; clients never read it.
+    const secret = await company.ref.collection('workerSecrets').doc(worker.id).get();
+    const loginCodeHash = secret.exists ? secret.data()?.loginCodeHash : workerData.loginCodeHash;
+    if (workerData.status !== 'active' || !verifyLoginCode(loginCode, loginCodeHash)) throw new Error('invalid');
     const uid = typeof workerData.authUid === 'string' ? workerData.authUid : '';
     const member = uid ? await company.ref.collection('members').doc(uid).get() : null;
     if (!member?.exists || member.data()?.role !== 'worker' || member.data()?.status !== 'active') throw new Error('invalid');
