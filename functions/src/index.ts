@@ -7,7 +7,7 @@ import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService } from './companyMembers.js';
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CreateCompanyMemberRequest, CreateCompanyMemberResponse, CreateCompanyResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse } from './apiTypes.js';
-import { createInitialPlatformOwner as provisionInitialPlatformOwner, seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
+import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironmentAllowed, testDataEnvironmentAllowed } from './setup.js';
 
 initializeApp();
 const db = getFirestore();
@@ -92,7 +92,7 @@ async function handleWorkerLogin(request: { data: unknown; rawRequest: { ip?: st
   }
 }
 
-export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' }, async request => {
+export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', invoker: 'public' }, async request => {
   try {
     return await handleWorkerLogin(request);
   } catch {
@@ -102,19 +102,16 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: proc
 });
 
 /** Setup is deliberately limited to the local emulator or an explicitly configured staging environment. */
-export const createInitialPlatformOwner = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request) => {
-  if (!setupEnvironmentAllowed()) return { success: false, code: 'SETUP_DISABLED', message: 'إعداد المنصة غير متاح في هذه البيئة.' };
-  return provisionInitialPlatformOwner(request.data);
-});
+export const createInitialPlatformOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'private' }, async () => ({ success: false, code: 'SETUP_DISABLED', message: 'إعداد المنصة غير متاح في هذه البيئة.' }));
 
 /** Creates only synthetic, isolated tenant records and is never available in production. */
-export const seedTestMultiTenantData = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request) => {
+export const seedTestMultiTenantData = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'private' }, async (request) => {
   if (!testDataEnvironmentAllowed()) return { success: false, code: 'SEED_DISABLED', message: 'بيانات الاختبار غير متاحة في هذه البيئة.' };
   return provisionTestMultiTenantData(request.data);
 });
 
 /** Privileged provisioning endpoint, available only after an explicit local/staging setup gate. */
-export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceAppCheck: false }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateCompanyResponse> => {
+export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateCompanyResponse> => {
   if (!setupEnvironmentAllowed()) return { success: false, code: 'UNKNOWN_ERROR', message: 'هذه العملية متاحة في Emulator أو Staging المصرح فقط.' };
   const uid = request.auth?.uid;
   if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
@@ -129,7 +126,7 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
 });
 
 const memberService = new CompanyMemberService({ db, auth, emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
-const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' };
+const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', invoker: 'public' as const };
 type MemberRequest = { auth?: { uid: string }; data: unknown };
 export const createCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));
 export const updateCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateCompanyMemberResponse> => memberService.update(request.data as UpdateCompanyMemberRequest, request.auth));
