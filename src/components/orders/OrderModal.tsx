@@ -347,6 +347,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       await addOrder(payload);
     }
     onClose();
+    } catch (error) {
+      setStockWarning(error instanceof Error ? error.message : 'تعذر حفظ الطلب. حاول مرة أخرى.');
     } finally {
       setIsSaving(false);
     }

@@ -153,12 +153,15 @@ export interface Customer {
 
 export interface InventoryItem {
   id: string;
+  /** Present on company-scoped inventory documents. */
+  companyId?: string;
   itemCode: string;
   nameEn: string;
   nameAr: string;
   category: InventoryCategory;
   imageUrl?: string;
   quantity: number; // Total quantity
+  totalQuantity?: number; // Canonical total for multi-tenant inventory
   availableQuantity: number; // Quantity currently in warehouse
   reservedQuantity: number; // Quantity reserved in active orders
   minStockLevel: number; // Threshold for low stock warning

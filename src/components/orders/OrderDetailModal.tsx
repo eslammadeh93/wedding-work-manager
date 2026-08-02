@@ -107,6 +107,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     try {
       setIsUpdatingStatus(true);
       await updateOrder(order.id, { orderStatus: newStatus });
+    } catch (error) {
+      setLogToast(error instanceof Error ? error.message : 'تعذر تحديث الطلب.');
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -139,6 +141,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setIsDeleting(true);
       await deleteOrder(order.id);
       onClose();
+    } catch (error) {
+      setLogToast(error instanceof Error ? error.message : 'تعذر حذف الطلب.');
     } finally {
       setIsDeleting(false);
     }

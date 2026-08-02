@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:firestore-rules": "firebase emulators:exec --only firestore \"tsx --test tests/firestore-rules/firestore.rules.test.ts\""
+    "test:firestore-rules": "firebase emulators:exec --only firestore \"tsx --test tests/firestore-rules/firestore.rules.test.ts\"",
+    "test:inventory": "tsx --test tests/orderInventoryMath.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
