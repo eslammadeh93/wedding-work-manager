@@ -226,7 +226,9 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
 const memberService = new CompanyMemberService({ db, auth, emulator: process.env.FUNCTIONS_EMULATOR === 'true' });
 const memberFunctionOptions = { region: 'us-central1' as const, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', invoker: 'public' as const };
 type MemberRequest = { auth?: { uid: string }; data: unknown };
-export const createCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));
+// Render does not currently provide an App Check token. Firebase Auth plus
+// the active tenant membership and role checks remain mandatory in the service.
+export const createCompanyMember = onCall({ ...memberFunctionOptions, enforceAppCheck: false }, (request: MemberRequest): Promise<CreateCompanyMemberResponse> => memberService.create(request.data as CreateCompanyMemberRequest, request.auth));
 export const updateCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateCompanyMemberResponse> => memberService.update(request.data as UpdateCompanyMemberRequest, request.auth));
 export const changeCompanyMemberRole = onCall(memberFunctionOptions, (request: MemberRequest): Promise<ChangeCompanyMemberRoleResponse> => memberService.changeRole(request.data as ChangeCompanyMemberRoleRequest, request.auth));
 export const disableCompanyMember = onCall(memberFunctionOptions, (request: MemberRequest): Promise<DisableCompanyMemberResponse> => memberService.disable(request.data as DisableCompanyMemberRequest, request.auth));
