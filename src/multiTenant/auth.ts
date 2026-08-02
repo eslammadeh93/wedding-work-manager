@@ -9,7 +9,10 @@ import type { AuthSession, Company, CompanyMember, PlatformUser } from './types'
 export class MultiTenantAuthError extends Error {}
 type WorkerLoginResult = { success: boolean; code: string; message: string; customToken?: string; retryAfterSeconds?: number };
 
-export const getPostLoginPath = (session: AuthSession): string => session.userType === 'platform' ? '/platform' : session.role === 'worker' ? '/worker' : '/company';
+// Render serves this project as a static SPA. Keep real requests on `/` and
+// place platform routing after `#` so refreshing never asks the CDN for a
+// non-existent `/company`, `/worker`, or `/platform` file.
+export const getPostLoginPath = (session: AuthSession): string => session.userType === 'platform' ? '/#/platform' : '/';
 
 function assertCompanyAllowsLogin(company: Company) {
   const deadline = new Date(company.gracePeriodEnd || company.subscriptionEnd).getTime();
