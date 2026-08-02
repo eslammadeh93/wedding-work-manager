@@ -20,6 +20,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Worker } from '../../types';
 import { companyMembersService } from '../../multiTenant/companyMembersService';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 export const WorkersModule: React.FC = () => {
   const { t } = useLanguage();
@@ -77,7 +78,7 @@ export const WorkersModule: React.FC = () => {
     setUsername(worker.username);
     setLoginCode('');
     setJobTitle(worker.jobTitle || '');
-    setPhone(worker.phone || '');
+    setPhone(sanitizePhoneInput(worker.phone || ''));
     setNotes(worker.notes || '');
     setStatus(worker.status);
     setFormError(null);
@@ -423,7 +424,7 @@ export const WorkersModule: React.FC = () => {
                   <input
                     type="text"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
                     placeholder="01200000000"
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />

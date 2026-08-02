@@ -105,3 +105,70 @@ body {
   background: linear-gradient(135deg, #b18a4e, #e0c893);
   color: #22181d;
 }
+
+/* Platform dashboard contrast corrections for the burgundy dark palette. */
+.dark .platform-ui .text-amber-700,
+.dark .platform-ui .text-amber-600 {
+  color: #f5f1ec;
+}
+
+.dark .platform-ui .text-rose-700,
+.dark .platform-ui .text-rose-600 {
+  color: #f3a6b2;
+}
+
+.dark .platform-ui .text-slate-500,
+.dark .platform-ui .text-slate-600,
+.dark .platform-ui .text-slate-700 {
+  color: #d6c5b8;
+}
+
+.dark .platform-ui .bg-rose-50 {
+  background-color: #351015;
+  color: #ffd7de;
+}
+
+.dark .platform-ui .bg-emerald-100 {
+  background-color: #143126;
+  color: #d7efdf;
+}
+
+.dark .platform-ui button.border-amber-600 {
+  border-color: #d6c5b8;
+  color: #fffefe;
+}
+
+.dark .platform-ui button.border-amber-600:hover {
+  background-color: #33252d;
+}
+
+.dark .platform-ui button.rounded-xl.border:not([class*='border-amber']) {
+  border-color: #5a464b;
+  color: #f5f1ec;
+}
+
+/* Compact platform header controls: logout icon plus adjacent theme icon. */
+.platform-ui header > button:last-child {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid #e8ddd4;
+  border-radius: 0.75rem;
+  justify-content: center;
+  font-size: 0;
+  background: #fffefe;
+}
+
+.platform-ui header > button:last-child:hover {
+  background: #fcedef;
+}
+
+.dark .platform-ui header > button:last-child {
+  border-color: #5a464b;
+  background: #33252d;
+  color: #f3a6b2;
+}
+
+.dark .platform-ui header > button:last-child:hover {
+  background: #3c2b31;
+}

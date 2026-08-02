@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Customer } from '../../types';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 interface CustomerModalProps {
   isOpen: boolean;
@@ -84,7 +85,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
               type="text"
               required
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
               placeholder="+966 50 000 0000"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
             />

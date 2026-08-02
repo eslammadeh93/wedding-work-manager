@@ -98,9 +98,10 @@ service cloud.firestore {
       allow write: if false;
 
       match /members/{uid} {
-        allow get: if isSelf(uid) && memberIsActive(companyId)
+        allow get: if isPlatformOwner()
+          || isSelf(uid) && memberIsActive(companyId)
           || hasCompanyPermission(companyId, 'members:read');
-        allow list: if hasCompanyPermission(companyId, 'members:read');
+        allow list: if isPlatformOwner() || hasCompanyPermission(companyId, 'members:read');
         // Profile preference updates are backend-mediated in this phase.
         allow write: if false;
       }

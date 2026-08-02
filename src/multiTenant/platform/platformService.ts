@@ -1,7 +1,7 @@
 import { collection, getDocs, query } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import type { CompanyStatus } from '../types';
-import type { PlatformCompany, PlatformOverview } from './types';
+import type { PlatformCompany, PlatformCompanyMember, PlatformOverview } from './types';
 
 const toDate = (value: unknown): Date | null => {
   if (value instanceof Date) return value;
@@ -33,6 +33,14 @@ export const daysUntil = (value: unknown) => {
 export async function listPlatformCompanies(): Promise<PlatformCompany[]> {
   const snapshot = await getDocs(query(collection(db, 'companies')));
   return snapshot.docs.map(item => ({ id: item.id, ...(item.data() as Omit<PlatformCompany, 'id'>) }) as PlatformCompany);
+}
+
+/** Platform-owner read-only view of the accounts provisioned for one company. */
+export async function listPlatformCompanyMembers(companyId: string): Promise<PlatformCompanyMember[]> {
+  const snapshot = await getDocs(query(collection(db, 'companies', companyId, 'members')));
+  return snapshot.docs
+    .map(item => ({ uid: item.id, ...(item.data() as Omit<PlatformCompanyMember, 'uid'>) }))
+    .sort((a, b) => String(a.name || a.email || '').localeCompare(String(b.name || b.email || ''), 'ar'));
 }
 
 export function summarizeCompanies(companies: PlatformCompany[]): PlatformOverview {

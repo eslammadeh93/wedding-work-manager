@@ -7,6 +7,17 @@ export interface PlatformCompany extends Company {
   ownerEmail?: string;
 }
 
+export interface PlatformCompanyMember {
+  uid: string;
+  name: string;
+  email?: string | null;
+  role: string;
+  status: string;
+  phone?: string | null;
+  jobTitle?: string | null;
+  createdAt?: RecordTimestamp;
+}
+
 export interface PlatformOverview {
   totalCompanies: number;
   activeCompanies: number;

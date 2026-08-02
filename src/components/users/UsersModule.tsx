@@ -22,6 +22,7 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { UserProfile, UserRole } from '../../types';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 export const UsersModule: React.FC = () => {
   const { t } = useLanguage();
@@ -121,7 +122,7 @@ export const UsersModule: React.FC = () => {
   const openEditModal = (u: UserProfile) => {
     setEditingUser(u);
     setEditName(u.displayName);
-    setEditPhone(u.phone || '');
+    setEditPhone(sanitizePhoneInput(u.phone || ''));
     setEditRole(u.role);
     setEditIsActive(u.isActive);
   };
@@ -480,7 +481,7 @@ export const UsersModule: React.FC = () => {
                   <input
                     type="text"
                     value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value)}
+                    onChange={(e) => setNewPhone(sanitizePhoneInput(e.target.value))}
                     placeholder="+966 50 111 2233"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium outline-none focus:ring-2 focus:ring-amber-500"
                   />
@@ -592,7 +593,7 @@ export const UsersModule: React.FC = () => {
                   <input
                     type="text"
                     value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
+                    onChange={(e) => setEditPhone(sanitizePhoneInput(e.target.value))}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>

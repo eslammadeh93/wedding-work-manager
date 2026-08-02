@@ -4,6 +4,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker } from '../../types';
 import { localDateString } from '../../utils/localDate';
+import { sanitizePhoneInput } from '../../utils/phone';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -211,7 +212,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     const found = customers.find((c) => c.id === id);
     if (found) {
       setCustomerName(found.name);
-      setCustomerPhone(found.phone);
+      setCustomerPhone(sanitizePhoneInput(found.phone));
     }
   };
 
@@ -439,7 +440,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 type="text"
                 required
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
+                onChange={(e) => setCustomerPhone(sanitizePhoneInput(e.target.value))}
                 placeholder="+966 50 000 0000"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
               />
