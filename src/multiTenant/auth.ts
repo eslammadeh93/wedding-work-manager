@@ -19,18 +19,19 @@ function assertCompanyAllowsLogin(company: Company) {
 }
 
 export async function resolveMultiTenantSession(user: User): Promise<AuthSession> {
-  const development = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
-  const debug = (step: string, details: Record<string, unknown>) => { if (development) console.debug(`[auth-resolution] ${step}`, details); };
+  const debug = (step: string, details: Record<string, unknown>) => console.info(`[auth-resolution] ${step}`, details);
   try {
-  const [token, platformSnapshot] = await Promise.all([user.getIdTokenResult(true), getDoc(doc(db, firestorePaths.platformUser(user.uid)))]);
+  debug('start', { authenticated: true });
+  const token = await user.getIdTokenResult(true);
   const tokenRole = typeof token.claims.role === 'string' ? token.claims.role : null;
   const tokenCompanyId = typeof token.claims.companyId === 'string' ? token.claims.companyId : null;
-  debug('token', { hasRole: Boolean(tokenRole), roleIsCompanySuperAdmin: tokenRole === 'company_super_admin', hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
-  const platformProfile = platformSnapshot.exists() ? platformSnapshot.data() as PlatformUser : null;
   const hasClaim = token.claims.platform_owner === true;
-  const hasProfile = platformProfile?.role === 'platform_owner';
-  if (hasClaim !== hasProfile) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات الحساب.');
-  if (hasClaim && hasProfile) {
+  debug('getIdTokenResult', { platformOwner: hasClaim, hasRole: Boolean(tokenRole), role: tokenRole, hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
+  if (hasClaim) {
+    const platformSnapshot = await getDoc(doc(db, firestorePaths.platformUser(user.uid)));
+    const platformProfile = platformSnapshot.exists() ? platformSnapshot.data() as PlatformUser : null;
+    debug('platform profile', { found: platformSnapshot.exists(), active: platformProfile?.status === 'active' });
+    if (platformProfile?.role !== 'platform_owner') throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if (platformProfile.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل.');
     return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: 'platform_owner', permissions: PERMISSION_MATRIX.platform_owner };
   }
@@ -47,7 +48,7 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
   assertCompanyAllowsLogin(company);
   return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: PERMISSION_MATRIX[member.role] };
   } catch (error) {
-    if (development) console.error('[auth-resolution] exception at resolveMultiTenantSession', { name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
+    console.error('[auth-resolution] exception at resolveMultiTenantSession', { source: 'src/multiTenant/auth.ts', name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
     throw error;
   }
 }
