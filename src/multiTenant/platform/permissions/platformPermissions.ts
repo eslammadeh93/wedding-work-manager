@@ -18,6 +18,7 @@ export const PLATFORM_PERMISSIONS = [
   "platform:users:read",
   "platform:subscriptions:read",
   "platform:audit_logs:read",
+  "platform:developer_tools:manage",
   "platform:support:impersonate",
   "platform:admins:manage",
   "platform:dangerous_delete",

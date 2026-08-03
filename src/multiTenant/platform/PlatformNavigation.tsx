@@ -12,6 +12,7 @@ const navigationGroups = [
   ["subscriptions", "analytics", "activity"],
   ["notifications", "support"],
   ["settings", "admins"],
+  ["developerTools"],
 ] as const;
 
 interface PlatformNavigationProps {
@@ -28,7 +29,8 @@ export function PlatformNavigation({
   const platformRole: PlatformRole | null = isPlatformRole(role) ? role : null;
   const visibleRoutes = platformRole
     ? PLATFORM_ROUTES.filter((route) =>
-        platformRoleHasPermission(platformRole, route.permission),
+        platformRoleHasPermission(platformRole, route.permission) &&
+        (route.id !== "developerTools" || platformRole === "platform_owner"),
       )
     : [];
   const active = (route: PlatformRouteDefinition) =>
@@ -48,20 +50,23 @@ export function PlatformNavigation({
         </div>
       </div>
       <nav aria-label="أقسام منصة الإدارة">
-        {navigationGroups.map((group, groupIndex) => (
-          <div
-            key={group.join("-")}
-            className={
-              groupIndex === 0
-                ? "space-y-0.5"
-                : "mt-2 space-y-0.5 border-t border-slate-200 pt-2 dark:border-slate-800"
-            }
-          >
-            {visibleRoutes
-              .filter((route) =>
-                (group as readonly string[]).includes(route.id),
-              )
-              .map((route) => {
+        {navigationGroups.map((group, groupIndex) => {
+          const groupRoutes = visibleRoutes.filter((route) =>
+            (group as readonly string[]).includes(route.id),
+          );
+          if (groupRoutes.length === 0) return null;
+          return (
+            <div
+              key={group.join("-")}
+              className={
+                groupIndex === 0
+                  ? "space-y-0.5"
+                  : groupIndex === navigationGroups.length - 1
+                    ? "mt-4 space-y-0.5 border-t-2 border-dashed border-amber-300 pt-4 dark:border-amber-700/60"
+                    : "mt-2 space-y-0.5 border-t border-slate-200 pt-2 dark:border-slate-800"
+              }
+            >
+              {groupRoutes.map((route) => {
                 const Icon = route.icon;
                 const isActive = active(route);
                 return (
@@ -102,8 +107,9 @@ export function PlatformNavigation({
                   </button>
                 );
               })}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </nav>
     </div>
   );

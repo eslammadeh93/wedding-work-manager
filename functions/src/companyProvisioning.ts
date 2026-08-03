@@ -33,6 +33,7 @@ export function validateCreateCompanyRequest(input: unknown): CreateCompanyReque
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return failure('INVALID_INPUT', 'تواريخ الاشتراك غير صالحة.');
   normalized.features = [...new Set(value.features.map(feature => feature.trim()))];
   normalized.maxUsers = value.maxUsers!;
+  normalized.status = value.status === 'trial' ? 'trial' : 'active';
   return normalized;
 }
 
@@ -88,7 +89,7 @@ export class CompanyProvisioningService {
         transaction.create(slugRef, { companyId: companyRef.id, value: request.slug, createdAt: timestamp });
         transaction.create(codeRef, { companyId: companyRef.id, value: generatedCompanyCode, createdAt: timestamp });
         transaction.set(counterRef, { lastCode: nextCode, updatedAt: timestamp });
-        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: generatedCompanyCode, ownerName: request.ownerName, ownerEmail: request.ownerEmail, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: 'active', memberCount: 1, createdAt: timestamp, updatedAt: timestamp });
+        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: generatedCompanyCode, ownerName: request.ownerName, ownerEmail: request.ownerEmail, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: request.status, memberCount: 1, activeMemberCount: 1, orderCount: 0, createdAt: timestamp, updatedAt: timestamp });
         transaction.create(memberRef, { uid: ownerUid, companyId: companyRef.id, companyCode: generatedCompanyCode, name: request.ownerName, email: request.ownerEmail, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp });
         transaction.create(auditRef, { companyId: companyRef.id, ownerUid, createdBy, timestamp, action: 'company_created_with_owner' });
       });

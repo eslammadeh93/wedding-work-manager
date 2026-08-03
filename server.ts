@@ -11,6 +11,7 @@ const lockMinutesFor = (level: number) => (level === 0 ? 1 : level === 1 ? 5 : 3
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  const hmrPort = Number(process.env.VITE_HMR_PORT);
 
   app.use(express.json({ limit: '25mb' }));
 
@@ -87,7 +88,10 @@ async function startServer() {
   // Vite middleware in development mode
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ...(Number.isInteger(hmrPort) && hmrPort > 0 ? { hmr: { port: hmrPort } } : {}),
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

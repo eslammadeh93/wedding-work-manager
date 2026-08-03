@@ -52,6 +52,7 @@ export const ReportsModule: React.FC = () => {
   });
 
   const totalRevenue = reportOrders.reduce((sum, o) => sum + o.totalPrice, 0);
+  const averageOrderPrice = reportOrders.length > 0 ? totalRevenue / reportOrders.length : 0;
   const totalPaidRevenue = reportOrders.reduce((sum, o) => sum + o.deposit + (o.paymentStatus === 'fully_paid' ? o.remainingBalance : 0), 0);
   const totalOrderExpenses = reportOrders.reduce((sum, o) => sum + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
   // Keep order profitability completely separate from company capital and
@@ -274,7 +275,7 @@ export const ReportsModule: React.FC = () => {
           <ClipboardList className="w-5 h-5 text-amber-500" />
           <span>{language === 'ar' ? 'حسابات الأوردرات والربحية' : 'Orders & Profitability'}</span>
         </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalPrice')}</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
@@ -289,6 +290,17 @@ export const ReportsModule: React.FC = () => {
             ${totalPaidRevenue.toLocaleString()}
           </p>
           <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Collected Cash</span>
+        </div>
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-xs font-semibold text-slate-400 uppercase">
+            {language === 'ar' ? 'متوسط سعر الأوردر' : 'Average Order Price'}
+          </span>
+          <p className="text-2xl font-black text-sky-600 dark:text-sky-400 mt-2">
+            ${averageOrderPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </p>
+          <span className="text-[11px] text-slate-400 font-medium mt-1 block">
+            {language === 'ar' ? 'إجمالي قيمة الأوردرات ÷ عدد الأوردرات' : 'Total order value ÷ number of orders'}
+          </span>
         </div>
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <span className="text-xs font-semibold text-slate-400 uppercase">{language === 'ar' ? 'تكاليف الأوردرات' : 'Order Costs'}</span>

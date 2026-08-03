@@ -7,6 +7,7 @@ interface ConfirmDialogProps {
   description: ReactNode;
   confirmLabel?: string;
   busy?: boolean;
+  confirmDisabled?: boolean;
   dangerous?: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -18,6 +19,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = "تأكيد",
   busy = false,
+  confirmDisabled = false,
   dangerous = false,
   onConfirm,
   onClose,
@@ -57,7 +59,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             className={`rounded-xl px-4 py-2 font-bold text-white disabled:opacity-50 ${dangerous ? "bg-rose-600" : "bg-amber-600"}`}
           >
             {busy ? "جارٍ التنفيذ…" : confirmLabel}

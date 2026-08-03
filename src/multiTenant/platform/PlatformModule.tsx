@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
-  ChevronRight,
   Crown,
   Mail,
   Pencil,
-  Plus,
   Users,
   X,
 } from "lucide-react";
@@ -19,7 +17,6 @@ import {
   listPlatformCompanies,
   listPlatformCompanyMembers,
   platformDateInputValue,
-  summarizeCompanies,
 } from "./platformService";
 import type {
   CreateAdditionalCompanyOwnerRequest,
@@ -32,7 +29,6 @@ import { PlatformLayout } from "./PlatformLayout";
 import { platformRouteForPath } from "./routes";
 import { PlatformPermissionGuard } from "./permissions/PlatformPermissionGuard";
 import { PlatformPageHeader } from "./shared/PlatformPageHeader";
-import { StatCard } from "./shared/StatCard";
 import { LoadingState } from "./shared/LoadingState";
 import { EmptyState } from "./shared/EmptyState";
 import { ErrorState } from "./shared/ErrorState";
@@ -40,9 +36,10 @@ import { DataTable, type DataTableColumn } from "./shared/DataTable";
 import { FilterBar } from "./shared/FilterBar";
 import { Pagination } from "./shared/Pagination";
 import { PlatformButton } from "./shared/PlatformButton";
-import { PlatformSection } from "./shared/PlatformSection";
+import { PlatformDashboard } from "./pages/dashboard/PlatformDashboard";
+import { DeveloperToolsPage } from "./pages/developerTools/DeveloperToolsPage";
 
-type View = "overview" | "companies" | "detail" | "placeholder";
+type View = "overview" | "companies" | "detail" | "developerTools" | "placeholder";
 const statusLabel: Record<string, string> = {
   active: "نشطة",
   trial: "تجريبية",
@@ -62,11 +59,12 @@ const statusClass: Record<string, string> = {
 const fieldClass =
   "w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/25";
 
-function usePlatformCompanies() {
+function usePlatformCompanies(enabled: boolean) {
   const [companies, setCompanies] = useState<PlatformCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reload = async () => {
+    if (!enabled) { setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
@@ -78,8 +76,8 @@ function usePlatformCompanies() {
     }
   };
   useEffect(() => {
-    void reload();
-  }, []);
+    if (enabled) void reload(); else setLoading(false);
+  }, [enabled]);
   return { companies, loading, error, reload };
 }
 
@@ -281,27 +279,36 @@ function CreateCompanyForm({ close }: { close: () => void }) {
 
 export function PlatformModule() {
   const { authSession, logout } = useAuth();
-  const { companies, loading, error, reload } = usePlatformCompanies();
-  const [path, setPath] = useState("/platform");
+  const [path, setPath] = useState(() => window.location.pathname.startsWith("/platform") ? `${window.location.pathname}${window.location.search}` : "/platform");
   const [menu, setMenu] = useState(false);
   const [creating, setCreating] = useState(false);
   const go = (target: string) => {
     setPath(target);
+    window.history.pushState({}, "", target);
     setMenu(false);
   };
+  useEffect(() => {
+    const syncPath = () => setPath(`${window.location.pathname}${window.location.search}`);
+    window.addEventListener("popstate", syncPath);
+    return () => window.removeEventListener("popstate", syncPath);
+  }, []);
+  const cleanPath = path.split("?")[0];
   const view: View =
-    path === "/platform/companies"
+    cleanPath === "/platform/companies"
       ? "companies"
-      : path.startsWith("/platform/companies/")
+      : cleanPath.startsWith("/platform/companies/")
         ? "detail"
-        : path === "/platform"
+        : cleanPath === "/platform"
           ? "overview"
+          : cleanPath === "/platform/developer-tools"
+            ? "developerTools"
           : "placeholder";
   const companyId =
-    view === "detail" ? decodeURIComponent(path.split("/").pop() || "") : "";
+    view === "detail" ? decodeURIComponent(cleanPath.split("/").pop() || "") : "";
+  const { companies, loading, error, reload } = usePlatformCompanies(view === "companies" || view === "detail");
   const selected = companies.find((company) => company.id === companyId);
-  const overview = useMemo(() => summarizeCompanies(companies), [companies]);
-  const route = platformRouteForPath(path);
+  const route = platformRouteForPath(cleanPath);
+  const companyView = view === "companies" || view === "detail";
   return (
     <PlatformLayout
       currentPath={path}
@@ -318,101 +325,21 @@ export function PlatformModule() {
           permission={route.permission}
           fallback={<ErrorState message="لا تملك صلاحية فتح هذا القسم." />}
         >
-          {error ? (
+          {companyView && error ? (
             <ErrorState message={error} onRetry={() => void reload()} />
-          ) : loading ? (
+          ) : companyView && loading ? (
             <LoadingState text="جارٍ تحميل بيانات المنصة…" />
           ) : (
             <>
               {view === "overview" && (
-                <section>
-                  <PlatformPageHeader
-                    title="لوحة المنصة"
-                    description="نظرة عامة على الاشتراكات والشركات."
-                    actions={
-                      <PlatformButton onClick={() => setCreating(true)}>
-                        <Plus size={17} />
-                        إنشاء شركة
-                      </PlatformButton>
-                    }
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <StatCard
-                      label="إجمالي الشركات"
-                      value={overview.totalCompanies}
-                    />
-                    <StatCard
-                      label="الشركات النشطة"
-                      value={overview.activeCompanies}
-                    />
-                    <StatCard
-                      label="الشركات التجريبية"
-                      value={overview.trialCompanies}
-                    />
-                    <StatCard
-                      label="متأخرة في الدفع"
-                      value={overview.pastDueCompanies}
-                    />
-                    <StatCard
-                      label="المنتهية"
-                      value={overview.expiredCompanies}
-                    />
-                    <StatCard
-                      label="الموقوفة"
-                      value={overview.suspendedCompanies}
-                    />
-                    <StatCard
-                      label="إجمالي الأعضاء"
-                      value={overview.totalMembers ?? "غير متاح"}
-                    />
-                    <StatCard
-                      label="تنتهي قريبًا"
-                      value={overview.expiringSoonCompanies.length}
-                    />
-                  </div>
-                  <PlatformSection className="mt-7">
-                    <h2 className="mb-4 font-black">
-                      الشركات القريبة من انتهاء الاشتراك
-                    </h2>
-                    {overview.expiringSoonCompanies.length === 0 ? (
-                      <EmptyState text="لا توجد شركات قريبة من انتهاء الاشتراك." />
-                    ) : (
-                      <div className="space-y-2">
-                        {overview.expiringSoonCompanies.map((company) => (
-                          <div
-                            key={company.id}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800"
-                          >
-                            <span className="font-bold">{company.name}</span>
-                            <span>{company.plan}</span>
-                            <Status status={company.status} />
-                            <span>
-                              {formatPlatformDate(company.subscriptionEnd)}
-                            </span>
-                            <span>
-                              {daysUntil(company.subscriptionEnd)} يوم
-                            </span>
-                            <button
-                              onClick={() =>
-                                go(`/platform/companies/${company.id}`)
-                              }
-                              className="text-amber-700"
-                            >
-                              فتح التفاصيل{" "}
-                              <ChevronRight className="inline" size={16} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </PlatformSection>
-                </section>
+                <PlatformDashboard navigate={go} createCompany={() => setCreating(true)} />
               )}
               {view === "companies" && (
                 <Companies
                   companies={companies}
                   go={go}
                   openCreate={() => setCreating(true)}
+                  initialStatus={new URLSearchParams(path.split("?")[1] || "").get("status") || ""}
                 />
               )}
               {view === "detail" && (
@@ -421,6 +348,7 @@ export function PlatformModule() {
                   back={() => go("/platform/companies")}
                 />
               )}
+              {view === "developerTools" && <DeveloperToolsPage />}
               {view === "placeholder" && (
                 <section>
                   <PlatformPageHeader title={route.label} />
@@ -471,13 +399,15 @@ function Companies({
   companies,
   go,
   openCreate,
+  initialStatus,
 }: {
   companies: PlatformCompany[];
   go: (path: string) => void;
   openCreate: () => void;
+  initialStatus: string;
 }) {
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus === "expiring" ? "" : initialStatus);
   const [plan, setPlan] = useState("");
   const [sort, setSort] = useState("name");
   const [localCompanies, setLocalCompanies] = useState(companies);
@@ -496,6 +426,7 @@ function Companies({
             v?.toLowerCase().includes(search.toLowerCase()),
           )) &&
         (!status || c.status === status) &&
+        (initialStatus !== "expiring" || (() => { const days = daysUntil(c.subscriptionEnd); return days !== null && days >= 0 && days <= 30; })()) &&
         (!plan || c.plan === plan),
     )
     .sort((a, b) =>

@@ -81,7 +81,7 @@ export function PlatformLayout({
         </div>
         <div>
           <p className="font-bold">{displayName || "صاحب المنصة"}</p>
-          <p className="text-xs text-slate-500">{role}</p>
+          <p className="text-xs text-slate-500">{role === "platform_owner" ? "Super Admin" : role.replaceAll("_", " ")}</p>
         </div>
         <div className="flex items-center gap-2">
           <PlatformIconButton

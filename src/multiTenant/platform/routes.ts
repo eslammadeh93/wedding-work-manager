@@ -10,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  Wrench,
 } from "lucide-react";
 import type { PlatformPermission } from "./permissions/platformPermissions";
 
@@ -21,6 +22,7 @@ export type PlatformRouteId =
   | "analytics"
   | "notifications"
   | "activity"
+  | "developerTools"
   | "support"
   | "settings"
   | "admins";
@@ -114,6 +116,14 @@ export const PLATFORM_ROUTES: readonly PlatformRouteDefinition[] = [
     icon: ShieldCheck,
     permission: "platform:admins:manage",
     implemented: false,
+  },
+  {
+    id: "developerTools",
+    path: "/platform/developer-tools",
+    label: "Developer Tools",
+    icon: Wrench,
+    permission: "platform:developer_tools:manage",
+    implemented: true,
   },
 ] as const;
 

@@ -92,6 +92,10 @@ service cloud.firestore {
       allow write: if false;
     }
     match /platformAuditLogs/{logId} { allow read: if isPlatformOwner(); allow write: if false; }
+    // Dashboard aggregates are server-only. The callable returns a limited DTO.
+    match /platformAggregates/{documentId} { allow read, write: if false; }
+    match /platformAggregateEvents/{eventId} { allow read, write: if false; }
+    match /platformRebuildRuns/{runId} { allow read, write: if false; }
 
     match /companies/{companyId} {
       allow read: if isPlatformOwner() || memberIsActive(companyId);
