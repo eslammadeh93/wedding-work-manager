@@ -1,5 +1,5 @@
 /** Pure Cloud Functions DTOs. This module intentionally has no Firebase imports. */
-export type CompanyMemberError = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'COMPANY_NOT_FOUND' | 'COMPANY_INACTIVE' | 'MEMBER_NOT_FOUND' | 'MEMBER_DISABLED' | 'EMAIL_EXISTS' | 'USERNAME_EXISTS' | 'MAX_USERS_REACHED' | 'ROLE_NOT_ALLOWED' | 'SELF_ROLE_CHANGE_FORBIDDEN' | 'SELF_DISABLE_FORBIDDEN' | 'CANNOT_MANAGE_COMPANY_ADMIN' | 'LAST_COMPANY_ADMIN' | 'AUTH_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'WORKER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'RESET_NOT_SUPPORTED' | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
+export type CompanyMemberError = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'COMPANY_NOT_FOUND' | 'COMPANY_INACTIVE' | 'MEMBER_NOT_FOUND' | 'MEMBER_DISABLED' | 'EMAIL_EXISTS' | 'USERNAME_EXISTS' | 'MAX_USERS_REACHED' | 'ROLE_NOT_ALLOWED' | 'SELF_ROLE_CHANGE_FORBIDDEN' | 'SELF_DISABLE_FORBIDDEN' | 'CANNOT_MANAGE_COMPANY_ADMIN' | 'LAST_COMPANY_ADMIN' | 'AUTH_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'WORKER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'RESET_NOT_SUPPORTED' | 'ROLLBACK_FAILED' | 'MOVEMENT_ALREADY_RECORDED' | 'MOVEMENT_SEQUENCE_INVALID' | 'UNKNOWN_ERROR';
 export type ManagedRole = 'manager' | 'employee' | 'worker';
 export type CompanyRole = ManagedRole | 'company_super_admin';
 export type CompanyMemberResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberError; message: string; data?: T };
@@ -15,6 +15,7 @@ export interface DeleteWorkerRequest { workerId: string; companyId?: string; }
 export interface UpdateWorkerRequest { workerId: string; name?: string; username?: string; phone?: string; jobTitle?: string; notes?: string; }
 export interface SetWorkerStatusRequest { workerId: string; status: 'active' | 'inactive'; }
 export interface RecordOrderActivityRequest { orderId: string; action: 'opened' | 'arrived' | 'finished'; }
+export interface RecordWorkerMovementRequest { companyId: string; orderId: string; action: 'arrived' | 'completed'; }
 export interface UpdateWorkerOrderStatusRequest { orderId: string; status: 'preparing' | 'in_progress' | 'completed'; }
 export interface MarkCompanyNotificationsReadRequest { notificationIds: string[]; }
 export interface UpdateOwnCompanyProfileRequest { name?: string; phone?: string; newPassword?: string; }
@@ -30,6 +31,7 @@ export type DeleteWorkerResponse = CompanyMemberResponse;
 export type UpdateWorkerResponse = CompanyMemberResponse;
 export type SetWorkerStatusResponse = CompanyMemberResponse;
 export type RecordOrderActivityResponse = CompanyMemberResponse;
+export type RecordWorkerMovementResponse = CompanyMemberResponse<{ movementId: string }>;
 export type UpdateWorkerOrderStatusResponse = CompanyMemberResponse;
 export type MarkCompanyNotificationsReadResponse = CompanyMemberResponse;
 export type UpdateOwnCompanyProfileResponse = CompanyMemberResponse;

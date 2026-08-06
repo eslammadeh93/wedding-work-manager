@@ -27,6 +27,7 @@ export const firestorePaths = {
   notifications: (companyId: string) => companyCollection(companyId, 'notifications'),
   members: (companyId: string) => companyCollection(companyId, 'members'),
   order: (companyId: string, orderId: string) => `${companyRoot(companyId)}/orders/${documentId(orderId, 'orderId')}`,
+  workerMovements: (companyId: string, orderId: string) => `${companyRoot(companyId)}/orders/${documentId(orderId, 'orderId')}/workerMovements`,
   workerOrder: (companyId: string, orderId: string) => `${companyRoot(companyId)}/workerOrders/${documentId(orderId, 'orderId')}`,
   workerOrderContact: (companyId: string, orderId: string) => `${companyRoot(companyId)}/workerOrderContacts/${documentId(orderId, 'orderId')}`,
   customer: (companyId: string, customerId: string) => `${companyRoot(companyId)}/customers/${documentId(customerId, 'customerId')}`,

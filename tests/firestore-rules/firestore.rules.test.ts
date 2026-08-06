@@ -37,6 +37,8 @@ async function seed() {
       setDoc(doc(db, `${company('companyA')}/orders/contactRevokedAndDeleted`), { id: 'contactRevokedAndDeleted', companyId: 'companyA', workerId: 'worker1', workerCanContactCustomer: false, createdBy: 'system', createdAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderLegacy`), { id: 'orderLegacy', companyId: 'companyA', workerId: 'worker1', customerPhone: '+201008888888', createdBy: 'system', createdAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderOtherWorker`), { id: 'orderOtherWorker', companyId: 'companyA', workerId: 'worker2', customerPhone: '+201007777777', workerCanContactCustomer: true, createdBy: 'system', createdAt: 'now' }),
+      setDoc(doc(db, `${company('companyA')}/orders/orderA/workerMovements/worker1_arrived`), { companyId: 'companyA', orderId: 'orderA', workerId: 'worker1', action: 'arrived', createdByUid: 'companyAWorker1' }),
+      setDoc(doc(db, `${company('companyA')}/orders/orderA/workerMovements/worker2_arrived`), { companyId: 'companyA', orderId: 'orderA', workerId: 'worker2', action: 'arrived', createdByUid: 'companyAWorker2' }),
       setDoc(doc(db, `${company('companyA')}/orders/contactIdentityMismatch`), { id: 'contactIdentityMismatch', companyId: 'companyA', workerId: 'worker1', customerPhone: '+201006666666', workerCanContactCustomer: true, createdBy: 'system', createdAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/workerOrders/orderA`), { id: 'orderA', companyId: 'companyA', workerId: 'worker1', active: true, workerCanContactCustomer: true }),
       setDoc(doc(db, `${company('companyA')}/workerOrders/orderContactDenied`), { id: 'orderContactDenied', companyId: 'companyA', workerId: 'worker1', active: true, workerCanContactCustomer: false }),
@@ -125,3 +127,10 @@ test('41 employee may only perform the automatic false reset while changing work
 test('42 clients cannot write worker projections or contact documents', async () => { await assertFails(setDoc(doc(db('companyAManager'), `${company('companyA')}/workerOrders/client`), { workerId: 'worker1' })); await assertFails(setDoc(doc(db('companyAManager'), `${company('companyA')}/workerOrderContacts/client`), { workerId: 'worker1', customerPhone: '+201000000000' })); });
 test('43 worker cannot read a malformed projection containing a phone', async () => assertFails(getDoc(doc(db('companyAWorker2'), `${company('companyA')}/workerOrders/unsafeProjection`))));
 test('44 employee cannot create an order with contact permission enabled', async () => { await assertFails(setDoc(doc(db('companyAEmployee'), `${company('companyA')}/orders/employee-grant`), { companyId: 'companyA', workerCanContactCustomer: true })); await assertSucceeds(setDoc(doc(db('companyAEmployee'), `${company('companyA')}/orders/employee-denied`), { companyId: 'companyA', workerCanContactCustomer: false })); });
+test('45 assigned worker reads only their own movement records and cannot write them', async () => {
+  const movements = collection(db('companyAWorker1'), `${company('companyA')}/orders/orderA/workerMovements`);
+  await assertSucceeds(getDocs(query(movements, where('workerId', '==', 'worker1'))));
+  await assertFails(getDocs(movements));
+  await assertFails(setDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderA/workerMovements/client`), { workerId: 'worker1' }));
+});
+test('46 unassigned worker cannot read another worker order movements', async () => assertFails(getDoc(doc(db('companyAWorker2'), `${company('companyA')}/orders/orderA/workerMovements/worker1_arrived`))));

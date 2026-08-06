@@ -27,11 +27,13 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderStatus } from '../../types';
+import { Order, OrderStatus, WorkerMovement } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
 import { localDateString } from '../../utils/localDate';
 import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
+import { companyDataService } from '../../multiTenant/data/companyDataService';
+import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -47,8 +49,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onPrint,
 }) => {
   const { t, language } = useLanguage();
-  const { updateOrder, deleteOrder, settings, addPaymentToOrder, addActivityLog } = useData();
-  const { profile } = useAuth();
+  const { updateOrder, deleteOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
+  const { profile, authSession } = useAuth();
 
   const isWorker = profile?.role === 'worker';
   const canViewCustomerContact = order ? contactIsVisible(isWorker, order) : false;
@@ -64,6 +66,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [logToast, setLogToast] = useState<string | null>(null);
+  const [logToastIsError, setLogToastIsError] = useState(false);
+  const [workerMovements, setWorkerMovements] = useState<WorkerMovement[]>([]);
 
   const hasLoggedOpenRef = React.useRef<string | null>(null);
 
@@ -83,6 +87,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       }).catch(console.error);
     }
   }, [isWorker, order, profile, addActivityLog]);
+
+  React.useEffect(() => {
+    if (!order || !authSession) { setWorkerMovements([]); return; }
+    let companyId: string;
+    try { companyId = trustedCompanyIdFromSession(authSession); }
+    catch { setWorkerMovements([]); return; }
+    return companyDataService.subscribeOrderWorkerMovements<WorkerMovement>(companyId, order.id, isWorker ? profile?.workerId : undefined, setWorkerMovements, () => setWorkerMovements([]));
+  }, [authSession, isWorker, order?.id, profile?.workerId]);
 
   const imagesList = React.useMemo(() => {
     if (order?.designImages && order.designImages.length > 0) {
@@ -151,30 +163,26 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     }
   };
 
-  const handleLogActivity = async (action: 'arrived' | 'finished', label: string) => {
+  const handleLogActivity = async (action: WorkerMovement['action']) => {
     try {
       setIsLogging(true);
-      const workerName = profile?.workerName || profile?.displayName || 'المنفذ';
-      const workerId = profile?.workerId || profile?.uid || 'worker';
-      // Keep activity auditing in its dedicated Firestore collection. This
-      // avoids adding or changing fields on the existing order document.
-      await addActivityLog({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        workerId,
-        workerName,
-        action,
-        customerName: order.customerName,
-        eventDate: order.eventDate || order.weddingDate || order.bookingDate || '',
-      });
-
-      setLogToast(language === 'ar' ? `تم تسجيل (${label}) بنجاح` : `Logged (${label}) successfully`);
+      await recordWorkerMovement(order.id, action);
+      setLogToastIsError(false);
+      setLogToast(language === 'ar' ? 'تم إرسال بلاغك للمديرين بنجاح. لم تتغير حالة الطلب تلقائياً.' : 'Your report was sent to managers. The order was not changed automatically.');
       setTimeout(() => setLogToast(null), 3000);
     } catch (err) {
-      console.error(err);
+      setLogToastIsError(true);
+      setLogToast(err instanceof Error ? err.message : 'تعذر تسجيل بلاغ المنفذ. حاول مرة أخرى.');
     } finally {
       setIsLogging(false);
     }
+  };
+
+  const hasArrived = workerMovements.some(movement => movement.action === 'arrived');
+  const hasCompleted = workerMovements.some(movement => movement.action === 'completed');
+  const movementTime = (value: unknown) => {
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') return value.toDate() as Date;
+    return new Date(typeof value === 'string' || typeof value === 'number' ? value : Date.now());
   };
 
   return (
@@ -235,7 +243,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
         {/* Toast Alert */}
         {logToast && (
-          <div className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 text-center animate-in fade-in duration-150 shrink-0">
+          <div className={`${logToastIsError ? 'bg-red-600' : 'bg-emerald-600'} text-white text-xs font-bold px-4 py-2 text-center animate-in fade-in duration-150 shrink-0`}>
             {logToast}
           </div>
         )}
@@ -814,8 +822,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => handleLogActivity('arrived', language === 'ar' ? 'تم الوصول' : 'Arrived')}
-                  disabled={isLogging}
+                  onClick={() => handleLogActivity('arrived')}
+                  disabled={isLogging || hasArrived}
                   className="p-3 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   <Car className="w-4 h-4" />
@@ -823,8 +831,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleLogActivity('finished', language === 'ar' ? 'تم الانتهاء' : 'Finished')}
-                  disabled={isLogging}
+                  onClick={() => handleLogActivity('completed')}
+                  disabled={isLogging || !hasArrived || hasCompleted}
                   className="p-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   <Check className="w-4 h-4" />
@@ -834,19 +842,19 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             )}
 
             {/* Recorded Activity Logs List */}
-            {order.activityLogs && order.activityLogs.length > 0 ? (
+            {workerMovements.length > 0 ? (
               <div className="space-y-1.5 max-h-40 overflow-y-auto pt-1">
-                {order.activityLogs.map((log) => (
+                {workerMovements.map((log) => (
                   <div
                     key={log.id}
                     className="p-2.5 bg-white dark:bg-slate-900 rounded-xl text-xs border border-slate-200 dark:border-slate-700 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-200">
                       {log.action === 'arrived' ? <Car className="w-4 h-4 text-amber-500" /> : <Check className="w-4 h-4 text-emerald-500" />}
-                      <span>{log.actionText}</span>
+                      <span>{log.action === 'arrived' ? t('markArrived') : t('markFinished')}</span>
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      {new Date(log.timestamp).toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                      {movementTime(log.createdAt).toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 ))}

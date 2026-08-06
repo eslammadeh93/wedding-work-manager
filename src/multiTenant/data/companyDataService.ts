@@ -198,6 +198,15 @@ export const companyDataService = {
     });
     return () => { stopped = true; unsubscribeOrders(); contactUnsubscribes.forEach(unsubscribe => unsubscribe()); contactUnsubscribes.clear(); contacts.clear(); safeOrders.clear(); };
   },
+  /** Reads the same nested collection written by recordWorkerMovement. */
+  subscribeOrderWorkerMovements<T extends { id: string }>(companyId: string, orderId: string, workerId: string | undefined, next: (records: T[]) => void, fail: (result: DataOperationResult<never>) => void): Unsubscribe {
+    const path = firestorePaths.workerMovements(companyId, orderId);
+    const source = collection(db, path);
+    // Worker rules require this exact identity constraint; managers read the
+    // complete movement history for a single order.
+    const restricted = workerId ? query(source, where('workerId', '==', workerId)) : source;
+    return onSnapshot(restricted, snapshot => next(snapshot.docs.map(item => ({ id: item.id, ...item.data() } as T))), error => fail({ success: false, ...messageFor(error, 'تعذر تحميل سجل تحركات المنفذ.') }));
+  },
   subscribe<T extends { id: string }>(companyId: string, name: CompanyCollection, next: (records: T[]) => void, fail: (result: DataOperationResult<never>) => void, equalTo?: { field: string; value: string }): Unsubscribe {
     const path = firestorePaths[name](companyId); warnOnTenantRootCollection(path);
     const source = collection(db, path);

@@ -117,6 +117,7 @@ function AppContent() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
+  const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
 
   // Set default active tab to dashboard (or orders for workers) when logged in
   useEffect(() => {
@@ -172,7 +173,8 @@ function AppContent() {
     return <PlatformEntry />;
   }
 
-  const handleNavigate = (tab: ActiveTab) => {
+  const handleNavigate = (tab: ActiveTab, referenceId?: string) => {
+    if (tab === 'orders' && referenceId) setNotificationOrderId(referenceId);
     setActiveTab(tab);
   };
 
@@ -241,7 +243,7 @@ function AppContent() {
             }
           >
             {activeTab === 'dashboard' && <DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} />}
-            {activeTab === 'orders' && <OrdersModule createOrderRequest={createOrderRequest} />}
+            {activeTab === 'orders' && <OrdersModule createOrderRequest={createOrderRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} />}
             {activeTab === 'workers' && <WorkersModule />}
             {activeTab === 'customers' && <CustomersModule />}
             {activeTab === 'inventory' && <InventoryModule />}

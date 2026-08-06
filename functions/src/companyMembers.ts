@@ -4,7 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 const admin = { firestore: { FieldValue } };
 import type { ChangeCompanyMemberRoleRequest, ChangeCompanyMemberRoleResponse, CompanyMemberError, CompanyMemberResponse, CompanyRole, CreateCompanyMemberRequest, CreateCompanyMemberResponse, DeleteCompanyMemberRequest, DeleteCompanyMemberResponse, DeleteWorkerRequest, DeleteWorkerResponse, DisableCompanyMemberRequest, DisableCompanyMemberResponse, ManagedRole, ReactivateCompanyMemberRequest, ReactivateCompanyMemberResponse, ResetWorkerLoginCodeRequest, ResetWorkerLoginCodeResponse, SendCompanyMemberPasswordResetRequest, SendCompanyMemberPasswordResetResponse, UpdateCompanyMemberRequest, UpdateCompanyMemberResponse, UpdateOwnCompanyProfileRequest, UpdateOwnCompanyProfileResponse } from './apiTypes.js';
-import type { MarkCompanyNotificationsReadRequest, MarkCompanyNotificationsReadResponse, RecordOrderActivityRequest, RecordOrderActivityResponse, SetWorkerStatusRequest, SetWorkerStatusResponse, UpdateWorkerOrderStatusRequest, UpdateWorkerOrderStatusResponse, UpdateWorkerRequest, UpdateWorkerResponse } from './apiTypes.js';
+import type { MarkCompanyNotificationsReadRequest, MarkCompanyNotificationsReadResponse, RecordOrderActivityRequest, RecordOrderActivityResponse, RecordWorkerMovementRequest, RecordWorkerMovementResponse, SetWorkerStatusRequest, SetWorkerStatusResponse, UpdateWorkerOrderStatusRequest, UpdateWorkerOrderStatusResponse, UpdateWorkerRequest, UpdateWorkerResponse } from './apiTypes.js';
 export type * from './apiTypes.js';
 
 type AuthContext = { uid: string; token?: Record<string, unknown> } | undefined;
@@ -172,18 +172,53 @@ export class CompanyMemberService {
     await context.company.ref.collection('activityLogs').add({ orderId, orderNumber: String(order.data()?.orderNumber || ''), workerId: String(actor.workerId || ''), workerName: String(actor.name || ''), action: data.action, customerName: String(order.data()?.customerName || ''), eventDate: String(order.data()?.eventDate || order.data()?.weddingDate || order.data()?.bookingDate || ''), performedBy: auth!.uid, timestamp: admin.firestore.FieldValue.serverTimestamp() });
     return ok('تم تسجيل النشاط.');
   }
+  /** Worker check-ins are reports only; this method never writes the order. */
+  async recordWorkerMovement(input: unknown, auth: AuthContext): Promise<RecordWorkerMovementResponse> {
+    const movementFail = (code: CompanyMemberError, message: string): RecordWorkerMovementResponse => ({ success: false, code, message });
+    const context = await this.caller(auth); if ('success' in context) return context as RecordWorkerMovementResponse;
+    const data = (input || {}) as RecordWorkerMovementRequest;
+    const companyId = normalize(data.companyId); const orderId = normalize(data.orderId); const action = data.action;
+    if (companyId !== context.company.id || !orderId || !['arrived', 'completed'].includes(String(action))) return movementFail('INVALID_INPUT', 'بيانات حركة المنفذ غير صالحة.');
+    const actor = context.member.data() as MemberDoc;
+    if (actor.role !== 'worker' || !actor.workerId) return movementFail('FORBIDDEN', 'هذه العملية متاحة للمنفذ المسند إليه الطلب فقط.');
+    const rate = await this.rateLimit(context.company.id, auth!.uid, 'worker-movement'); if (rate) return rate as RecordWorkerMovementResponse;
+    const companyRef = context.company.ref;
+    const movementId = `${actor.workerId}_${action}`;
+    const movementRef = companyRef.collection('orders').doc(orderId).collection('workerMovements').doc(movementId);
+    const arrivalRef = companyRef.collection('orders').doc(orderId).collection('workerMovements').doc(`${actor.workerId}_arrived`);
+    const activityRef = companyRef.collection('activityLogs').doc(`worker_movement_${orderId}_${movementId}`);
+    try {
+      await this.deps.db.runTransaction(async tx => {
+        const orderRef = companyRef.collection('orders').doc(orderId);
+        const [order, existing, arrival, recipients] = await Promise.all([
+          tx.get(orderRef), tx.get(movementRef), action === 'completed' ? tx.get(arrivalRef) : Promise.resolve(undefined),
+          tx.get(companyRef.collection('members').where('status', '==', 'active').where('role', 'in', ['company_super_admin', 'manager'])),
+        ]);
+        if (!order.exists) throw new MemberFailure('MEMBER_NOT_FOUND', 'الطلب غير موجود.');
+        if (order.data()?.workerId !== actor.workerId) throw new MemberFailure('FORBIDDEN', 'الطلب غير مسند لهذا العامل.');
+        if (existing.exists) throw new MemberFailure('MOVEMENT_ALREADY_RECORDED', action === 'arrived' ? 'تم تسجيل الوصول مسبقاً.' : 'تم تسجيل انتهاء التنفيذ مسبقاً.');
+        if (action === 'completed' && !arrival?.exists) throw new MemberFailure('MOVEMENT_SEQUENCE_INVALID', 'يجب تسجيل الوصول أولاً قبل الإبلاغ عن انتهاء التنفيذ.');
+        const orderNumber = String(order.data()?.orderNumber || orderId); const name = String(actor.name || 'المنفذ');
+        const type = action === 'arrived' ? 'worker_arrived' : 'worker_completed';
+        const titleAr = action === 'arrived' ? 'تم وصول المنفذ' : 'تم انتهاء التنفيذ';
+        const bodyAr = action === 'arrived' ? `${name} وصل إلى موقع تنفيذ الطلب ${orderNumber}` : `${name} أبلغ بانتهاء تنفيذ الطلب ${orderNumber}`;
+        const timestamp = admin.firestore.FieldValue.serverTimestamp();
+        tx.create(movementRef, { id: movementId, companyId: context.company.id, orderId, orderNumber, workerId: actor.workerId, workerUid: auth!.uid, workerName: name, action, type, createdAt: timestamp, createdByUid: auth!.uid, createdByRole: 'worker' });
+        tx.create(activityRef, { id: activityRef.id, companyId: context.company.id, orderId, orderNumber, workerId: actor.workerId, workerUid: auth!.uid, workerName: name, action: action === 'arrived' ? 'worker_reported_arrival' : 'worker_reported_completion', type, descriptionAr: `${bodyAr} (بلاغ من المنفذ، وليس تغييراً تلقائياً لحالة الطلب).`, descriptionEn: 'Worker report only; the order status was not changed.', performedBy: auth!.uid, timestamp, createdAt: timestamp });
+        recipients.docs.forEach(recipient => {
+          const notificationRef = companyRef.collection('notifications').doc(`worker_movement_${orderId}_${movementId}_${recipient.id}`);
+          tx.create(notificationRef, { id: notificationRef.id, type, title: titleAr, body: bodyAr, titleAr, titleEn: action === 'arrived' ? 'Worker arrived' : 'Worker reported completion', messageAr: `${bodyAr}. هذا بلاغ من المنفذ وليس تحديثاً تلقائياً لحالة الطلب.`, messageEn: 'Worker report only; review the order and update it manually if needed.', companyId: context.company.id, orderId, workerId: actor.workerId, movementId, targetUid: recipient.id, read: false, linkModule: 'orders', referenceId: orderId, navigation: { module: 'orders', referenceId: orderId }, createdAt: timestamp });
+        });
+      });
+      return ok('تم تسجيل بلاغ المنفذ وإرسال إشعار للمديرين.', { movementId });
+    } catch (error) {
+      if (error instanceof MemberFailure) return movementFail(error.code, error.message);
+      return movementFail('UNKNOWN_ERROR', 'تعذر حفظ بلاغ المنفذ. لم يتم تأكيد أي تغيير.');
+    }
+  }
   async updateWorkerOrderStatus(input: unknown, auth: AuthContext): Promise<UpdateWorkerOrderStatusResponse> {
-    const context = await this.caller(auth); if ('success' in context) return context;
-    const actor = context.member.data() as MemberDoc; const data = (input || {}) as UpdateWorkerOrderStatusRequest; const orderId = normalize(data.orderId);
-    if (actor.role !== 'worker' || !actor.workerId) return fail('FORBIDDEN', 'هذه العملية متاحة للعامل فقط.');
-    if (!orderId || !['preparing', 'in_progress', 'completed'].includes(String(data.status))) return fail('INVALID_INPUT', 'حالة الطلب غير مسموحة للعامل.');
-    const orderRef = context.company.ref.collection('orders').doc(orderId); const order = await orderRef.get();
-    if (!order.exists) return fail('MEMBER_NOT_FOUND', 'الطلب غير موجود.');
-    if (order.data()?.workerId !== actor.workerId) return fail('FORBIDDEN', 'الطلب غير مسند لهذا العامل.');
-    const rate = await this.rateLimit(context.company.id, auth!.uid, 'worker-order-status'); if (rate) return rate;
-    await orderRef.update({ orderStatus: data.status, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-    await this.audit(context.company.id, 'worker_order_status_updated', auth!.uid, auth!.uid, 'worker', { orderId, status: data.status });
-    return ok('تم تحديث حالة الطلب.');
+    void input; void auth;
+    return fail('FORBIDDEN', 'لا يُسمح للمنفذ بتعديل حالة الطلب. استخدم بلاغ الوصول أو الانتهاء ليقوم المدير بالمراجعة يدوياً.');
   }
   async markNotificationsRead(input: unknown, auth: AuthContext): Promise<MarkCompanyNotificationsReadResponse> {
     const context = await this.caller(auth); if ('success' in context) return context;

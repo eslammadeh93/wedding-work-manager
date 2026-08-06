@@ -23,6 +23,7 @@ import {
   PaymentEntry,
   Worker,
   ActivityLogRecord,
+  WorkerMovement,
 } from '../types';
 import {
   initialCompanySettings,
@@ -71,6 +72,7 @@ export interface DataContextType {
   
   // Activity Logs
   addActivityLog: (logData: Omit<ActivityLogRecord, 'id' | 'timestamp'>) => Promise<string>;
+  recordWorkerMovement: (orderId: string, action: WorkerMovement['action']) => Promise<string>;
   
   // Orders
   addOrder: (orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus'>) => Promise<string>;
@@ -828,6 +830,10 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return logId;
   };
 
+  const recordWorkerMovement = async (): Promise<string> => {
+    throw new Error('تسجيل تحركات المنفذ متاح فقط عبر المسار الآمن للشركات.');
+  };
+
   const markNotificationAsRead = (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
   };
@@ -863,6 +869,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         totalGeneralExpenses,
         currentCashBalance,
         addActivityLog,
+        recordWorkerMovement,
         addOrder,
         updateOrder,
         deleteOrder,

@@ -47,9 +47,11 @@ type SortOrder = 'asc' | 'desc';
 
 interface OrdersModuleProps {
   createOrderRequest?: number;
+  openOrderId?: string;
+  onOrderOpened?: () => void;
 }
 
-export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0 }) => {
+export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
   const { orders, deleteOrder } = useData();
   const { profile } = useAuth();
@@ -107,6 +109,12 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     if (!isWorker && createOrderRequest > 0) setIsCreateOpen(true);
     if (isWorker) setIsCreateOpen(false);
   }, [createOrderRequest, isWorker]);
+
+  useEffect(() => {
+    if (!openOrderId) return;
+    const target = orders.find(order => order.id === openOrderId);
+    if (target) { setViewingOrder(target); onOrderOpened?.(); }
+  }, [onOrderOpened, openOrderId, orders]);
 
   // Helper date parsing
   const getBookingDate = (ord: Order) => ord.bookingDate || ord.createdAt.split('T')[0];

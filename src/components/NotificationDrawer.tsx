@@ -69,8 +69,10 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
             </div>
           ) : (
             notifications.map((notif) => {
-              const title = language === 'ar' ? notif.titleAr : notif.titleEn;
-              const message = language === 'ar' ? notif.messageAr : notif.messageEn;
+              const title = language === 'ar' ? (notif.titleAr || notif.title || '') : (notif.titleEn || notif.title || '');
+              const message = language === 'ar' ? (notif.messageAr || notif.body || '') : (notif.messageEn || notif.body || '');
+              const dateValue = notif.createdAt && typeof notif.createdAt === 'object' && 'toDate' in notif.createdAt && typeof notif.createdAt.toDate === 'function'
+                ? notif.createdAt.toDate() as Date : new Date(notif.date || Date.now());
 
               let icon = <AlertTriangle className="w-4 h-4 text-amber-500" />;
               let bgClass = 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50';
@@ -89,7 +91,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                   onClick={() => {
                     markNotificationAsRead(notif.id);
                     if (notif.linkModule) {
-                      onNavigate(notif.linkModule as ActiveTab, notif.referenceId);
+                      onNavigate(notif.linkModule as ActiveTab, notif.referenceId || notif.orderId);
                       onClose();
                     }
                   }}
@@ -109,7 +111,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                         {message}
                       </p>
                       <span className="text-[10px] text-slate-400 mt-1 block">
-                        {new Date(notif.date).toLocaleDateString()}
+                        {dateValue.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US')}
                       </span>
                     </div>
                   </div>

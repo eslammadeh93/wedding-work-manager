@@ -166,6 +166,15 @@ service cloud.firestore {
           && workerContactUpdateAllowed(companyId);
         allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
       }
+      match /orders/{orderId}/workerMovements/{movementId} {
+        // Movements are written only by the trusted callable. A worker can
+        // read only their own records under an order assigned to them.
+        allow read: if contactManagers(companyId)
+          || (canReadOperations(companyId) && isWorker(companyId)
+            && canonicalOrder(companyId, orderId).data.workerId == companyMember(companyId).data.workerId
+            && resource.data.workerId == companyMember(companyId).data.workerId);
+        allow write: if false;
+      }
       match /workerOrders/{orderId} {
         allow read: if hasCompanyPermission(companyId, 'orders:read')
           || (canReadOperations(companyId) && isWorker(companyId)

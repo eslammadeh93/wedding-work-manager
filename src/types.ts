@@ -86,6 +86,21 @@ export interface ActivityLogRecord {
   eventDate: string;
 }
 
+export interface WorkerMovement {
+  id: string;
+  companyId: string;
+  orderId: string;
+  orderNumber: string;
+  workerId: string;
+  workerUid?: string;
+  workerName: string;
+  action: 'arrived' | 'completed';
+  type: 'worker_arrived' | 'worker_completed';
+  createdAt: unknown;
+  createdByUid: string;
+  createdByRole: 'worker';
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -204,15 +219,22 @@ export interface CategoryItem {
 
 export interface AppNotification {
   id: string;
-  type: 'upcoming_wedding' | 'pending_payment' | 'low_inventory';
-  titleEn: string;
-  titleAr: string;
-  messageEn: string;
-  messageAr: string;
-  date: string;
+  type: 'upcoming_wedding' | 'pending_payment' | 'low_inventory' | 'worker_arrived' | 'worker_completed';
+  titleEn?: string;
+  titleAr?: string;
+  messageEn?: string;
+  messageAr?: string;
+  title?: string;
+  body?: string;
+  date?: string;
+  createdAt?: unknown;
   read: boolean;
   linkModule?: string;
   referenceId?: string;
+  orderId?: string;
+  workerId?: string;
+  movementId?: string;
+  targetUid?: string;
 }
 
 export interface CompanySettings {
