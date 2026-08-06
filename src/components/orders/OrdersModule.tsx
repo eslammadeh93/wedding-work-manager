@@ -25,11 +25,13 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderStatus, PaymentStatus } from '../../types';
+import { Order, OrderStatus, PaymentStatus, WorkerMovement } from '../../types';
 import { OrderModal } from './OrderModal';
 import { OrderDetailModal } from './OrderDetailModal';
 import { OrderInvoicePrint } from './OrderInvoicePrint';
 import { localDateString } from '../../utils/localDate';
+import { companyDataService } from '../../multiTenant/data/companyDataService';
+import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 
 type QuickFilterType =
   | 'all'
@@ -51,10 +53,37 @@ interface OrdersModuleProps {
   onOrderOpened?: () => void;
 }
 
+const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Order }> = ({ companyId, order }) => {
+  const [movements, setMovements] = useState<WorkerMovement[]>([]);
+
+  useEffect(() => {
+    if (!companyId || !order.workerId) { setMovements([]); return; }
+    // Follow the same authoritative nested records used by the order detail
+    // screen. This does not rely on optional fields in movement documents.
+    return companyDataService.subscribeOrderWorkerMovements<WorkerMovement>(
+      companyId,
+      order.id,
+      order.workerId,
+      setMovements,
+      () => setMovements([]),
+    );
+  }, [companyId, order.id, order.workerId]);
+
+  const hasArrived = movements.some(movement => movement.action === 'arrived');
+  const hasCompleted = movements.some(movement => movement.action === 'completed');
+
+  return (
+    <span className="flex items-center gap-1 me-1" aria-hidden="true">
+      <MapPin className={`w-3.5 h-3.5 ${hasArrived ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600 opacity-50'}`} />
+      <CheckCircle2 className={`w-3.5 h-3.5 ${hasCompleted ? 'text-emerald-500' : 'text-slate-300 dark:text-slate-600 opacity-50'}`} />
+    </span>
+  );
+};
+
 export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
   const { orders, deleteOrder } = useData();
-  const { profile } = useAuth();
+  const { profile, authSession } = useAuth();
 
   const isWorker = profile?.role === 'worker';
   const workerId = profile?.workerId || '';
@@ -99,6 +128,12 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
+
+  const managerCompanyId = useMemo(() => {
+    if (isWorker || !authSession) return null;
+    try { return trustedCompanyIdFromSession(authSession); }
+    catch { return null; }
+  }, [authSession, isWorker]);
 
   // Keep an already-open worker modal synchronized with realtime redaction/grant updates.
   useEffect(() => {
@@ -1048,6 +1083,9 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                   )}
 
                   <div className="flex items-center gap-1">
+                    {!isWorker && (
+                      <WorkerMovementIndicators companyId={managerCompanyId} order={ord} />
+                    )}
                     <button
                       onClick={() => setViewingOrder(ord)}
                       className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-xl transition-colors cursor-pointer"
