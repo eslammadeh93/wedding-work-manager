@@ -430,6 +430,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newOrder: Order = {
       ...sanitizeData(orderData),
+      workerCanContactCustomer: orderData.workerCanContactCustomer === true,
       id: newId,
       totalPaid,
       remainingBalance,

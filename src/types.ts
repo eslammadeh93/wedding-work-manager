@@ -103,6 +103,8 @@ export interface Order {
   executorName?: string; // المنفذ / Executor
   workerId?: string; // Worker Firestore Document ID
   workerName?: string; // Worker display name
+  /** Missing on legacy orders and therefore treated as false. */
+  workerCanContactCustomer?: boolean;
   totalPrice: number;
   deposit: number;
   securityDeposit?: number; // التأمين / Security Deposit

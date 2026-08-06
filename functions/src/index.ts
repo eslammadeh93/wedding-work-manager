@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
+import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService, hashWorkerLoginCode } from './companyMembers.js';
@@ -12,6 +13,7 @@ import { seedTestMultiTenantData as provisionTestMultiTenantData, setupEnvironme
 import { PlatformDashboardService } from './platformDashboard.js';
 import { PlatformRebuildService } from './platformRebuild.js';
 import { createPlatformAggregationTriggers } from './platformAggregation.js';
+import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
 
 initializeApp();
 const db = getFirestore();
@@ -23,6 +25,99 @@ export const updatePlatformCompanyAggregates = platformAggregationTriggers.compa
 export const updatePlatformMemberAggregates = platformAggregationTriggers.memberWritten;
 export const updatePlatformOrderAggregates = platformAggregationTriggers.orderWritten;
 export const refreshPlatformAggregatePeriods = platformAggregationTriggers.refreshPeriods;
+const projectionDebugEnabled = process.env.FUNCTIONS_EMULATOR === 'true' || process.env.NODE_ENV === 'development';
+const projectionDebug = (event: string, details: Record<string, unknown>) => {
+  if (projectionDebugEnabled) logger.info(`[worker-order-projection] ${event}`, details);
+};
+
+/**
+ * Writes each field-safe order projection and its contact capability atomically.
+ * The fallback callable uses this for legacy orders, while the Firestore trigger
+ * uses the same path shape for regular writes.
+ */
+async function writeWorkerOrderProjections(companyId: string, orders: Array<{ id: string; data: Record<string, unknown> }>) {
+  const commits: Array<Promise<unknown>> = [];
+  let batch = db.batch();
+  let operationCount = 0;
+  const commitCurrentBatch = () => {
+    if (operationCount === 0) return;
+    commits.push(batch.commit());
+    batch = db.batch();
+    operationCount = 0;
+  };
+
+  for (const order of orders) {
+    // Every order consumes two operations: a safe order projection and a
+    // contact set/delete. Stay well inside Firestore's 500-write limit.
+    if (operationCount + 2 > 450) commitCurrentBatch();
+    const companyRef = db.collection('companies').doc(companyId);
+    const workerOrderRef = companyRef.collection('workerOrders').doc(order.id);
+    const contactRef = companyRef.collection('workerOrderContacts').doc(order.id);
+    batch.set(workerOrderRef, buildWorkerOrderProjection(companyId, order.id, order.data));
+    const contact = buildWorkerOrderContactProjection(companyId, order.id, order.data);
+    if (contact) batch.set(contactRef, contact);
+    else batch.delete(contactRef);
+    operationCount += 2;
+  }
+  commitCurrentBatch();
+  await Promise.all(commits);
+}
+
+export const syncWorkerOrderAccess = onDocumentWritten({ document: 'companies/{companyId}/orders/{orderId}', region: 'us-central1' }, async event => {
+  const companyId = event.params.companyId;
+  const orderId = event.params.orderId;
+  const companyRef = db.collection('companies').doc(companyId);
+  const workerOrderRef = companyRef.collection('workerOrders').doc(orderId);
+  const contactRef = companyRef.collection('workerOrderContacts').doc(orderId);
+  const batch = db.batch();
+
+  if (!event.data?.after.exists) {
+    batch.delete(workerOrderRef);
+    batch.delete(contactRef);
+    await batch.commit();
+    projectionDebug('deleted', {
+      orderId, workerId: null, assignedWorkerId: null, workerCanContactCustomer: false,
+      workerOrderContactsPath: contactRef.path, contactDocumentExists: false,
+    });
+    return;
+  }
+
+  const before = event.data.before.exists ? event.data.before.data() : undefined;
+  const after = event.data.after.data() || {};
+  const assignment = enforceAssignmentContactReset(before, after);
+  const effectiveOrder = assignment.order;
+  const assignedWorkerId = typeof after.workerId === 'string' ? after.workerId.trim() : '';
+  projectionDebug('source order written', {
+    orderId, workerId: assignedWorkerId || null, assignedWorkerId: assignedWorkerId || null,
+    workerCanContactCustomer: after.workerCanContactCustomer === true,
+    workerOrderContactsPath: contactRef.path, assignmentReset: assignment.resetRequired,
+  });
+
+  // Admin SDK writes also keep the invariant, even though client rules already reject this state.
+  if (assignment.resetRequired) {
+    batch.update(event.data.after.ref, { workerCanContactCustomer: false });
+  }
+
+  const workerId = typeof effectiveOrder.workerId === 'string' ? effectiveOrder.workerId.trim() : '';
+  if (!workerId) {
+    batch.delete(workerOrderRef);
+    batch.delete(contactRef);
+  } else {
+    batch.set(workerOrderRef, buildWorkerOrderProjection(companyId, orderId, effectiveOrder));
+    const contact = buildWorkerOrderContactProjection(companyId, orderId, effectiveOrder);
+    if (contact) batch.set(contactRef, contact);
+    else batch.delete(contactRef);
+  }
+  await batch.commit();
+  if (projectionDebugEnabled) {
+    const contactSnapshot = await contactRef.get();
+    projectionDebug('projection synchronized', {
+      orderId, workerId: workerId || null, assignedWorkerId: assignedWorkerId || null,
+      workerCanContactCustomer: effectiveOrder.workerCanContactCustomer === true,
+      workerOrderContactsPath: contactRef.path, contactDocumentExists: contactSnapshot.exists,
+    });
+  }
+});
 export const getPlatformDashboard = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, request => platformDashboardService.get(request));
 export const rebuildPlatformAggregates = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public', timeoutSeconds: 120 }, request => platformRebuildService.run(request));
 type WorkerLoginResponse = { success: boolean; code: 'OK' | 'INVALID_CREDENTIALS' | 'LOCKED' | 'INVALID_REQUEST'; message: string; customToken?: string; retryAfterSeconds?: number };
@@ -152,7 +247,15 @@ export const getWorkerOrders = onCall({ region: 'us-central1', enforceAppCheck: 
   const company = await companyRef.get();
   if (!company.exists || !['active', 'trial'].includes(String(company.data()?.status))) return { success: false, code: 'FORBIDDEN', message: 'الشركة غير متاحة.' };
   const orders = await companyRef.collection('orders').where('workerId', '==', memberData.workerId).get();
-  return { success: true, code: 'OK', orders: orders.docs.map(order => ({ id: order.id, ...order.data() })) };
+  // Backfill safe realtime projections for legacy orders that predate the trigger.
+  const projectionInputs = orders.docs.map(order => ({ id: order.id, data: order.data() }));
+  const safeOrders = projectionInputs.map(order => buildWorkerOrderProjection(companyId, order.id, order.data));
+  await writeWorkerOrderProjections(companyId, projectionInputs);
+  projectionDebug('worker projection backfill complete', {
+    workerId: memberData.workerId, orderCount: projectionInputs.length,
+    workerOrderContactsPath: companyRef.collection('workerOrderContacts').path,
+  });
+  return { success: true, code: 'OK', orders: safeOrders };
 });
 
 /** Setup is deliberately limited to the local emulator or an explicitly configured staging environment. */

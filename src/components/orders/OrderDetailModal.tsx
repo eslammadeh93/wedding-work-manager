@@ -30,6 +30,8 @@ import { useAuth } from '../../context/AuthContext';
 import { Order, OrderStatus } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
 import { localDateString } from '../../utils/localDate';
+import { toTelHref, toWhatsAppHref } from '../../utils/phone';
+import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -49,6 +51,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const { profile } = useAuth();
 
   const isWorker = profile?.role === 'worker';
+  const canViewCustomerContact = order ? contactIsVisible(isWorker, order) : false;
 
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState('InstaPay');
@@ -146,16 +149,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     } finally {
       setIsDeleting(false);
     }
-  };
-
-  const formatWhatsAppPhone = (phone: string) => {
-    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
-    const normalized = phone.replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)));
-    const digits = normalized.replace(/[^0-9]/g, '');
-    if (!digits) return '';
-    if (digits.startsWith('0')) return `20${digits.slice(1)}`;
-    if (digits.length === 10 && digits.startsWith('1')) return `20${digits}`;
-    return digits;
   };
 
   const handleLogActivity = async (action: 'arrived' | 'finished', label: string) => {
@@ -258,25 +251,27 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <span>{t('quickActions')}</span>
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {/* 1. Call */}
-                <a
-                  href={`tel:${order.customerPhone}`}
-                  className="p-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
-                >
-                  <Phone className="w-5 h-5" />
-                  <span>{t('call')}</span>
-                </a>
+                {canViewCustomerContact && <>
+                  {/* 1. Call */}
+                  <a
+                    href={toTelHref(order.customerPhone)}
+                    className="p-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
+                  >
+                    <Phone className="w-5 h-5" />
+                    <span>{t('call')}</span>
+                  </a>
 
-                {/* 2. WhatsApp */}
-                <a
-                  href={`https://wa.me/${formatWhatsAppPhone(order.customerPhone)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>{t('whatsapp')}</span>
-                </a>
+                  {/* 2. WhatsApp */}
+                  <a
+                    href={toWhatsAppHref(order.customerPhone)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95"
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                    <span>{t('whatsapp')}</span>
+                  </a>
+                </>}
 
                 {/* 3. Location */}
                 <button
@@ -438,9 +433,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <p className="text-base font-extrabold text-slate-900 dark:text-white">
                   {order.customerName}
                 </p>
-                <p className="text-sm font-mono text-slate-600 dark:text-slate-300 font-bold dir-ltr text-left sm:text-right mt-0.5">
+                {canViewCustomerContact && <p className="text-sm font-mono text-slate-600 dark:text-slate-300 font-bold dir-ltr text-left sm:text-right mt-0.5">
                   {order.customerPhone}
-                </p>
+                </p>}
                 {order.salesEmployee && !isWorker && (
                   <p className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 mt-1 font-semibold">
                     <UserCheck className="w-3.5 h-3.5" />
@@ -455,16 +450,16 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 )}
               </div>
 
-              {!isWorker && <div className="flex items-center gap-2 shrink-0">
+              {canViewCustomerContact && !isWorker && <div className="flex items-center gap-2 shrink-0">
                 <a
-                  href={`tel:${order.customerPhone}`}
+                  href={toTelHref(order.customerPhone)}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
                 >
                   <Phone className="w-4 h-4" />
                   <span>{t('call')}</span>
                 </a>
                 <a
-                  href={`https://wa.me/${formatWhatsAppPhone(order.customerPhone)}`}
+                  href={toWhatsAppHref(order.customerPhone)}
                   target="_blank"
                   rel="noreferrer"
                   className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"

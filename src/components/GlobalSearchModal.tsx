@@ -30,7 +30,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           o.orderNumber.toLowerCase().includes(q) ||
           o.customerName.toLowerCase().includes(q) ||
           o.eventLocation.toLowerCase().includes(q) ||
-          o.customerPhone.includes(q)
+          (o.customerPhone || '').includes(q)
       )
     : [];
 

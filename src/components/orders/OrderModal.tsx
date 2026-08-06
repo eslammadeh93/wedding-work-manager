@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, AlertTriangle, UserCheck, Image, Upload, ExternalLink, Receipt, ChevronDown, Check, Wrench } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker } from '../../types';
 import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput } from '../../utils/phone';
@@ -119,8 +120,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { orders, customers, inventory, workers, addOrder, updateOrder, addCustomer, checkStockAvailability } = useData();
+  const { authSession } = useAuth();
 
   const isEdit = !!initialOrder;
+  const canManageWorkerContact = authSession?.role === 'manager' || authSession?.role === 'company_super_admin';
 
   // Form State
   const [orderNumber, setOrderNumber] = useState(
@@ -148,6 +151,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   // Worker assignment
   const [workerId, setWorkerId] = useState(initialOrder?.workerId || '');
   const [workerName, setWorkerName] = useState(initialOrder?.workerName || initialOrder?.executorName || '');
+  const [workerCanContactCustomer, setWorkerCanContactCustomer] = useState(initialOrder?.workerCanContactCustomer === true);
   const [totalPrice, setTotalPrice] = useState<number>(initialOrder?.totalPrice || 0);
   const [deposit, setDeposit] = useState<number>(initialOrder?.deposit || 0);
   const [securityDeposit, setSecurityDeposit] = useState<number>(initialOrder?.securityDeposit || 0);
@@ -328,6 +332,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       workerId: workerId.trim(),
       workerName: workerName.trim(),
       executorName: workerName.trim(),
+      workerCanContactCustomer: workerId.trim() ? workerCanContactCustomer : false,
       totalPrice: Number(totalPrice),
       deposit: Number(deposit),
       securityDeposit: Number(securityDeposit) || 0,
@@ -469,12 +474,39 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 selectedWorkerId={workerId}
                 selectedWorkerName={workerName}
                 onSelectWorker={(wId, wName) => {
+                  if (isEdit && wId !== workerId) {
+                    setWorkerCanContactCustomer(false);
+                    window.alert('تغيير العامل المسند سيوقف صلاحية رؤية رقم العميلة والتواصل معها. يمكنك تفعيلها يدويًا للعامل الجديد بعد الحفظ.');
+                  } else if (!wId) {
+                    setWorkerCanContactCustomer(false);
+                  }
                   setWorkerId(wId);
                   setWorkerName(wName);
                 }}
                 workers={workers}
               />
               <p className="mt-1 text-[11px] text-slate-500">اكتب للبحث ثم اختر العامل من القائمة حتى يتم حفظ الـWorker ID الصحيح.</p>
+              {canManageWorkerContact && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                  <label className="flex cursor-pointer items-start justify-between gap-3">
+                    <span>
+                      <span className="block text-xs font-bold text-slate-800 dark:text-slate-100">السماح للعامل برؤية رقم العميلة والتواصل معها</span>
+                      <span className="mt-1 block text-[11px] leading-5 text-slate-500 dark:text-slate-400">عند التفعيل، سيتمكن العامل المسند من رؤية رقم العميلة واستخدام الاتصال وWhatsApp.</span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={workerCanContactCustomer}
+                      aria-label="السماح للعامل برؤية رقم العميلة والتواصل معها"
+                      disabled={!workerId}
+                      onClick={() => setWorkerCanContactCustomer(value => !value)}
+                      className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workerCanContactCustomer ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                    >
+                      <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${workerCanContactCustomer ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </label>
+                </div>
+              )}
             </div>
 
             <div>

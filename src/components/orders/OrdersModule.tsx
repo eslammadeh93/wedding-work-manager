@@ -98,6 +98,11 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
 
+  // Keep an already-open worker modal synchronized with realtime redaction/grant updates.
+  useEffect(() => {
+    setViewingOrder(current => current ? orders.find(order => order.id === current.id) || null : null);
+  }, [orders]);
+
   useEffect(() => {
     if (!isWorker && createOrderRequest > 0) setIsCreateOpen(true);
     if (isWorker) setIsCreateOpen(false);
@@ -161,7 +166,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
           ord.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
           ord.eventLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (ord.executorName && ord.executorName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-          ord.customerPhone.includes(searchTerm);
+          (ord.customerPhone || '').includes(searchTerm);
 
         if (!matchesSearch) return false;
 
@@ -796,10 +801,10 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
 
                       <td className="p-4 font-bold">
                         <div>{ord.customerName}</div>
-                        <div className="text-[11px] text-slate-400 font-normal flex items-center gap-1 mt-0.5">
+                        {(!isWorker || (ord.workerCanContactCustomer === true && Boolean(ord.customerPhone))) && <div className="text-[11px] text-slate-400 font-normal flex items-center gap-1 mt-0.5">
                           <Phone className="w-3 h-3 text-amber-500" />
                           <span>{ord.customerPhone}</span>
-                        </div>
+                        </div>}
                         {ord.executorName && (
                           <div className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1 mt-1">
                             <Wrench className="w-3 h-3 text-amber-500 shrink-0" />
@@ -950,10 +955,10 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-amber-600 transition-colors">
                     {ord.customerName}
                   </h3>
-                  <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                  {(!isWorker || (ord.workerCanContactCustomer === true && Boolean(ord.customerPhone))) && <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                     <Phone className="w-3.5 h-3.5 text-amber-500" />
                     <span>{ord.customerPhone}</span>
-                  </p>
+                  </p>}
 
                   {/* Dual Dates Box */}
                   <div className="mt-3 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-1.5 border border-slate-100 dark:border-slate-700/50">

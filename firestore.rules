@@ -85,6 +85,53 @@ service cloud.firestore {
         && (!('reservedQuantity' in request.resource.data) || !('totalQuantity' in request.resource.data)
           || request.resource.data.reservedQuantity <= request.resource.data.totalQuantity);
     }
+    function contactManagers(companyId) {
+      return canReadOperations(companyId)
+        && (isCompanySuperAdmin(companyId) || isManager(companyId));
+    }
+    function validWorkerContactFlag() {
+      return !('workerCanContactCustomer' in request.resource.data)
+        || request.resource.data.workerCanContactCustomer is bool;
+    }
+    function workerAssignmentChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['workerId']);
+    }
+    function workerContactCreateAllowed(companyId) {
+      return validWorkerContactFlag() && (
+        contactManagers(companyId)
+        || !('workerCanContactCustomer' in request.resource.data)
+        || request.resource.data.workerCanContactCustomer == false
+      );
+    }
+    function workerContactUpdateAllowed(companyId) {
+      return validWorkerContactFlag()
+        && (!workerAssignmentChanged()
+          || ('workerCanContactCustomer' in request.resource.data)
+            && request.resource.data.workerCanContactCustomer == false)
+        && (contactManagers(companyId)
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['workerCanContactCustomer'])
+          || (!('workerCanContactCustomer' in resource.data)
+            && request.resource.data.workerCanContactCustomer == false)
+          || (workerAssignmentChanged()
+            && request.resource.data.workerCanContactCustomer == false));
+    }
+    function canonicalOrder(companyId, orderId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/orders/$(orderId));
+    }
+    function workerCanReadOrderContact(companyId, orderId) {
+      return canReadOperations(companyId) && isWorker(companyId)
+        && exists(/databases/$(database)/documents/companies/$(companyId)/orders/$(orderId))
+        && canonicalOrder(companyId, orderId).data.workerId == companyMember(companyId).data.workerId
+        // A deleted contact is readable only as an empty snapshot. This lets
+        // an already-running listener receive the revoke without an error;
+        // an existing contact document still requires an explicit grant and
+        // exact tenant, order, and worker identity.
+        && (!exists(/databases/$(database)/documents/companies/$(companyId)/workerOrderContacts/$(orderId))
+          || (canonicalOrder(companyId, orderId).data.workerCanContactCustomer == true
+            && resource.data.companyId == companyId
+            && resource.data.orderId == orderId
+            && resource.data.workerId == companyMember(companyId).data.workerId));
+    }
 
     match /platformUsers/{uid} {
       allow get: if isPlatformOwner() && (isSelf(uid) || platformProfileIsActive());
@@ -110,13 +157,25 @@ service cloud.firestore {
         allow write: if false;
       }
       match /orders/{orderId} {
+        // Workers use the field-safe projection below; rules cannot redact customerPhone here.
+        allow read: if hasCompanyPermission(companyId, 'orders:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
+          && companyIdMatchesPath(companyId) && workerContactCreateAllowed(companyId);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
+          && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
+          && workerContactUpdateAllowed(companyId);
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
+      }
+      match /workerOrders/{orderId} {
         allow read: if hasCompanyPermission(companyId, 'orders:read')
           || (canReadOperations(companyId) && isWorker(companyId)
-            && resource.data.workerId == companyMember(companyId).data.workerId);
-        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write') && companyIdMatchesPath(companyId);
-        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
-          && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
-        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
+            && resource.data.workerId == companyMember(companyId).data.workerId
+            && !('customerPhone' in resource.data));
+        allow write: if false;
+      }
+      match /workerOrderContacts/{orderId} {
+        allow get: if contactManagers(companyId) || workerCanReadOrderContact(companyId, orderId);
+        allow list, write: if false;
       }
       match /customers/{customerId} {
         allow read: if hasCompanyPermission(companyId, 'customers:read');
@@ -176,7 +235,7 @@ service cloud.firestore {
     function legacyManager() { return isSignedIn() && legacyProfile().role in ['super_admin', 'admin', 'manager'] && legacyProfile().isActive == true; }
     function legacyWorker() { return isSignedIn() && legacyProfile().role == 'worker' && legacyProfile().isActive == true; }
     match /users/{uid} { allow get: if isSelf(uid) || legacyManager(); allow list: if legacyManager(); allow write: if false; }
-    match /orders/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if false; }
+    match /orders/{id} { allow read: if legacyManager(); allow write: if false; }
     match /activityLogs/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.workerId == legacyProfile().workerId); allow write: if false; }
     match /workers/{id} { allow read: if legacyManager() || (legacyWorker() && resource.data.authUid == request.auth.uid); allow write: if false; }
     match /settings/company { allow read: if isSignedIn(); allow write: if false; }

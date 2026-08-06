@@ -4,7 +4,7 @@ import { DataContext, type DataContextType } from '../../context/DataContext';
 import { initialCompanySettings } from '../../data/sampleData';
 import { sanitizeData } from '../../utils/security';
 import { useAuth } from '../../context/AuthContext';
-import { companyDataService, type CompanyCollection, type DataOperationResult } from './companyDataService';
+import { companyDataService, workerOrdersListenerInputReady, type CompanyCollection, type DataOperationResult } from './companyDataService';
 import { trustedCompanyIdFromSession } from './useTrustedCompanyId';
 import { orderInventoryTransaction } from './orderInventoryTransaction';
 import { hasPermission, type Permission } from '../permissions';
@@ -30,23 +30,41 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     clear(); setLoadError(null);
     let companyId: string;
     try { companyId = trustedCompanyIdFromSession(authSession); } catch (error) { setLoading(false); if (authSession?.userType === 'company') setLoadError(error instanceof Error ? error.message : 'تعذر تحميل البيانات.'); return; }
-    setLoading(true); const role = authSession?.role; const workerOnly = role === 'worker'; const hasWorkerId = Boolean(profile?.workerId); let remaining = 0; let failed = false;
+    setLoading(true); const role = authSession?.role; const workerOnly = role === 'worker'; const workerId = profile?.workerId?.trim() || ''; let remaining = 0; let failed = false;
     const ready = () => { remaining -= 1; if (remaining === 0 && !failed) setLoading(false); };
     const onError = (result: DataOperationResult<never>) => { failed = true; setLoading(false); setLoadError(result.message || 'تعذر تحميل البيانات.'); };
     const allowed = (permission: Permission) => Boolean(role && hasPermission(role, permission));
     const listen = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void, equalTo?: { field: string; value: string }) => { remaining += 1; return companyDataService.subscribe<T>(companyId, name, (items) => { set(items); ready(); }, onError, equalTo); };
     const orderListener = workerOnly
       ? (() => {
-          let cancelled = false;
+          let cancelled = false; let unsubscribeRealtime: (() => void) | undefined;
           remaining += 1;
-          if (!hasWorkerId) { setOrders([]); ready(); return () => { cancelled = true; }; }
+          const workerOrdersInput = { companyId, workerId, session: authSession };
+          if (!workerOrdersListenerInputReady(workerOrdersInput)) {
+            console.info('[worker-orders] listener not requested: provider prerequisites not ready', {
+              companyId: companyId || null,
+              workerId: workerId || null,
+              sessionPresent: Boolean(authSession),
+              sessionUid: authSession?.uid || null,
+              sessionRole: authSession?.role || null,
+              sessionMemberStatus: authSession?.memberStatus || null,
+              constraints: [{ type: 'where', fieldPath: 'workerId', operator: '==', value: workerId }],
+              hasWorkerIdEqualityConstraint: true,
+            });
+            setOrders([]); ready(); return () => { cancelled = true; };
+          }
           void companyDataService.loadWorkerOrders<Order>().then(result => {
             if (cancelled) return;
-            if (result.success) setOrders(sortCreated(result.data || []));
-            else console.error('[worker-orders] backend load failed', { code: result.code || 'UNKNOWN_ERROR' });
+            if (result.success) {
+              setOrders(sortCreated((result.data || []).map(order => ({ ...order, customerPhone: '' }))));
+              unsubscribeRealtime = companyDataService.subscribeWorkerOrders<Order>(workerOrdersInput, items => setOrders(sortCreated(items)), onError);
+            } else {
+              onError(result as DataOperationResult<never>);
+              console.error('[worker-orders] backend load failed', { code: result.code || 'UNKNOWN_ERROR' });
+            }
             ready();
           });
-          return () => { cancelled = true; };
+          return () => { cancelled = true; unsubscribeRealtime?.(); };
         })()
       : allowed('company:orders:read') ? listen<Order>('orders', (items) => setOrders(sortCreated(items))) : () => undefined;
     const unsubs = [orderListener];
@@ -64,14 +82,14 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     if (allowed('company:settings:read')) { remaining += 1; unsubs.push(companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError)); }
     if (remaining === 0) setLoading(false);
     return () => { unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
-  }, [authSession?.uid, authSession?.companyId, authSession?.role, clear, profile?.workerId, retryVersion]);
+  }, [authSession, clear, profile?.workerId, retryVersion]);
 
   const company = useCallback(() => trustedCompanyIdFromSession(authSession), [authSession]);
   const write = useCallback(async <T,>(name: CompanyCollection, id: string, data: T, merge = false) => { const result = await companyDataService.set(company(), name, id, data, merge); if (!result.success) failure(result); return id; }, [company]);
   const remove = useCallback(async (name: CompanyCollection, id: string) => { const result = await companyDataService.remove(company(), name, id); if (!result.success) failure(result); }, [company]);
   const addOrder = useCallback(async (data: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus'>) => {
     const id = newId('ord'); const history = data.paymentHistory || []; const totalPaid = Math.max(data.deposit || 0, history.reduce((sum, entry) => sum + (entry.amount || 0), 0)); const totalPrice = data.totalPrice || 0;
-    const order: Order = { ...sanitizeData(data), id, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const order: Order = { ...sanitizeData(data), id, workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (order.customerId && !customers.some((customer) => customer.id === order.customerId)) throw new Error('العميل المحدد لا يتبع الشركة الحالية.');
     const result = await orderInventoryTransaction.create(company(), order);
     if (!result.success) failure(result);
