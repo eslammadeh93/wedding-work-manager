@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { recordedOrderPayment } from '../../utils/orderPayments';
 import { Customer } from '../../types';
 import { CustomerModal } from './CustomerModal';
 
@@ -102,10 +103,7 @@ export const CustomersModule: React.FC = () => {
               (o) => o.customerId === cust.id || o.customerPhone === cust.phone
             );
 
-            const totalPaid = custOrders.reduce((sum, o) => {
-              const historySum = o.paymentHistory ? o.paymentHistory.reduce((pSum, p) => pSum + p.amount, 0) : 0;
-              return sum + o.deposit + historySum;
-            }, 0);
+            const totalPaid = custOrders.reduce((sum, order) => sum + recordedOrderPayment(order), 0);
             const totalRemaining = custOrders.reduce((sum, o) => sum + o.remainingBalance, 0);
 
             const isExpanded = expandedCustomerId === cust.id;

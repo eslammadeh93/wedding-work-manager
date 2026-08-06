@@ -15,6 +15,7 @@
     "test:permissions": "tsx --test tests/platformPermissions.test.ts",
     "test:firestore-rules": "firebase emulators:exec --only firestore \"tsx --test tests/firestore-rules/firestore.rules.test.ts\"",
     "test:inventory": "tsx --test tests/orderInventoryMath.test.ts",
+    "test:payments": "tsx --test tests/orderPayments.test.ts",
     "test:worker-contact": "tsx --test tests/workerContactAccess.test.ts"
   },
   "dependencies": {

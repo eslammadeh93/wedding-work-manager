@@ -15,6 +15,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
+import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
@@ -45,9 +46,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate, on
     return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
   });
 
-  const monthlyRevenue = monthlyOrders.reduce((sum, o) => sum + (o.deposit + (o.paymentStatus === 'fully_paid' ? o.remainingBalance : 0)), 0);
+  const monthlyRevenue = monthlyOrders.reduce((sum, order) => sum + recordedOrderPayment(order), 0);
 
-  const monthlyOrderExpenses = monthlyOrders.reduce((sum, o) => sum + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
+  const monthlyOrderExpenses = monthlyOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
 
   // Order profitability stays independent from the company capital/expense ledger.
   const netProfit = monthlyRevenue - monthlyOrderExpenses;
@@ -87,7 +88,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate, on
 
     const rev = monthOrders.reduce((acc, o) => acc + o.totalPrice, 0);
 
-    const orderExp = monthOrders.reduce((acc, o) => acc + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
+    const orderExp = monthOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
 
     const exp = orderExp;
 

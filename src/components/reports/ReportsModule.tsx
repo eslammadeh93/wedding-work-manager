@@ -16,6 +16,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
@@ -53,8 +54,8 @@ export const ReportsModule: React.FC = () => {
 
   const totalRevenue = reportOrders.reduce((sum, o) => sum + o.totalPrice, 0);
   const averageOrderPrice = reportOrders.length > 0 ? totalRevenue / reportOrders.length : 0;
-  const totalPaidRevenue = reportOrders.reduce((sum, o) => sum + o.deposit + (o.paymentStatus === 'fully_paid' ? o.remainingBalance : 0), 0);
-  const totalOrderExpenses = reportOrders.reduce((sum, o) => sum + ((o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0)), 0);
+  const totalPaidRevenue = reportOrders.reduce((sum, order) => sum + recordedOrderPayment(order), 0);
+  const totalOrderExpenses = reportOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
   // Keep order profitability completely separate from company capital and
   // operating expenses. The latter are shown in their own financial ledger.
   const netProfit = totalRevenue - totalOrderExpenses;
@@ -137,7 +138,7 @@ export const ReportsModule: React.FC = () => {
     ];
 
     const ordersExportData = reportOrders.map((o) => {
-      const orderExp = (o.workerCost || 0) + (o.transportationCost || 0) + (o.otherExpenses || 0);
+      const orderExp = completedOrderFulfillmentCosts(o) + (o.otherExpenses || 0);
       return {
         'Order Number': o.orderNumber,
         Customer: o.customerName,
