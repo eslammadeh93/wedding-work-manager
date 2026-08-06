@@ -9,7 +9,7 @@ import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBound
 
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
-import { GlobalSearchModal } from './components/GlobalSearchModal';
+import { GlobalSearchErrorBoundary, GlobalSearchModal } from './components/GlobalSearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { LoginPage } from './components/auth/LoginPage';
 
@@ -257,11 +257,16 @@ function AppContent() {
       </div>
 
       {/* Modals & Drawers */}
-      <GlobalSearchModal
-        isOpen={isSearchOpen}
+      <GlobalSearchErrorBoundary
+        key={isSearchOpen ? 'global-search-open' : 'global-search-closed'}
         onClose={() => setIsSearchOpen(false)}
-        onNavigate={handleNavigate}
-      />
+      >
+        <GlobalSearchModal
+          isOpen={isSearchOpen}
+          onClose={() => setIsSearchOpen(false)}
+          onNavigate={handleNavigate}
+        />
+      </GlobalSearchErrorBoundary>
 
       <NotificationDrawer
         isOpen={isNotifDrawerOpen}
