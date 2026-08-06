@@ -56,6 +56,8 @@ export const ReportsModule: React.FC = () => {
   const averageOrderPrice = reportOrders.length > 0 ? totalRevenue / reportOrders.length : 0;
   const totalPaidRevenue = reportOrders.reduce((sum, order) => sum + recordedOrderPayment(order), 0);
   const totalOrderExpenses = reportOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
+  // Actual collected cash less direct costs that have been recognized for orders.
+  const netCollectedCash = totalPaidRevenue - totalOrderExpenses;
   // Keep order profitability completely separate from company capital and
   // operating expenses. The latter are shown in their own financial ledger.
   const netProfit = totalRevenue - totalOrderExpenses;
@@ -93,6 +95,7 @@ export const ReportsModule: React.FC = () => {
         ['Total Order Contracting Revenue', `$${totalRevenue.toLocaleString()}`],
         ['Total Collected Paid Deposits', `$${totalPaidRevenue.toLocaleString()}`],
         ['Total Direct Order Expenses', `$${totalOrderExpenses.toLocaleString()}`],
+        ['Net Cash Remaining', `$${netCollectedCash.toLocaleString()}`],
         ['Total Capital Deposited', `$${monthCapital.toLocaleString()}`],
         ['Total General Expenses', `$${monthGeneralExpenses.toLocaleString()}`],
         ['Current Cash Balance', `$${monthCashBalance.toLocaleString()}`],
@@ -131,6 +134,7 @@ export const ReportsModule: React.FC = () => {
       { Metric: 'Total Revenue', Value: totalRevenue },
       { Metric: 'Collected Paid Revenue', Value: totalPaidRevenue },
       { Metric: 'Total Direct Order Expenses', Value: totalOrderExpenses },
+      { Metric: 'Net Cash Remaining', Value: netCollectedCash },
       { Metric: 'Total Capital', Value: monthCapital },
       { Metric: 'General Expenses', Value: monthGeneralExpenses },
       { Metric: 'Current Cash Balance', Value: monthCashBalance },
@@ -276,7 +280,7 @@ export const ReportsModule: React.FC = () => {
           <ClipboardList className="w-5 h-5 text-amber-500" />
           <span>{language === 'ar' ? 'حسابات الأوردرات والربحية' : 'Orders & Profitability'}</span>
         </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalPrice')}</span>
           <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
@@ -309,6 +313,15 @@ export const ReportsModule: React.FC = () => {
             ${totalOrderExpenses.toLocaleString()}
           </p>
           <span className="text-[11px] text-rose-500 font-medium mt-1 block">Direct order costs</span>
+        </div>
+        <div className="p-5 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 shadow-sm">
+          <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase">{t('netCollectedCash')}</span>
+          <p className={`text-2xl font-black mt-2 ${netCollectedCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-400'}`}>
+            ${netCollectedCash.toLocaleString()}
+          </p>
+          <span className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 font-medium mt-1 block">
+            {language === 'ar' ? 'المسدد − مصروفات الأوردرات المحتسبة' : 'Collected cash − recognized order costs'}
+          </span>
         </div>
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <span className="text-xs font-semibold text-slate-400 uppercase">{t('netProfit')}</span>
