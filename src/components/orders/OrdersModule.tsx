@@ -49,6 +49,7 @@ type SortOrder = 'asc' | 'desc';
 
 interface OrdersModuleProps {
   createOrderRequest?: number;
+  todaysOrdersRequest?: number;
   openOrderId?: string;
   onOrderOpened?: () => void;
 }
@@ -80,7 +81,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
   );
 };
 
-export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, openOrderId, onOrderOpened }) => {
+export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, todaysOrdersRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
   const { orders, deleteOrder } = useData();
   const { profile, authSession } = useAuth();
@@ -144,6 +145,13 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     if (!isWorker && createOrderRequest > 0) setIsCreateOpen(true);
     if (isWorker) setIsCreateOpen(false);
   }, [createOrderRequest, isWorker]);
+
+  useEffect(() => {
+    if (todaysOrdersRequest > 0) {
+      resetFilters();
+      setQuickFilter('todays_events');
+    }
+  }, [todaysOrdersRequest]);
 
   useEffect(() => {
     if (!openOrderId) return;

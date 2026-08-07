@@ -12,6 +12,7 @@ import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { GlobalSearchErrorBoundary, GlobalSearchModal } from './components/GlobalSearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
+import { MobileManagerNav } from './components/MobileManagerNav';
 import { LoginPage } from './components/auth/LoginPage';
 
 import { Menu, Crown, Loader2 } from 'lucide-react';
@@ -167,7 +168,9 @@ function AppContent() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
+  const [todaysOrdersRequest, setTodaysOrdersRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
+  const [workerMovementNotificationsOnly, setWorkerMovementNotificationsOnly] = useState(false);
   const [restoredTabForUid, setRestoredTabForUid] = useState<string | null>(null);
 
   // The browser history cannot be erased, but once a session ends every
@@ -275,6 +278,16 @@ function AppContent() {
     setCreateOrderRequest((request) => request + 1);
   };
 
+  const handleOpenTodaysOrders = () => {
+    setActiveTab('orders');
+    setTodaysOrdersRequest((request) => request + 1);
+  };
+
+  const handleOpenWorkerMovementNotifications = () => {
+    setWorkerMovementNotificationsOnly(true);
+    setIsNotifDrawerOpen(true);
+  };
+
   // 1. App Startup Loading State
   if (loading || !usersInitialized || (user && profile && authSession?.userType !== 'platform' && restoredTabForUid !== user.uid)) {
     return (
@@ -299,7 +312,10 @@ function AppContent() {
       {/* Top Navbar */}
       <Navbar
         onOpenSearch={() => setIsSearchOpen(true)}
-        onToggleNotificationDrawer={() => setIsNotifDrawerOpen(!isNotifDrawerOpen)}
+        onToggleNotificationDrawer={() => {
+          setWorkerMovementNotificationsOnly(false);
+          setIsNotifDrawerOpen(!isNotifDrawerOpen);
+        }}
         onNavigateDashboard={() => setActiveTab('dashboard')}
       />
 
@@ -314,7 +330,7 @@ function AppContent() {
         />
 
         {/* Content Area */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 min-w-0">
+        <main className="flex-1 p-3 pb-24 sm:p-6 lg:p-8 min-w-0">
           {/* Mobile hamburger menu button */}
           <div className="lg:hidden mb-3.5">
             <button
@@ -334,8 +350,8 @@ function AppContent() {
               </div>
             }
           >
-            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} /></CompanyTabGuard>}
-            {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
+            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovementNotifications={handleOpenWorkerMovementNotifications} /></CompanyTabGuard>}
+            {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} todaysOrdersRequest={todaysOrdersRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
             {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}
             {activeTab === 'customers' && <CompanyTabGuard tab="customers"><CustomersModule /></CompanyTabGuard>}
@@ -365,8 +381,18 @@ function AppContent() {
 
       <NotificationDrawer
         isOpen={isNotifDrawerOpen}
-        onClose={() => setIsNotifDrawerOpen(false)}
+        onClose={() => {
+          setIsNotifDrawerOpen(false);
+          setWorkerMovementNotificationsOnly(false);
+        }}
         onNavigate={handleNavigate}
+        workerMovementsOnly={workerMovementNotificationsOnly}
+      />
+
+      <MobileManagerNav
+        onCreateOrder={handleCreateOrder}
+        onOpenTodaysOrders={handleOpenTodaysOrders}
+        onOpenWorkerMovementNotifications={handleOpenWorkerMovementNotifications}
       />
 
     </div>

@@ -15,14 +15,22 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
+import { MobileManagerNav } from '../MobileManagerNav';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
   onCreateOrder: () => void;
+  onOpenTodaysOrders: () => void;
+  onOpenWorkerMovementNotifications: () => void;
 }
 
-export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate, onCreateOrder }) => {
+export const DashboardModule: React.FC<DashboardModuleProps> = ({
+  onNavigate,
+  onCreateOrder,
+  onOpenTodaysOrders,
+  onOpenWorkerMovementNotifications,
+}) => {
   const { t, language } = useLanguage();
   const { profile } = useAuth();
   const { orders, inventory, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
@@ -108,13 +116,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate, on
           </div>
           <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">{t('welcomeBack')}, {firstName}</h2>
         </div>
-        <button
-          onClick={onCreateOrder}
-          className="px-4 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-900 font-extrabold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-2"
-        >
-          <ClipboardList className="w-4 h-4" />
-          <span>{t('newOrder')}</span>
-        </button>
+        <MobileManagerNav
+          variant="desktop"
+          onCreateOrder={onCreateOrder}
+          onOpenTodaysOrders={onOpenTodaysOrders}
+          onOpenWorkerMovementNotifications={onOpenWorkerMovementNotifications}
+        />
       </div>
 
       {/* Company Financial Balance Summary Banner */}

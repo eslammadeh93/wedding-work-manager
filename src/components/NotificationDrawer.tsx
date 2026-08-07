@@ -8,19 +8,31 @@ interface NotificationDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (tab: ActiveTab, refId?: string) => void;
+  workerMovementsOnly?: boolean;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   isOpen,
   onClose,
   onNavigate,
+  workerMovementsOnly = false,
 }) => {
   const { t, language } = useLanguage();
   const { notifications, markNotificationAsRead, clearAllNotifications } = useData();
 
   if (!isOpen) return null;
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const visibleNotifications = workerMovementsOnly
+    ? notifications.filter((notification) => ['worker_arrived', 'worker_completed'].includes(notification.type))
+    : notifications;
+  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
+  const markVisibleAsRead = () => {
+    if (workerMovementsOnly) {
+      void Promise.all(visibleNotifications.filter((notification) => !notification.read).map((notification) => markNotificationAsRead(notification.id)));
+      return;
+    }
+    void clearAllNotifications();
+  };
 
   return (
     <>
@@ -34,7 +46,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
           <div className="flex items-center gap-2">
             <Bell className="w-5 h-5 text-amber-500" />
             <h3 className="font-bold text-slate-900 dark:text-white text-base">
-              {t('notifications')}
+              {workerMovementsOnly ? (language === 'ar' ? 'إشعارات تحرك العمال' : 'Worker movement alerts') : t('notifications')}
             </h3>
             {unreadCount > 0 && (
               <span className="px-2 py-0.5 text-xs font-bold bg-amber-500 text-white rounded-full">
@@ -45,7 +57,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
           <div className="flex items-center gap-1">
             {unreadCount > 0 && (
               <button
-                onClick={clearAllNotifications}
+                onClick={markVisibleAsRead}
                 className="text-xs text-amber-600 dark:text-amber-400 font-medium hover:underline px-2 py-1"
               >
                 {t('markAllRead')}
@@ -62,13 +74,13 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 
         {/* List */}
         <div className="p-3 overflow-y-auto space-y-2 flex-1">
-          {notifications.length === 0 ? (
+          {visibleNotifications.length === 0 ? (
             <div className="text-center py-16 text-slate-400">
               <CheckCircle2 className="w-12 h-12 mx-auto mb-2 text-emerald-500 opacity-50" />
               <p className="text-sm">{t('noNotifications')}</p>
             </div>
           ) : (
-            notifications.map((notif) => {
+            visibleNotifications.map((notif) => {
               const title = language === 'ar' ? (notif.titleAr || notif.title || '') : (notif.titleEn || notif.title || '');
               const message = language === 'ar' ? (notif.messageAr || notif.body || '') : (notif.messageEn || notif.body || '');
               const dateValue = notif.createdAt && typeof notif.createdAt === 'object' && 'toDate' in notif.createdAt && typeof notif.createdAt.toDate === 'function'
