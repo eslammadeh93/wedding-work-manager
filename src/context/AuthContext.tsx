@@ -9,7 +9,6 @@ import {
   sendPasswordResetEmail,
   getAuth,
   setPersistence,
-  browserLocalPersistence,
   browserSessionPersistence,
 } from 'firebase/auth';
 import {
@@ -53,9 +52,9 @@ interface AuthContextType {
   usersInitialized: boolean;
   authError: string | null;
   clearError: () => void;
-  loginEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
+  loginEmail: (email: string, pass: string) => Promise<void>;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
-  loginMultiTenantEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
+  loginMultiTenantEmail: (email: string, pass: string) => Promise<void>;
   loginMultiTenantWorker: (companyCode: string, username: string, loginCode: string) => Promise<boolean>;
   provisionWorkerAccount: (worker: Worker) => Promise<string>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
@@ -208,14 +207,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const LAST_ACTIVITY_KEY = 'wedding_manager_last_activity';
-  const REMEMBER_UNTIL_KEY = 'wedding_manager_remember_until';
-  const REMEMBER_DURATION = 7 * 24 * 60 * 60 * 1000;
-  const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
-
   const logout = async (reason?: string) => {
-    localStorage.removeItem(LAST_ACTIVITY_KEY);
-    localStorage.removeItem(REMEMBER_UNTIL_KEY);
     if (reason) {
       setAuthError(reason);
     } else {
@@ -240,6 +232,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       await reportLoginAttempt('check');
+      await setPersistence(auth, browserSessionPersistence);
       const credential = await signInWithEmailAndPassword(auth, `${username}@worker.local`, loginCode);
       const workerProfileSnap = await getDoc(doc(db, 'users', credential.user.uid));
       const workerProfile = workerProfileSnap.exists()
@@ -259,7 +252,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
 
-      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
       setProfile(workerProfile);
       await reportLoginAttempt('success');
       return true;
@@ -311,21 +303,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
           return;
         }
-        const rememberUntil = Number(localStorage.getItem(REMEMBER_UNTIL_KEY) || 0);
-        if (rememberUntil && Date.now() >= rememberUntil) {
-          localStorage.removeItem(REMEMBER_UNTIL_KEY);
-          await signOut(auth);
-          setUser(null);
-          setProfile(null);
-          setAuthError('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.');
-          setLoading(false);
-          return;
-        }
-        // A newly created account may not have gone through loginEmail yet.
-        // Start its inactivity clock without overwriting an existing session timestamp.
-        if (!localStorage.getItem(LAST_ACTIVITY_KEY)) {
-          localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
-        }
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userDocRef);
@@ -366,84 +343,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Automatic inactivity monitor (5 minutes timeout)
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    let lastUpdate = Date.now();
-
-    const updateActivity = () => {
-      const now = Date.now();
-      if (now - lastUpdate >= 1000) {
-        lastUpdate = now;
-        localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
-      }
-    };
-
-    const checkInactivity = () => {
-      const lastActStr = localStorage.getItem(LAST_ACTIVITY_KEY);
-      if (!lastActStr) return;
-      const lastAct = parseInt(lastActStr, 10);
-      const now = Date.now();
-
-      if (now - lastAct >= INACTIVITY_TIMEOUT) {
-        logout('انتهت جلسة العمل بسبب عدم النشاط، يرجى تسجيل الدخول مرة أخرى.');
-      }
-    };
-
-    const activityEvents = [
-      'mousemove',
-      'mousedown',
-      'keydown',
-      'touchstart',
-      'touchmove',
-      'scroll',
-      'click',
-    ];
-
-    activityEvents.forEach((evt) => {
-      window.addEventListener(evt, updateActivity, { passive: true });
-    });
-
-    const interval = setInterval(checkInactivity, 1000);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        checkInactivity();
-      }
-    };
-
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', checkInactivity);
-
-    return () => {
-      activityEvents.forEach((evt) => {
-        window.removeEventListener(evt, updateActivity);
-      });
-      clearInterval(interval);
-      window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', checkInactivity);
-    };
-  }, [user]);
-
-  // Enforce the seven-day "remember me" expiry even if the app remains open.
-  useEffect(() => {
-    const rememberUntil = Number(localStorage.getItem(REMEMBER_UNTIL_KEY) || 0);
-    if (!user || !rememberUntil) return;
-    const remaining = rememberUntil - Date.now();
-    if (remaining <= 0) {
-      logout('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.');
-      return;
-    }
-    const timer = window.setTimeout(
-      () => logout('انتهت مدة التذكر. يرجى تسجيل الدخول مرة أخرى.'),
-      remaining
-    );
-    return () => window.clearTimeout(timer);
-  }, [user]);
-
   const clearError = () => setAuthError(null);
 
   const provisionWorkerAccount = async (worker: Worker): Promise<string> => {
@@ -471,21 +370,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return credential.user.uid;
   };
 
-  const loginEmail = async (email: string, pass: string, rememberMe = false) => {
+  const loginEmail = async (email: string, pass: string) => {
     setAuthError(null);
     const trimmedEmail = sanitizeText(email).trim().toLowerCase();
 
     try {
       await reportLoginAttempt('check');
-      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-      if (rememberMe) {
-        localStorage.setItem(REMEMBER_UNTIL_KEY, (Date.now() + REMEMBER_DURATION).toString());
-      } else {
-        localStorage.removeItem(REMEMBER_UNTIL_KEY);
-      }
+      await setPersistence(auth, browserSessionPersistence);
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
       if (cred.user) {
-        localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
         const now = new Date().toISOString();
         try {
           await updateDoc(doc(db, 'users', cred.user.uid), { lastLogin: now });
@@ -513,14 +406,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginMultiTenantEmail = async (email: string, pass: string, rememberMe = false) => {
+  const loginMultiTenantEmail = async (email: string, pass: string) => {
     setAuthError(null);
     try {
       console.info('[auth-login] start', { method: 'email' });
       await reportLoginAttempt('check');
       console.info('[auth-login] rate-limit check passed');
-      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-      console.info('[auth-login] persistence configured', { rememberMe });
+      await setPersistence(auth, browserSessionPersistence);
+      console.info('[auth-login] session persistence configured');
       await signInWithEmailAndPassword(auth, sanitizeText(email).trim().toLowerCase(), pass);
       console.info('[auth-login] Firebase Auth sign-in succeeded');
       await reportLoginAttempt('success');
@@ -537,6 +430,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     try {
       await reportLoginAttempt('check');
+      await setPersistence(auth, browserSessionPersistence);
       const result = await requestWorkerCustomToken(
         sanitizeText(companyCode).trim(),
         sanitizeText(username).trim(),
@@ -562,7 +456,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cleanData = sanitizeData(data);
       const userCred = await createUserWithEmailAndPassword(auth, cleanData.email, data.password);
       if (userCred.user) {
-        localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
         const newProf: UserProfile = {
           uid: userCred.user.uid,
           email: cleanData.email,

@@ -40,13 +40,26 @@ interface SidebarProps {
   onClose: () => void;
 }
 
+type NavigationGroup = 'workspace' | 'sales' | 'operations' | 'finance' | 'administration' | 'account';
+
+const navigationGroupLabels: Record<NavigationGroup, { ar: string; en: string }> = {
+  workspace: { ar: 'مساحة العمل', en: 'Workspace' },
+  sales: { ar: 'العملاء والطلبات', en: 'Customers & Orders' },
+  operations: { ar: 'التشغيل', en: 'Operations' },
+  finance: { ar: 'المالية والتقارير', en: 'Finance & Reports' },
+  administration: { ar: 'الإدارة', en: 'Administration' },
+  account: { ar: 'الحساب', en: 'Account' },
+};
+
+const navigationGroupOrder: NavigationGroup[] = ['workspace', 'sales', 'operations', 'finance', 'administration', 'account'];
+
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   isOpen,
   onClose,
 }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { orders, inventory } = useData();
   const { profile, authSession } = useAuth();
 
@@ -55,22 +68,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const userRole = profile?.role || 'employee';
 
-  const allNavItems: { id: ActiveTab; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[]; permission?: Permission }[] = [
-    { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
-    { id: 'orders', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
-    { id: 'customers', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
-    { id: 'inventory', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
-    { id: 'expenses', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
-    { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
-    { id: 'members', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
-    { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },
-    { id: 'settings', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
-    { id: 'profile', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
+  const allNavItems: { id: ActiveTab; group: NavigationGroup; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[]; permission?: Permission }[] = [
+    { id: 'dashboard', group: 'workspace', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
+    { id: 'orders', group: 'sales', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
+    { id: 'customers', group: 'sales', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
+    { id: 'workers', group: 'operations', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
+    { id: 'inventory', group: 'operations', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
+    { id: 'expenses', group: 'finance', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
+    { id: 'reports', group: 'finance', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },
+    { id: 'members', group: 'administration', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
+    { id: 'settings', group: 'administration', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
+    { id: 'profile', group: 'account', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 
   const navItems = allNavItems.filter((item) => USE_MULTI_TENANT_DATA
     ? authSession?.userType === 'company' && (item.id === 'profile' || !item.permission || authSession.permissions.includes(item.permission))
     : item.roles.includes(userRole));
+  const groupedNavItems = navigationGroupOrder.map(group => ({ group, items: navItems.filter(item => item.group === group) })).filter(({ items }) => items.length > 0);
 
   const handleTabClick = (id: ActiveTab) => {
     setActiveTab(id);
@@ -116,8 +130,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Items */}
-        <nav className="p-3 space-y-1 overflow-y-auto flex-1">
-          {navItems.map((item) => {
+        <nav className="p-3 overflow-y-auto flex-1">
+          {groupedNavItems.map(({ group, items }, groupIndex) => <div key={group} className={groupIndex === 0 ? '' : 'mt-3 border-t border-slate-200 pt-3 dark:border-slate-800'}>
+            <p className="mb-1.5 px-3 text-[10px] font-black tracking-wide text-slate-400 dark:text-slate-500">{language === 'ar' ? navigationGroupLabels[group].ar : navigationGroupLabels[group].en}</p>
+            <div className="space-y-1">{items.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -147,7 +163,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </button>
             );
-          })}
+            })}</div>
+          </div>)}
         </nav>
 
         {/* Sidebar Footer info */}
