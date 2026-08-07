@@ -43,6 +43,8 @@ service cloud.firestore {
     function hasCompanyPermission(companyId, permission) {
       return canReadOperations(companyId) && (
         memberRole(companyId) == 'company_super_admin'
+        || ('permissions' in companyMember(companyId).data
+          && permission in companyMember(companyId).data.permissions)
         || (permission == 'orders:read' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])
@@ -169,7 +171,7 @@ service cloud.firestore {
       match /orders/{orderId}/workerMovements/{movementId} {
         // Movements are written only by the trusted callable. A worker can
         // read only their own records under an order assigned to them.
-        allow read: if contactManagers(companyId)
+        allow read: if hasCompanyPermission(companyId, 'orders:read')
           || (canReadOperations(companyId) && isWorker(companyId)
             && canonicalOrder(companyId, orderId).data.workerId == companyMember(companyId).data.workerId
             && resource.data.workerId == companyMember(companyId).data.workerId);

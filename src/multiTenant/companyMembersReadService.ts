@@ -2,6 +2,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { USE_MULTI_TENANT_DATA } from './featureFlags';
 import type { AccountStatus, CompanyMemberRole, RecordTimestamp } from './types';
+import type { Permission } from './permissions';
 
 export interface CompanyMemberListItem {
   uid: string;
@@ -13,6 +14,8 @@ export interface CompanyMemberListItem {
   phone?: string | null;
   jobTitle?: string | null;
   workerId?: string;
+  employeeType?: string | null;
+  permissions?: Permission[];
   createdAt?: RecordTimestamp;
   createdBy?: string;
 }
@@ -37,6 +40,8 @@ export async function listCompanyMembers(trustedCompanyId: string): Promise<Comp
       phone: typeof data.phone === 'string' ? data.phone : null,
       jobTitle: typeof data.jobTitle === 'string' ? data.jobTitle : null,
       workerId: typeof data.workerId === 'string' ? data.workerId : undefined,
+      employeeType: typeof data.employeeType === 'string' ? data.employeeType : null,
+      permissions: Array.isArray(data.permissions) ? data.permissions.filter((permission): permission is Permission => typeof permission === 'string') : undefined,
       createdAt: data.createdAt,
       createdBy: typeof data.createdBy === 'string' ? data.createdBy : undefined,
     };

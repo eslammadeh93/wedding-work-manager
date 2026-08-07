@@ -2,9 +2,15 @@
 export type CompanyMemberError = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'COMPANY_NOT_FOUND' | 'COMPANY_INACTIVE' | 'MEMBER_NOT_FOUND' | 'MEMBER_DISABLED' | 'EMAIL_EXISTS' | 'USERNAME_EXISTS' | 'MAX_USERS_REACHED' | 'ROLE_NOT_ALLOWED' | 'SELF_ROLE_CHANGE_FORBIDDEN' | 'SELF_DISABLE_FORBIDDEN' | 'CANNOT_MANAGE_COMPANY_ADMIN' | 'LAST_COMPANY_ADMIN' | 'AUTH_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'WORKER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'RESET_NOT_SUPPORTED' | 'ROLLBACK_FAILED' | 'MOVEMENT_ALREADY_RECORDED' | 'MOVEMENT_SEQUENCE_INVALID' | 'UNKNOWN_ERROR';
 export type ManagedRole = 'manager' | 'employee' | 'worker';
 export type CompanyRole = ManagedRole | 'company_super_admin';
+export type CompanyPermission =
+  | 'company:dashboard:read' | 'company:calendar:read' | 'company:orders:read' | 'company:orders:write'
+  | 'company:customers:read' | 'company:customers:write' | 'company:workers:read' | 'company:workers:write'
+  | 'company:inventory:read' | 'company:inventory:write' | 'company:expenses:read' | 'company:expenses:write'
+  | 'company:categories:read' | 'company:categories:write' | 'company:activity_logs:read' | 'company:reports:read'
+  | 'company:settings:read' | 'company:settings:write' | 'company:members:read' | 'company:members:write' | 'company:notifications:read';
 export type CompanyMemberResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberError; message: string; data?: T };
-export interface CreateCompanyMemberRequest { name: string; role: ManagedRole; email?: string; temporaryPassword?: string; jobTitle?: string; username?: string; loginCode?: string; phone?: string; notes?: string; companyId?: string; }
-export interface UpdateCompanyMemberRequest { uid: string; name?: string; phone?: string; jobTitle?: string; displaySettings?: Record<string, boolean | string | number>; companyId?: string; }
+export interface CreateCompanyMemberRequest { name: string; role: ManagedRole; email?: string; temporaryPassword?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; username?: string; loginCode?: string; phone?: string; notes?: string; companyId?: string; }
+export interface UpdateCompanyMemberRequest { uid: string; name?: string; phone?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; displaySettings?: Record<string, boolean | string | number>; companyId?: string; }
 export interface ChangeCompanyMemberRoleRequest { uid: string; role: ManagedRole; companyId?: string; }
 export interface DisableCompanyMemberRequest { uid: string; companyId?: string; }
 export interface ReactivateCompanyMemberRequest { uid: string; companyId?: string; }

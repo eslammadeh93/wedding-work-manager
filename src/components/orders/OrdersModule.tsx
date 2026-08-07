@@ -73,7 +73,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
   const hasCompleted = movements.some(movement => movement.action === 'completed');
 
   return (
-    <span className="flex items-center gap-1 me-1" aria-hidden="true">
+    <span className="flex items-center gap-1 me-1" aria-label={hasCompleted ? 'تم التنفيذ' : hasArrived ? 'تم الوصول' : 'لم يبلّغ المنفذ بالحركة بعد'}>
       <MapPin className={`w-3.5 h-3.5 ${hasArrived ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600 opacity-50'}`} />
       <CheckCircle2 className={`w-3.5 h-3.5 ${hasCompleted ? 'text-emerald-500' : 'text-slate-300 dark:text-slate-600 opacity-50'}`} />
     </span>

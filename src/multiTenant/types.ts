@@ -45,6 +45,10 @@ export interface CompanyMember {
   role: CompanyMemberRole;
   status: AccountStatus;
   workerId?: string;
+  /** Custom job type shown in employee management, e.g. accountant. */
+  employeeType?: string;
+  /** Explicit permissions for this account. Missing means legacy role defaults. */
+  permissions?: import('./permissions').Permission[];
   createdAt: RecordTimestamp;
   createdBy: string;
 }

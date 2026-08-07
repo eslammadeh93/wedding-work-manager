@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { hasPermission, type Permission } from './permissions';
+import { memberHasPermission, type Permission } from './permissions';
 import { useTenant } from './TenantContext';
 import { useAuth } from '../context/AuthContext';
 import type { CompanyMemberRole } from './types';
@@ -18,7 +18,7 @@ export function CompanyRouteGuard({ children, fallback = null, roles, permission
   const { company, member } = useTenant();
   const isActiveMember = Boolean(company && member && member.companyId === company.id && member.status === 'active');
   const allowedRole = !roles || (member ? roles.includes(member.role) : false);
-  const allowedPermission = !permission || (member ? hasPermission(member.role, permission) : false);
+  const allowedPermission = !permission || (member ? memberHasPermission(member.role, member.permissions, permission) : false);
   return isActiveMember && allowedRole && allowedPermission ? <>{children}</> : <>{fallback}</>;
 }
 
@@ -28,6 +28,6 @@ export function CompanySessionRouteGuard({ children, fallback = null, roles, per
   const companyRole = authSession?.userType === 'company' ? authSession.role as CompanyMemberRole : undefined;
   const active = authSession?.userType === 'company' && authSession.memberStatus === 'active' && Boolean(authSession.companyId);
   const allowedRole = !roles || (companyRole ? roles.includes(companyRole) : false);
-  const allowedPermission = !permission || (companyRole ? hasPermission(companyRole, permission) : false);
+  const allowedPermission = !permission || Boolean(authSession?.permissions.includes(permission));
   return active && allowedRole && allowedPermission ? <>{children}</> : <>{fallback}</>;
 }

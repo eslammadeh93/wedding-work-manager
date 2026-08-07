@@ -3,7 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 import { firestorePaths } from './firestorePaths';
-import { PERMISSION_MATRIX } from './permissions';
+import { effectivePermissions, PERMISSION_MATRIX, type Permission } from './permissions';
 import type { AuthSession, Company, CompanyMember, PlatformUser } from './types';
 
 export class MultiTenantAuthError extends Error {}
@@ -48,7 +48,10 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
   const company = companySnapshot.data() as Company;
   debug('company', { companyId: tokenCompanyId, status: company.status, active: company.status === 'active' });
   assertCompanyAllowsLogin(company);
-  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: PERMISSION_MATRIX[member.role] };
+  const savedPermissions = Array.isArray(member.permissions)
+    ? member.permissions.filter((permission): permission is Permission => typeof permission === 'string')
+    : undefined;
+  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: effectivePermissions(member.role, savedPermissions) };
   } catch (error) {
     console.error('[auth-resolution] exception at resolveMultiTenantSession', { source: 'src/multiTenant/auth.ts', name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
     throw error;

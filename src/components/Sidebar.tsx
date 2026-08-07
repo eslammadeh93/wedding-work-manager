@@ -17,7 +17,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
-import { hasPermission } from '../multiTenant/permissions';
+import type { Permission } from '../multiTenant/permissions';
 
 export type ActiveTab =
   | 'dashboard'
@@ -55,23 +55,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const userRole = profile?.role || 'employee';
 
-  const allNavItems: { id: ActiveTab; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[] }[] = [
-    { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'] },
-    { id: 'orders', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'] },
-    { id: 'customers', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'] },
-    { id: 'inventory', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'] },
-    { id: 'expenses', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'] },
-    { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'] },
-    { id: 'members', label: 'إدارة المديرين', icon: UsersRound, roles: ['super_admin', 'manager'] },
-    { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'] },
-    { id: 'settings', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'] },
+  const allNavItems: { id: ActiveTab; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[]; permission?: Permission }[] = [
+    { id: 'dashboard', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
+    { id: 'orders', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
+    { id: 'customers', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
+    { id: 'inventory', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
+    { id: 'expenses', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
+    { id: 'workers', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
+    { id: 'members', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
+    { id: 'reports', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },
+    { id: 'settings', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'profile', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 
-  const showCompanyMembers = USE_MULTI_TENANT_DATA
-    && authSession?.userType === 'company'
-    && hasPermission(authSession.role, 'company:members:read');
-  const navItems = allNavItems.filter((item) => item.roles.includes(userRole) && (item.id !== 'members' || showCompanyMembers) && (item.id !== 'profile' || authSession?.userType === 'company'));
+  const navItems = allNavItems.filter((item) => USE_MULTI_TENANT_DATA
+    ? authSession?.userType === 'company' && (item.id === 'profile' || !item.permission || authSession.permissions.includes(item.permission))
+    : item.roles.includes(userRole));
 
   const handleTabClick = (id: ActiveTab) => {
     setActiveTab(id);

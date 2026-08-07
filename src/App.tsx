@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import { USE_MULTI_TENANT_DATA } from './multiTenant/featureFlags';
 import { CompanySessionRouteGuard, PlatformRouteGuard } from './multiTenant/RouteGuards';
+import type { Permission } from './multiTenant/permissions';
 import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBoundary';
 
 import { Navbar } from './components/Navbar';
@@ -36,7 +37,21 @@ function UnauthorizedPlatform() {
 }
 
 function UnauthorizedCompanyMembers() {
-  return <div dir="rtl" className="min-h-64 flex items-center justify-center text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب الشركة والمديرين فقط.</p></div></div>;
+  return <div dir="rtl" className="min-h-64 flex items-center justify-center text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">ليس لديك الصلاحية المطلوبة لعرض هذا القسم.</p></div></div>;
+}
+
+const tabPermission: Partial<Record<ActiveTab, Permission>> = {
+  dashboard: 'company:dashboard:read', orders: 'company:orders:read', customers: 'company:customers:read',
+  inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
+  calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
+  settings: 'company:settings:read', members: 'company:members:read',
+};
+
+function CompanyTabGuard({ tab, children }: { tab: ActiveTab; children: React.ReactNode }) {
+  const permission = tabPermission[tab];
+  return USE_MULTI_TENANT_DATA && permission
+    ? <CompanySessionRouteGuard permission={permission} fallback={<UnauthorizedCompanyMembers />}>{children}</CompanySessionRouteGuard>
+    : <>{children}</>;
 }
 
 /** Kept outside the legacy tree so platform code is only requested after verification. */
@@ -71,7 +86,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
       case 'settings':
         return 'الإعدادات';
       case 'members':
-        return 'إدارة المديرين';
+        return 'إدارة الموظفين';
       case 'profile':
         return 'الملف الشخصي';
       default:
@@ -100,7 +115,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
       case 'settings':
         return 'Settings';
       case 'members':
-        return 'Managers';
+        return 'Employees';
       case 'profile':
         return 'Profile';
       default:
@@ -139,9 +154,13 @@ function AppContent() {
 
   // Role guard for current active tab
   useEffect(() => {
-    // The member screen performs its own AuthSession permission guard so a
-    // direct /company/members visit can show Unauthorized rather than redirect.
-    if (USE_MULTI_TENANT_DATA && activeTab === 'members') return;
+    if (USE_MULTI_TENANT_DATA && authSession?.userType === 'company') {
+      const requiredPermission = tabPermission[activeTab];
+      if (!requiredPermission || authSession.permissions.includes(requiredPermission)) return;
+      const fallback = (Object.keys(tabPermission) as ActiveTab[]).find(tab => authSession.permissions.includes(tabPermission[tab]!));
+      if (fallback) setActiveTab(fallback);
+      return;
+    }
     const role = profile?.role || 'employee';
     if (role === 'worker') {
       if (activeTab !== 'orders') {
@@ -242,17 +261,17 @@ function AppContent() {
               </div>
             }
           >
-            {activeTab === 'dashboard' && <DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} />}
-            {activeTab === 'orders' && <OrdersModule createOrderRequest={createOrderRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} />}
-            {activeTab === 'workers' && <WorkersModule />}
-            {activeTab === 'customers' && <CustomersModule />}
-            {activeTab === 'inventory' && <InventoryModule />}
-            {activeTab === 'expenses' && (USE_MULTI_TENANT_DATA ? <CompanySessionRouteGuard roles={['company_super_admin']} permission="company:expenses:read"><ExpensesModule /></CompanySessionRouteGuard> : <ExpensesModule />)}
-            {activeTab === 'calendar' && <CalendarModule />}
-            {activeTab === 'reports' && <ReportsModule />}
-            {activeTab === 'activityLog' && <ActivityLogModule />}
-            {activeTab === 'settings' && <SettingsModule />}
-            {USE_MULTI_TENANT_DATA && activeTab === 'members' && <CompanySessionRouteGuard permission="company:members:read" fallback={<UnauthorizedCompanyMembers />}><CompanyMembersModule /></CompanySessionRouteGuard>}
+            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} /></CompanyTabGuard>}
+            {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
+            {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
+            {activeTab === 'customers' && <CompanyTabGuard tab="customers"><CustomersModule /></CompanyTabGuard>}
+            {activeTab === 'inventory' && <CompanyTabGuard tab="inventory"><InventoryModule /></CompanyTabGuard>}
+            {activeTab === 'expenses' && <CompanyTabGuard tab="expenses"><ExpensesModule /></CompanyTabGuard>}
+            {activeTab === 'calendar' && <CompanyTabGuard tab="calendar"><CalendarModule /></CompanyTabGuard>}
+            {activeTab === 'reports' && <CompanyTabGuard tab="reports"><ReportsModule /></CompanyTabGuard>}
+            {activeTab === 'activityLog' && <CompanyTabGuard tab="activityLog"><ActivityLogModule /></CompanyTabGuard>}
+            {activeTab === 'settings' && <CompanyTabGuard tab="settings"><SettingsModule /></CompanyTabGuard>}
+            {USE_MULTI_TENANT_DATA && activeTab === 'members' && <CompanyTabGuard tab="members"><CompanyMembersModule /></CompanyTabGuard>}
             {USE_MULTI_TENANT_DATA && activeTab === 'profile' && <ProfileModule />}
           </Suspense>
         </main>

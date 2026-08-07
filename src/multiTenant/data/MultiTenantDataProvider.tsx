@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { companyDataService, workerOrdersListenerInputReady, type CompanyCollection, type DataOperationResult } from './companyDataService';
 import { trustedCompanyIdFromSession } from './useTrustedCompanyId';
 import { orderInventoryTransaction } from './orderInventoryTransaction';
-import { hasPermission, type Permission } from '../permissions';
+import { type Permission } from '../permissions';
 import { companyMembersService } from '../companyMembersService';
 
 const defaultCategories: CategoryItem[] = [];
@@ -33,7 +33,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     setLoading(true); const role = authSession?.role; const workerOnly = role === 'worker'; const workerId = profile?.workerId?.trim() || ''; let remaining = 0; let failed = false;
     const ready = () => { remaining -= 1; if (remaining === 0 && !failed) setLoading(false); };
     const onError = (result: DataOperationResult<never>) => { failed = true; setLoading(false); setLoadError(result.message || 'تعذر تحميل البيانات.'); };
-    const allowed = (permission: Permission) => Boolean(role && hasPermission(role, permission));
+    const allowed = (permission: Permission) => Boolean(authSession?.userType === 'company' && authSession.permissions.includes(permission));
     const listen = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void, equalTo?: { field: string; value: string }) => { remaining += 1; return companyDataService.subscribe<T>(companyId, name, (items) => { set(items); ready(); }, onError, equalTo); };
     const orderListener = workerOnly
       ? (() => {
@@ -79,7 +79,9 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
       }));
     }
     // Notifications are private to their recipient, including company owners.
-    if (allowed('company:notifications:read') && authSession?.uid) unsubs.push(listen<AppNotification>('notifications', setNotifications, { field: 'targetUid', value: authSession.uid }));
+    // Order managers must receive worker arrival/completion reports even when
+    // the optional generic-notifications checkbox was not selected for them.
+    if ((allowed('company:notifications:read') || allowed('company:orders:read')) && authSession?.uid) unsubs.push(listen<AppNotification>('notifications', setNotifications, { field: 'targetUid', value: authSession.uid }));
     if (allowed('company:settings:read')) { remaining += 1; unsubs.push(companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError)); }
     if (remaining === 0) setLoading(false);
     return () => { unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
