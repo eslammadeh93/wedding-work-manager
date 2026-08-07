@@ -5,11 +5,11 @@ import {
   signInWithCustomToken,
   createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
+  onIdTokenChanged,
   sendPasswordResetEmail,
   getAuth,
   setPersistence,
-  browserSessionPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
 import {
   doc,
@@ -232,7 +232,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       await reportLoginAttempt('check');
-      await setPersistence(auth, browserSessionPersistence);
       const credential = await signInWithEmailAndPassword(auth, `${username}@worker.local`, loginCode);
       const workerProfileSnap = await getDoc(doc(db, 'users', credential.user.uid));
       const workerProfile = workerProfileSnap.exists()
@@ -274,9 +273,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Sync authenticated Firebase user with their Firestore profile.
+  // Firebase stores its refresh token in the selected persistence layer and
+  // rotates the short-lived ID token itself. Listening for ID-token changes
+  // (rather than auth-state changes only) also revalidates tenant access when
+  // claims are refreshed, revoked, or changed by an administrator.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let disposed = false;
+    let unsubscribe = () => undefined;
+    let resolutionVersion = 0;
+
+    const resolveAuthState = async (currentUser: User | null) => {
+      const version = ++resolutionVersion;
+      const isCurrent = () => !disposed && version === resolutionVersion;
+      if (!isCurrent()) return;
       setUser(currentUser);
 
       if (currentUser) {
@@ -284,34 +293,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             console.info('[auth-context] auth state authenticated; resolving multi-tenant session');
             const session = await resolveMultiTenantSession(currentUser);
+            if (!isCurrent()) return;
             console.info('[auth-context] session resolved', { userType: session.userType, role: session.role, companyId: session.companyId || null });
             setAuthSession(session);
             // Compatibility shape for legacy UI only; authorization remains AuthSession.
             const compatibleRole: UserRole = session.role === 'company_super_admin' || session.role === 'platform_owner' ? 'super_admin' : session.role;
-            setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: session.role === 'worker' ? String((await currentUser.getIdTokenResult()).claims.workerId || '') : undefined });
-            window.history.replaceState({}, '', getPostLoginPath(session));
+            const tokenResult = session.role === 'worker' ? await currentUser.getIdTokenResult() : null;
+            if (!isCurrent()) return;
+            setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: tokenResult ? String(tokenResult.claims.workerId || '') : undefined });
+            const postLoginPath = getPostLoginPath(session);
+            if (window.location.pathname !== postLoginPath) window.history.replaceState({}, '', postLoginPath);
             console.info('[auth-context] navigation completed', { destination: getPostLoginPath(session) });
           } catch (error) {
+            if (!isCurrent()) return;
             const message = error instanceof Error ? error.message : String(error);
             console.error('[auth-context] exception before session state commit', { source: 'src/context/AuthContext.tsx', name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message, stack: error instanceof Error ? error.stack : null });
             setAuthError(message);
             setAuthSession(null);
             setProfile(null);
             await signOut(auth);
+            if (!isCurrent()) return;
             setUser(null);
           }
-          setLoading(false);
+          if (isCurrent()) setLoading(false);
           return;
         }
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userSnap = await getDoc(userDocRef);
+          if (!isCurrent()) return;
 
           if (userSnap.exists()) {
             const userProf = { uid: currentUser.uid, ...userSnap.data() } as UserProfile;
             if (!userProf.isActive) {
               setAuthError('Your account has been disabled by an administrator.');
               await signOut(auth);
+              if (!isCurrent()) return;
               setUser(null);
               setProfile(null);
             } else {
@@ -329,6 +346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn('Error reading user profile from Firestore:', e);
           setAuthError('تعذر التحقق من صلاحيات الحساب.');
           await signOut(auth);
+          if (!isCurrent()) return;
           setUser(null);
           setProfile(null);
         }
@@ -337,10 +355,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(null);
         setAuthSession(null);
       }
-      setLoading(false);
-    });
+      if (isCurrent()) setLoading(false);
+    };
 
-    return () => unsubscribe();
+    const initializeAuth = async () => {
+      try {
+        // Local persistence survives browser restarts. We deliberately never
+        // read, expose, or store the refresh token ourselves; Firebase Auth
+        // owns rotation and storage of both the refresh token and JWT.
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (error) {
+        // Some privacy-restricted browsers can deny persistent storage. Auth
+        // remains usable there, but the browser cannot guarantee a restart-safe session.
+        console.warn('[auth-context] persistent auth storage is unavailable', error);
+      }
+      if (disposed) return;
+      unsubscribe = onIdTokenChanged(auth, (currentUser) => { void resolveAuthState(currentUser); });
+    };
+
+    void initializeAuth();
+
+    return () => { disposed = true; resolutionVersion += 1; unsubscribe(); };
   }, []);
 
   const clearError = () => setAuthError(null);
@@ -376,7 +411,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       await reportLoginAttempt('check');
-      await setPersistence(auth, browserSessionPersistence);
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
       if (cred.user) {
         const now = new Date().toISOString();
@@ -412,8 +446,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.info('[auth-login] start', { method: 'email' });
       await reportLoginAttempt('check');
       console.info('[auth-login] rate-limit check passed');
-      await setPersistence(auth, browserSessionPersistence);
-      console.info('[auth-login] session persistence configured');
+      console.info('[auth-login] persistent session is ready');
       await signInWithEmailAndPassword(auth, sanitizeText(email).trim().toLowerCase(), pass);
       console.info('[auth-login] Firebase Auth sign-in succeeded');
       await reportLoginAttempt('success');
@@ -430,7 +463,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     try {
       await reportLoginAttempt('check');
-      await setPersistence(auth, browserSessionPersistence);
       const result = await requestWorkerCustomToken(
         sanitizeText(companyCode).trim(),
         sanitizeText(username).trim(),
