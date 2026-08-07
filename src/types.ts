@@ -103,6 +103,8 @@ export interface WorkerMovement {
 
 export interface Order {
   id: string;
+  /** Tenant owning this order. The Firestore path remains the security boundary. */
+  companyId?: string;
   orderNumber: string;
   customerId: string;
   customerName: string;
@@ -159,6 +161,10 @@ export interface Worker {
 
 export interface Customer {
   id: string;
+  /** Tenant owning this customer. The Firestore path remains the security boundary. */
+  companyId?: string;
+  /** Orders associated with this customer; Order.customerId is the canonical link. */
+  orderIds?: string[];
   name: string;
   phone: string;
   secondaryPhone?: string;
@@ -166,6 +172,7 @@ export interface Customer {
   address?: string;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface InventoryItem {

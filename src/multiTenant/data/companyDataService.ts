@@ -6,7 +6,7 @@ import { mergeWorkerContact } from '../../utils/workerContact';
 import type { AuthSession } from '../types';
 
 export type CompanyCollection = 'orders' | 'customers' | 'workers' | 'inventory' | 'expenses' | 'categories' | 'activityLogs' | 'notifications';
-export type DataErrorCode = 'UNAUTHENTICATED' | 'NO_COMPANY_CONTEXT' | 'PERMISSION_DENIED' | 'NETWORK_ERROR' | 'NOT_FOUND' | 'VALIDATION_ERROR' | 'CONFLICT' | 'WRITE_FAILED' | 'DELETE_FAILED' | 'INVALID_QUANTITY' | 'INVENTORY_NOT_FOUND' | 'CROSS_TENANT_INVENTORY' | 'INSUFFICIENT_STOCK' | 'INVENTORY_INVARIANT' | 'ORDER_NOT_FOUND' | 'ORDER_ALREADY_DELETED' | 'ORDER_STALE' | 'UNKNOWN_ERROR';
+export type DataErrorCode = 'UNAUTHENTICATED' | 'NO_COMPANY_CONTEXT' | 'PERMISSION_DENIED' | 'NETWORK_ERROR' | 'NOT_FOUND' | 'VALIDATION_ERROR' | 'CONFLICT' | 'WRITE_FAILED' | 'DELETE_FAILED' | 'INVALID_QUANTITY' | 'INVENTORY_NOT_FOUND' | 'CROSS_TENANT_INVENTORY' | 'INSUFFICIENT_STOCK' | 'INVENTORY_INVARIANT' | 'ORDER_NOT_FOUND' | 'CUSTOMER_NOT_FOUND' | 'ORDER_ALREADY_DELETED' | 'ORDER_STALE' | 'UNKNOWN_ERROR';
 export interface DataOperationResult<T> { success: boolean; data?: T; code?: DataErrorCode; message?: string; error?: unknown; }
 const ROOT_COLLECTIONS = new Set(['users', 'orders', 'customers', 'workers', 'inventory', 'expenses', 'categories', 'activityLogs', 'settings']);
 const isDevelopment = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;

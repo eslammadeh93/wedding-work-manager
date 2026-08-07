@@ -75,7 +75,7 @@ export interface DataContextType {
   recordWorkerMovement: (orderId: string, action: WorkerMovement['action']) => Promise<string>;
   
   // Orders
-  addOrder: (orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus'>) => Promise<string>;
+  addOrder: (orderData: NewOrderData, newCustomer?: NewOrderCustomer) => Promise<string>;
   updateOrder: (id: string, orderData: Partial<Order>) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
   addPaymentToOrder: (orderId: string, payment: Omit<PaymentEntry, 'id'>) => Promise<void>;
@@ -102,7 +102,7 @@ export interface DataContextType {
   deleteExpense: (id: string) => Promise<void>;
   
   // Categories
-  addCategory: (nameEn: string, nameAr: string) => Promise<CategoryItem>;
+  addCategory: (categoryData: NewCategoryData) => Promise<CategoryItem>;
 
   // Settings
   updateSettings: (settingsData: Partial<CompanySettings>) => Promise<void>;
@@ -115,6 +115,11 @@ export interface DataContextType {
   clearAllNotifications: () => void;
   checkStockAvailability: (items: { inventoryItemId: string; quantity: number }[]) => { available: boolean; warnings: string[] };
 }
+
+/** Order fields collected by the form. A new customer can be supplied separately. */
+export type NewOrderData = Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus' | 'customerId'> & { customerId?: string };
+export type NewOrderCustomer = Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'companyId' | 'orderIds'>;
+export type NewCategoryData = Omit<CategoryItem, 'id' | 'isCustom'>;
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
 
@@ -386,10 +391,11 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   // Add Category
-  const addCategory = async (nameEn: string, nameAr: string): Promise<CategoryItem> => {
-    const cleanNameEn = sanitizeData(nameEn);
-    const cleanNameAr = sanitizeData(nameAr);
-    const key = 'custom_' + cleanNameEn.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const addCategory = async (categoryData: NewCategoryData): Promise<CategoryItem> => {
+    const cleanNameEn = sanitizeData(categoryData.nameEn).trim();
+    const cleanNameAr = sanitizeData(categoryData.nameAr).trim();
+    const key = sanitizeData(categoryData.key).trim().toLowerCase().replace(/\s+/g, '_');
+    if (!key || !cleanNameEn || !cleanNameAr) throw new Error('أدخل مفتاح التصنيف واسمه بالعربية والإنجليزية.');
     const newCat: CategoryItem = {
       id: 'cat_' + Date.now(),
       key,
@@ -409,10 +415,10 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Order Operations
-  const addOrder = async (
-    orderData: Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus'>
-  ): Promise<string> => {
+  const addOrder = async (orderData: NewOrderData, newCustomer?: NewOrderCustomer): Promise<string> => {
     const newId = createRecordId('ord');
+    const customerId = orderData.customerId || (newCustomer ? await addCustomer({ ...newCustomer, orderIds: [newId] }) : '');
+    if (!customerId) throw new Error('يرجى اختيار عميل أو إدخال بيانات عميل جديد.');
     const history = orderData.paymentHistory || [];
     
     // Calculate total paid: deposit + sum of payment history entries
@@ -432,6 +438,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const newOrder: Order = {
       ...sanitizeData(orderData),
+      customerId,
       workerCanContactCustomer: orderData.workerCanContactCustomer === true,
       id: newId,
       totalPaid,

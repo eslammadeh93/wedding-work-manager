@@ -7,6 +7,7 @@ export type OrderInventoryErrorCode =
   | 'INSUFFICIENT_STOCK'
   | 'INVENTORY_INVARIANT'
   | 'ORDER_NOT_FOUND'
+  | 'CUSTOMER_NOT_FOUND'
   | 'ORDER_ALREADY_DELETED'
   | 'ORDER_STALE';
 

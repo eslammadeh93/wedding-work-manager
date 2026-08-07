@@ -1,5 +1,5 @@
 import { doc, runTransaction, type DocumentSnapshot } from 'firebase/firestore';
-import type { InventoryItem, Order, OrderItemReservation } from '../../types';
+import type { Customer, InventoryItem, Order, OrderItemReservation } from '../../types';
 import { db } from '../../firebase/config';
 import { firestorePaths } from '../firestorePaths';
 import { calculateReservationUpdates, normalizedReservations, OrderInventoryError } from './orderInventoryMath';
@@ -10,7 +10,7 @@ const messageFor = (code: string) => ({
   INVALID_QUANTITY: 'كمية المخزون يجب أن تكون رقماً صحيحاً أكبر من صفر.', INVENTORY_NOT_FOUND: 'تعذر العثور على عنصر المخزون المطلوب.',
   CROSS_TENANT_INVENTORY: 'عنصر المخزون لا يتبع الشركة الحالية.', INSUFFICIENT_STOCK: 'الكمية المطلوبة غير متاحة في المخزون.',
   INVENTORY_INVARIANT: 'بيانات المخزون غير صالحة ولا يمكن تنفيذ العملية بأمان.', ORDER_NOT_FOUND: 'لم يتم العثور على الطلب.',
-  ORDER_ALREADY_DELETED: 'هذا الطلب حُذف بالفعل.', ORDER_STALE: 'تم تعديل الطلب من مستخدم آخر. حدّث الصفحة ثم حاول مرة أخرى.',
+  ORDER_ALREADY_DELETED: 'هذا الطلب حُذف بالفعل.', ORDER_STALE: 'تم تعديل الطلب من مستخدم آخر. حدّث الصفحة ثم حاول مرة أخرى.', CUSTOMER_NOT_FOUND: 'العميل المحدد لا يتبع الشركة الحالية.',
   CONFLICT: 'حدث تعارض متزامن. حاول مرة أخرى.', PERMISSION_DENIED: 'ليس لديك صلاحية لتنفيذ هذه العملية.', NETWORK_ERROR: 'انقطع الاتصال. حاول مرة أخرى.', UNKNOWN_ERROR: 'تعذر تنفيذ عملية الطلب والمخزون.',
 } as Record<string, string>)[code] || 'تعذر تنفيذ عملية الطلب والمخزون.';
 
@@ -27,16 +27,30 @@ const inventoryRefs = (companyId: string, items: readonly OrderItemReservation[]
 const inventoryMap = (snapshots: readonly DocumentSnapshot[]) => new Map(snapshots.map((snapshot) => [snapshot.id, snapshot.exists() ? ({ id: snapshot.id, ...(snapshot.data() || {}) } as InventoryItem) : undefined]));
 
 export const orderInventoryTransaction = {
-  async create(companyId: string, order: Order): Promise<OrderMutationResult> {
+  async create(companyId: string, order: Order, newCustomer?: Customer): Promise<OrderMutationResult> {
     try {
       await runTransaction(db, async (transaction) => {
         const reservedItems = normalizedReservations(order.reservedItems);
         const refs = inventoryRefs(companyId, reservedItems);
         const orderRef = doc(db, firestorePaths.order(companyId, order.id));
-        const [existingOrder, ...snapshots] = await Promise.all([transaction.get(orderRef), ...refs.map((ref) => transaction.get(ref))]);
+        const customerRef = doc(db, firestorePaths.customer(companyId, order.customerId));
+        const [existingOrder, ...snapshots] = await Promise.all([transaction.get(orderRef), ...refs.map((ref) => transaction.get(ref)), transaction.get(customerRef)]);
         if (existingOrder.exists()) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
+        const customerSnapshot = snapshots.pop();
+        if (!customerSnapshot) throw new OrderInventoryError('CUSTOMER_NOT_FOUND', messageFor('CUSTOMER_NOT_FOUND'));
+        if (newCustomer) {
+          if (newCustomer.id !== order.customerId || newCustomer.companyId !== companyId || customerSnapshot.exists()) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
+        } else if (!customerSnapshot.exists()) {
+          throw new OrderInventoryError('CUSTOMER_NOT_FOUND', messageFor('CUSTOMER_NOT_FOUND'));
+        }
         const updates = calculateReservationUpdates(inventoryMap(snapshots), [], reservedItems, companyId);
         for (const ref of refs) transaction.update(ref, { ...updates.get(ref.id), updatedAt: order.updatedAt });
+        if (newCustomer) transaction.set(customerRef, newCustomer);
+        else {
+          const existingCustomer = customerSnapshot.data() as Customer;
+          const orderIds = [...new Set([...(existingCustomer.orderIds || []), order.id])];
+          if (orderIds.length !== (existingCustomer.orderIds || []).length) transaction.update(customerRef, { orderIds, updatedAt: order.updatedAt });
+        }
         transaction.set(orderRef, { ...order, reservedItems });
       });
       return { success: true, data: { id: order.id } };

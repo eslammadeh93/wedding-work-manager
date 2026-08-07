@@ -10,6 +10,8 @@ import {
   Boxes,
   ClipboardList,
   Calendar,
+  ReceiptText,
+  WalletCards,
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -17,18 +19,19 @@ import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
+import { calculateMonthlyCash } from '../../utils/monthlyCash';
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
-  const { orders, expenses, inventory, settings, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
+  const { orders, expenses, inventory, settings } = useData();
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
-  const [reportDateBasis, setReportDateBasis] = useState<'booking' | 'event'>('event');
+  const reportDateBasis: 'event' = 'event';
 
   // Filtered orders & company finances by month/year & date basis
   const reportOrders = orders.filter((o) => {
-    const targetDateStr = reportDateBasis === 'booking' ? (o.bookingDate || o.createdAt) : (o.eventDate || o.weddingDate);
+    const targetDateStr = o.eventDate || o.weddingDate;
     const d = new Date(targetDateStr);
     return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth;
   });
@@ -44,6 +47,9 @@ export const ReportsModule: React.FC = () => {
   const monthCapital = monthCapitalList.reduce((sum, e) => sum + e.amount, 0);
   const monthGeneralExpenses = monthGeneralExpensesList.reduce((sum, e) => sum + e.amount, 0);
   const monthCashBalance = monthCapital - monthGeneralExpenses;
+  const cashSummary = calculateMonthlyCash(orders, expenses, selectedYear, selectedMonth);
+  const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' });
+  const formatMoney = (amount: number) => `$${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
   // Category breakdown of General Expenses
   const categoryBreakdown: Record<string, number> = {};
@@ -92,13 +98,13 @@ export const ReportsModule: React.FC = () => {
       startY: 40,
       head: [['Metric', 'Amount ($)']],
       body: [
-        ['Total Order Contracting Revenue', `$${totalRevenue.toLocaleString()}`],
-        ['Total Collected Paid Deposits', `$${totalPaidRevenue.toLocaleString()}`],
-        ['Total Direct Order Expenses', `$${totalOrderExpenses.toLocaleString()}`],
-        ['Net Cash Remaining', `$${netCollectedCash.toLocaleString()}`],
-        ['Total Capital Deposited', `$${monthCapital.toLocaleString()}`],
-        ['Total General Expenses', `$${monthGeneralExpenses.toLocaleString()}`],
-        ['Current Cash Balance', `$${monthCashBalance.toLocaleString()}`],
+        ['Cash collected from completed orders', `$${cashSummary.collectedFromCompletedOrders.toLocaleString()}`],
+        ['Advance collections from upcoming orders', `$${cashSummary.advancesFromUpcomingOrders.toLocaleString()}`],
+        ['Capital added', `$${cashSummary.capitalAdded.toLocaleString()}`],
+        ['Operating expenses paid', `$${cashSummary.operatingExpenses.toLocaleString()}`],
+        ['Completed order costs', `$${cashSummary.completedOrderCosts.toLocaleString()}`],
+        ['Expected order-only cash in safe at month end', `$${cashSummary.orderCashBalanceToDate.toLocaleString()}`],
+        ['Expected safe balance at month end', `$${cashSummary.expectedSafeBalance.toLocaleString()}`],
         ['Order Profit (before company expenses)', `$${netProfit.toLocaleString()}`],
         ['Total Orders Booked', `${reportOrders.length}`],
       ],
@@ -131,13 +137,13 @@ export const ReportsModule: React.FC = () => {
     const summaryData = [
       { Metric: 'Company', Value: settings.companyNameEn },
       { Metric: 'Period', Value: `${selectedMonth + 1}/${selectedYear}` },
-      { Metric: 'Total Revenue', Value: totalRevenue },
-      { Metric: 'Collected Paid Revenue', Value: totalPaidRevenue },
-      { Metric: 'Total Direct Order Expenses', Value: totalOrderExpenses },
-      { Metric: 'Net Cash Remaining', Value: netCollectedCash },
-      { Metric: 'Total Capital', Value: monthCapital },
-      { Metric: 'General Expenses', Value: monthGeneralExpenses },
-      { Metric: 'Current Cash Balance', Value: monthCashBalance },
+      { Metric: 'Cash from completed orders', Value: cashSummary.collectedFromCompletedOrders },
+      { Metric: 'Advance cash from upcoming orders', Value: cashSummary.advancesFromUpcomingOrders },
+      { Metric: 'Capital added', Value: cashSummary.capitalAdded },
+      { Metric: 'Operating expenses paid', Value: cashSummary.operatingExpenses },
+      { Metric: 'Completed order costs', Value: cashSummary.completedOrderCosts },
+      { Metric: 'Expected order-only cash in safe at month end', Value: cashSummary.orderCashBalanceToDate },
+      { Metric: 'Expected safe balance', Value: cashSummary.expectedSafeBalance },
       { Metric: 'Order Profit', Value: netProfit },
     ];
 
@@ -216,7 +222,7 @@ export const ReportsModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Date Filter Selectors */}
+      {/* Month selector: cash is always calculated by real transaction dates. */}
       <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-xs font-bold text-slate-500 uppercase">{t('reportPeriod')}:</span>
@@ -248,89 +254,60 @@ export const ReportsModule: React.FC = () => {
           </select>
         </div>
 
-        {/* Date Basis Toggle */}
-        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-          <span className="text-[11px] font-bold text-slate-500 px-2">Calculate by:</span>
-          <button
-            onClick={() => setReportDateBasis('event')}
-            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              reportDateBasis === 'event'
-                ? 'bg-amber-500 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            <ClipboardList className="w-3.5 h-3.5 inline-block me-1" /> {t('eventDate')}
-          </button>
-          <button
-            onClick={() => setReportDateBasis('booking')}
-            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-              reportDateBasis === 'booking'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5 inline-block me-1" /> {t('bookingDate')}
-          </button>
+        <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-900/50">
+          <ReceiptText className="w-4 h-4" />
+          <span>{language === 'ar' ? 'الحساب حسب تاريخ التحصيل أو الصرف الفعلي' : 'Calculated from actual collection and spending dates'}</span>
         </div>
       </div>
 
-      {/* Order accounts: revenue, direct costs, and profit */}
-      <section className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-        <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-          <ClipboardList className="w-5 h-5 text-amber-500" />
-          <span>{language === 'ar' ? 'حسابات الأوردرات والربحية' : 'Orders & Profitability'}</span>
-        </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('totalPrice')}</span>
-          <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
-            ${totalRevenue.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-slate-400 mt-1 block">Contracted Revenue</span>
+      {/* Desktop-first monthly safe snapshot. */}
+      <section className="p-5 md:p-6 bg-slate-950 dark:bg-[#1e161a] rounded-[28px] border border-slate-800 dark:border-[#39272e] shadow-xl space-y-5" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-black text-white text-lg flex items-center gap-2">
+              <WalletCards className="w-5 h-5 text-amber-400" />
+              <span>{language === 'ar' ? 'حسابات الخزنة والتحصيلات' : 'Safe & Collections Summary'}</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">{language === 'ar' ? `حركة النقد الفعلية لشهر ${selectedMonthName}` : `Actual cash movement for ${selectedMonthName}`}</p>
+          </div>
+          <span className="text-xs text-slate-400">{language === 'ar' ? 'كل الأرقام تعتمد على التحصيل والصرف المسجّل فعلياً.' : 'All figures use recorded collections and spending.'}</span>
         </div>
 
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('paidAmount')}</span>
-          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
-            ${totalPaidRevenue.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Collected Cash</span>
+        {/* This is intentionally the first and largest number: the user's answer at a glance. */}
+        <div className={`p-6 md:p-7 rounded-2xl border ${cashSummary.orderCashBalanceToDate >= 0 ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-rose-500/10 border-rose-400/30'} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+          <div>
+            <div className="flex items-center gap-2 text-sm font-black text-white"><WalletCards className="w-5 h-5 text-amber-300" />{language === 'ar' ? `فلوس الأوردرات المفروض بالخزنة حتى نهاية ${selectedMonthName}` : `Expected order cash in safe through ${selectedMonthName}`}</div>
+            <p className="text-xs text-slate-400 mt-2">{language === 'ar' ? 'كل تحصيلات الأوردرات حتى آخر الشهر − تكاليف المكتمل − المصاريف الأخرى للأوردرات غير المكتملة. لا يشمل رأس المال أو المصروفات العامة.' : 'All order collections through month end − completed-order costs − other expenses for uncompleted orders. Capital and general expenses are excluded.'}</p>
+          </div>
+          <p className={`text-4xl md:text-5xl font-black tracking-tight ${cashSummary.orderCashBalanceToDate >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatMoney(cashSummary.orderCashBalanceToDate)}</p>
         </div>
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">
-            {language === 'ar' ? 'متوسط سعر الأوردر' : 'Average Order Price'}
-          </span>
-          <p className="text-2xl font-black text-sky-600 dark:text-sky-400 mt-2">
-            ${averageOrderPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </p>
-          <span className="text-[11px] text-slate-400 font-medium mt-1 block">
-            {language === 'ar' ? 'إجمالي قيمة الأوردرات ÷ عدد الأوردرات' : 'Total order value ÷ number of orders'}
-          </span>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+          {[
+            { label: language === 'ar' ? 'تحصيل أوردرات مكتملة' : 'Completed order collections', value: cashSummary.collectedFromCompletedOrders, note: language === 'ar' ? 'دفعات دخلت من أوردرات مكتملة' : 'Cash received from completed orders', color: 'text-emerald-400', icon: ReceiptText },
+            { label: language === 'ar' ? 'مقدمات أوردرات قادمة' : 'Upcoming order advances', value: cashSummary.advancesFromUpcomingOrders, note: language === 'ar' ? 'دفعات استلمتها قبل التنفيذ' : 'Payments received before service', color: 'text-cyan-400', icon: Calendar },
+            { label: language === 'ar' ? 'تكاليف أوردرات مكتملة' : 'Completed order costs', value: cashSummary.completedOrderCosts, note: language === 'ar' ? 'عمالة ونقل ومصروفات تنفيذ' : 'Labor, transport & fulfillment', color: 'text-orange-400', icon: ClipboardList },
+            { label: language === 'ar' ? 'مصاريف أخرى لأوردرات قادمة' : 'Upcoming order other expenses', value: cashSummary.upcomingOrderOtherExpenses, note: language === 'ar' ? 'تُخصم قبل اكتمال الأوردر' : 'Deducted before order completion', color: 'text-rose-400', icon: TrendingDown },
+            { label: language === 'ar' ? 'صافي فلوس الأوردرات' : 'Net order cash', value: cashSummary.orderCashNet, note: language === 'ar' ? 'الرقم النهائي للأوردرات فقط' : 'Final number for orders only', color: cashSummary.orderCashNet >= 0 ? 'text-amber-300' : 'text-rose-400', icon: DollarSign },
+            { label: language === 'ar' ? 'رصيد الأوردرات التراكمي' : 'Cumulative order cash', value: cashSummary.orderCashBalanceToDate, note: language === 'ar' ? 'المفروض بالخزنة حتى نهاية الشهر' : 'Expected in safe through month end', color: cashSummary.orderCashBalanceToDate >= 0 ? 'text-amber-300' : 'text-rose-400', icon: WalletCards },
+          ].map((card) => {
+            const Icon = card.icon;
+            return <div key={card.label} className="min-h-44 p-5 rounded-2xl bg-white/[0.03] border border-white/[0.09] flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-2"><span className="text-xs font-bold text-slate-300">{card.label}</span><Icon className={`w-4 h-4 ${card.color}`} /></div>
+              <p className={`text-3xl font-black tracking-tight ${card.color}`}>{formatMoney(card.value)}</p>
+              <span className="text-[11px] leading-5 text-slate-500">{card.note}</span>
+            </div>;
+          })}
         </div>
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{language === 'ar' ? 'تكاليف الأوردرات' : 'Order Costs'}</span>
-          <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2">
-            ${totalOrderExpenses.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-rose-500 font-medium mt-1 block">Direct order costs</span>
+      </section>
+
+      <section className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800">
+          <div><h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-5 h-5 text-emerald-500" />{language === 'ar' ? 'كشف التحصيلات الفعلية' : 'Actual collections ledger'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'كل دفعة تم استلامها خلال الشهر المختار.' : 'Every customer payment received during the selected month.'}</p></div>
+          <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatMoney(cashSummary.collectedFromCompletedOrders + cashSummary.advancesFromUpcomingOrders)}</span>
         </div>
-        <div className="p-5 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 shadow-sm">
-          <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase">{t('netCollectedCash')}</span>
-          <p className={`text-2xl font-black mt-2 ${netCollectedCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-400'}`}>
-            ${netCollectedCash.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 font-medium mt-1 block">
-            {language === 'ar' ? 'المسدد − مصروفات الأوردرات المحتسبة' : 'Collected cash − recognized order costs'}
-          </span>
-        </div>
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <span className="text-xs font-semibold text-slate-400 uppercase">{t('netProfit')}</span>
-          <p className={`text-2xl font-black mt-2 ${netProfit >= 0 ? 'premium-gold' : 'text-rose-600 dark:text-rose-400'}`}>
-            ${netProfit.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-slate-400 font-medium mt-1 block">Orders only</span>
-        </div>
-      </div>
+        {cashSummary.collections.length === 0 ? <p className="p-8 text-center text-sm text-slate-400">{language === 'ar' ? 'لا توجد تحصيلات مسجلة في هذا الشهر.' : 'No collections recorded this month.'}</p> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs text-start"><thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500"><tr><th className="p-3.5 text-start">{language === 'ar' ? 'التاريخ' : 'Date'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'الأوردر / العميل' : 'Order / customer'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'نوع التحصيل' : 'Collection type'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'طريقة الدفع' : 'Method'}</th><th className="p-3.5 text-end">{language === 'ar' ? 'المبلغ' : 'Amount'}</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{cashSummary.collections.map((collection) => <tr key={collection.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td className="p-3.5 font-semibold text-slate-500">{collection.date}</td><td className="p-3.5"><p className="font-bold text-slate-900 dark:text-white">{collection.orderNumber}</p><p className="text-slate-500 mt-0.5">{collection.customerName}</p></td><td className="p-3.5"><span className={`inline-flex px-2.5 py-1 rounded-lg font-bold ${collection.isCompletedOrder ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{collection.isCompletedOrder ? (language === 'ar' ? 'أوردر مكتمل' : 'Completed order') : (language === 'ar' ? 'مقدم أوردر قادم' : 'Upcoming advance')}{collection.isLegacyEstimate ? ` · ${language === 'ar' ? 'تقديري' : 'Estimated'}` : ''}</span></td><td className="p-3.5 text-slate-600 dark:text-slate-300">{collection.method}</td><td className="p-3.5 text-end font-black text-emerald-600 dark:text-emerald-400">+{formatMoney(collection.amount)}</td></tr>)}</tbody></table></div>}
+        <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: تكاليف الأوردرات تُخصم عند اكتمال الأوردر وبحسب تاريخ المناسبة، لعدم وجود تاريخ صرف منفصل لكل تكلفة. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order costs are deducted on the completed event date because individual cost payment dates are not yet stored. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
       </section>
 
       {/* Company finance ledger: capital and general expenses */}

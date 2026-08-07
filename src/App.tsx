@@ -27,6 +27,7 @@ const ExpensesModule = lazy(() => import('./components/expenses/ExpensesModule')
 const CalendarModule = lazy(() => import('./components/calendar/CalendarModule').then(({ CalendarModule }) => ({ default: CalendarModule })));
 const ReportsModule = lazy(() => import('./components/reports/ReportsModule').then(({ ReportsModule }) => ({ default: ReportsModule })));
 const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityLogModule').then(({ ActivityLogModule }) => ({ default: ActivityLogModule })));
+const WorkerPerformanceModule = lazy(() => import('./components/workerPerformance/WorkerPerformanceModule').then(({ WorkerPerformanceModule }) => ({ default: WorkerPerformanceModule })));
 const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
@@ -44,9 +45,10 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   dashboard: 'company:dashboard:read', orders: 'company:orders:read', customers: 'company:customers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
+  workerPerformance: 'company:worker_performance:read',
   settings: 'company:settings:read', members: 'company:members:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'customers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -57,6 +59,7 @@ const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<
   dashboard: ['super_admin', 'admin', 'manager'],
   orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
   workers: ['super_admin', 'admin', 'manager'],
+  workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
   customers: ['super_admin', 'admin', 'manager', 'employee'],
   inventory: ['super_admin', 'admin', 'manager'],
   expenses: ['super_admin'],
@@ -99,6 +102,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'الطلبات';
       case 'workers':
         return 'العمال';
+      case 'workerPerformance':
+        return 'متابعة الأداء';
       case 'customers':
         return 'العملاء';
       case 'inventory':
@@ -128,6 +133,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Orders';
       case 'workers':
         return 'Workers';
+      case 'workerPerformance':
+        return 'Worker Performance';
       case 'customers':
         return 'Customers';
       case 'inventory':
@@ -217,7 +224,7 @@ function AppContent() {
     }
     const role = profile?.role || 'employee';
     if (role === 'worker') {
-      if (activeTab !== 'orders') {
+      if (!['orders', 'workerPerformance'].includes(activeTab)) {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
@@ -330,6 +337,7 @@ function AppContent() {
             {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} /></CompanyTabGuard>}
             {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
+            {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}
             {activeTab === 'customers' && <CompanyTabGuard tab="customers"><CustomersModule /></CompanyTabGuard>}
             {activeTab === 'inventory' && <CompanyTabGuard tab="inventory"><InventoryModule /></CompanyTabGuard>}
             {activeTab === 'expenses' && <CompanyTabGuard tab="expenses"><ExpensesModule /></CompanyTabGuard>}

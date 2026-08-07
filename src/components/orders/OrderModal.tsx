@@ -119,7 +119,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   initialOrder,
 }) => {
   const { t, language } = useLanguage();
-  const { orders, customers, inventory, workers, addOrder, updateOrder, addCustomer, checkStockAvailability } = useData();
+  const { orders, customers, inventory, workers, addOrder, updateOrder, checkStockAvailability } = useData();
   const { authSession } = useAuth();
 
   const isEdit = !!initialOrder;
@@ -292,16 +292,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setIsSaving(true);
 
     try {
-    let custId = selectedCustomerId;
-    if (!custId && customerName.trim()) {
-      // Auto create new customer record
-      custId = await addCustomer({
-        name: customerName,
-        phone: customerPhone,
-        notes: 'Created via Order ' + orderNumber,
-      });
-    }
-
     if (workerName.trim()) {
       try {
         const existing = JSON.parse(localStorage.getItem('wedding_saved_executors') || '[]');
@@ -318,7 +308,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
     const payload = {
       orderNumber,
-      customerId: custId,
+      customerId: selectedCustomerId,
       customerName,
       customerPhone,
       bookingDate,
@@ -351,7 +341,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         {
           id: 'pay_init_' + Date.now(),
           amount: Number(deposit),
-          date: localDateString(),
+          // Booking date is explicitly the date the deposit was received; using
+          // today's date makes historical monthly cash reports inaccurate.
+          date: bookingDate || localDateString(),
           method: paymentMethod,
           notes: 'Initial Deposit Payment',
         },
@@ -361,7 +353,14 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     if (isEdit && initialOrder) {
       await updateOrder(initialOrder.id, payload);
     } else {
-      await addOrder(payload);
+      await addOrder(
+        payload,
+        selectedCustomerId ? undefined : {
+          name: customerName.trim(),
+          phone: customerPhone,
+          notes: `Created via Order ${orderNumber}`,
+        },
+      );
     }
     onClose();
     } catch (error) {

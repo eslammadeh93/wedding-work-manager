@@ -38,6 +38,8 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
   const [showNewCatForm, setShowNewCatForm] = useState(false);
   const [newCatKey, setNewCatKey] = useState('');
   const [newCatEn, setNewCatEn] = useState('');
+  const [newCatError, setNewCatError] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [newCatAr, setNewCatAr] = useState('');
 
@@ -45,21 +47,37 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
 
   const handleAddCustomCat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSaving) return;
-    setIsSaving(true);
-    if (!newCatKey.trim() || !newCatEn.trim() || !newCatAr.trim()) return;
+    if (isAddingCategory) return;
+    if (!newCatKey.trim() || !newCatEn.trim() || !newCatAr.trim()) {
+      setNewCatError('أدخل مفتاح التصنيف واسمه بالعربية والإنجليزية.');
+      return;
+    }
 
     const key = newCatKey.toLowerCase().replace(/\s+/g, '_');
-    await addCategory({ id: key, key, nameEn: newCatEn, nameAr: newCatAr });
-    setCategory(key);
-    setShowNewCatForm(false);
-    setNewCatKey('');
-    setNewCatEn('');
-    setNewCatAr('');
+    if (categories.some((item) => item.key === key)) {
+      setNewCatError('هذا التصنيف موجود بالفعل.');
+      return;
+    }
+    setIsAddingCategory(true);
+    setNewCatError(null);
+    try {
+      const newCategory = await addCategory({ key, nameEn: newCatEn, nameAr: newCatAr });
+      setCategory(newCategory.key);
+      setShowNewCatForm(false);
+      setNewCatKey('');
+      setNewCatEn('');
+      setNewCatAr('');
+    } catch (error) {
+      setNewCatError(error instanceof Error ? error.message : 'تعذر إضافة التصنيف. حاول مرة أخرى.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
     const payload = {
       itemCode,
       nameAr,
@@ -222,10 +240,12 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               <button
                 type="button"
                 onClick={handleAddCustomCat}
+                disabled={isAddingCategory}
                 className="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-bold"
               >
-                {t('add')}
+                {isAddingCategory ? 'جارٍ الإضافة...' : t('add')}
               </button>
+              {newCatError && <p role="alert" className="text-xs font-semibold text-rose-600">{newCatError}</p>}
             </div>
           )}
 

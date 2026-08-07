@@ -12,6 +12,7 @@ import {
   UsersRound,
   UserRound,
   Wallet,
+  Target,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -29,6 +30,7 @@ export type ActiveTab =
   | 'calendar'
   | 'reports'
   | 'activityLog'
+  | 'workerPerformance'
   | 'settings'
   | 'members'
   | 'profile';
@@ -73,6 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'orders', group: 'sales', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
     { id: 'customers', group: 'sales', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
     { id: 'workers', group: 'operations', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
+    { id: 'workerPerformance', group: 'operations', label: language === 'ar' ? (userRole === 'worker' ? 'متابعة أدائي' : 'متابعة أداء العمال') : (userRole === 'worker' ? 'My Performance' : 'Worker Performance'), icon: Target, roles: ['super_admin', 'admin', 'manager', 'worker'], permission: 'company:worker_performance:read' },
     { id: 'inventory', group: 'operations', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
     { id: 'expenses', group: 'finance', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
     { id: 'reports', group: 'finance', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },

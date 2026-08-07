@@ -6,7 +6,7 @@ export type CompanyPermission =
   | 'company:dashboard:read' | 'company:calendar:read' | 'company:orders:read' | 'company:orders:write'
   | 'company:customers:read' | 'company:customers:write' | 'company:workers:read' | 'company:workers:write'
   | 'company:inventory:read' | 'company:inventory:write' | 'company:expenses:read' | 'company:expenses:write'
-  | 'company:categories:read' | 'company:categories:write' | 'company:activity_logs:read' | 'company:reports:read'
+  | 'company:categories:read' | 'company:categories:write' | 'company:activity_logs:read' | 'company:worker_performance:read' | 'company:reports:read'
   | 'company:settings:read' | 'company:settings:write' | 'company:members:read' | 'company:members:write' | 'company:notifications:read';
 export type CompanyMemberResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberError; message: string; data?: T };
 export interface CreateCompanyMemberRequest { name: string; role: ManagedRole; email?: string; temporaryPassword?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; username?: string; loginCode?: string; phone?: string; notes?: string; companyId?: string; }
