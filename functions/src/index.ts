@@ -236,6 +236,31 @@ export const workerLogin = onCall({ region: 'us-central1', enforceAppCheck: fals
   }
 });
 
+type LogoutResponse = { success: boolean; code: 'OK' | 'UNAUTHORIZED' | 'LOGOUT_FAILED'; message: string };
+
+/**
+ * Ends the authenticated user's server session by invalidating refresh tokens.
+ * The client still calls Firebase signOut afterwards to clear the current
+ * browser session immediately; this endpoint additionally prevents sessions
+ * on other devices from obtaining new ID tokens.
+ */
+export const logout = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request): Promise<LogoutResponse> => {
+  const uid = request.auth?.uid;
+  if (!uid) return { success: false, code: 'UNAUTHORIZED', message: 'يجب تسجيل الدخول أولاً.' };
+
+  try {
+    await auth.revokeRefreshTokens(uid);
+    logger.info('User logged out', { uid });
+    return { success: true, code: 'OK', message: 'تم تسجيل الخروج بنجاح.' };
+  } catch (error) {
+    logger.error('Could not revoke user refresh tokens during logout', {
+      uid,
+      reason: error instanceof Error ? error.message : 'unknown',
+    });
+    return { success: false, code: 'LOGOUT_FAILED', message: 'تعذر إنهاء الجلسة.' };
+  }
+});
+
 export const getWorkerOrders = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async request => {
   if (!request.auth?.uid) return { success: false, code: 'UNAUTHORIZED', message: 'يجب تسجيل الدخول أولاً.' };
   const companyId = typeof request.auth.token.companyId === 'string' ? request.auth.token.companyId : '';

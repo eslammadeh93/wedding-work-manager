@@ -9,9 +9,9 @@ import type { AuthSession, Company, CompanyMember, PlatformUser } from './types'
 export class MultiTenantAuthError extends Error {}
 type WorkerLoginResult = { success: boolean; code: string; message: string; customToken?: string; retryAfterSeconds?: number };
 
-// Render serves this project as a static SPA. Every authenticated workspace
-// stays on `/`; React state selects the visible page without changing the URL.
-export const getPostLoginPath = (_session: AuthSession): string => '/';
+// Company workspaces keep their selected tab in session storage, while the
+// platform workspace has URL-based routes that should remain shareable.
+export const getPostLoginPath = (session: AuthSession): string => session.userType === 'platform' ? '/platform' : '/';
 
 function assertCompanyAllowsLogin(company: Company) {
   const deadline = new Date(company.gracePeriodEnd || company.subscriptionEnd).getTime();

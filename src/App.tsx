@@ -46,12 +46,40 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   settings: 'company:settings:read', members: 'company:members:read',
 };
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'customers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
+const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
+const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
+
+// Legacy accounts do not have a permission list, so retain their role-based
+// access rules here. This check deliberately happens before a lazy module is
+// mounted: an unauthorized initial/restored tab must not request its chunk.
+const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<typeof useAuth>['profile']>['role'][]>> = {
+  dashboard: ['super_admin', 'admin', 'manager'],
+  orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
+  workers: ['super_admin', 'admin', 'manager'],
+  customers: ['super_admin', 'admin', 'manager', 'employee'],
+  inventory: ['super_admin', 'admin', 'manager'],
+  expenses: ['super_admin'],
+  calendar: ['super_admin', 'admin', 'manager', 'employee'],
+  reports: ['super_admin', 'admin', 'manager'],
+  activityLog: ['super_admin', 'admin', 'manager'],
+  settings: ['super_admin', 'admin', 'manager'],
+};
 
 function CompanyTabGuard({ tab, children }: { tab: ActiveTab; children: React.ReactNode }) {
+  const { profile, authSession } = useAuth();
   const permission = tabPermission[tab];
-  return USE_MULTI_TENANT_DATA && permission
-    ? <CompanySessionRouteGuard permission={permission} fallback={<UnauthorizedCompanyMembers />}>{children}</CompanySessionRouteGuard>
-    : <>{children}</>;
+  if (USE_MULTI_TENANT_DATA) {
+    return permission
+      ? <CompanySessionRouteGuard permission={permission} fallback={<UnauthorizedCompanyMembers />}>{children}</CompanySessionRouteGuard>
+      : <>{children}</>;
+  }
+
+  const role = profile?.role;
+  const allowedRoles = legacyTabRoles[tab];
+  return !allowedRoles || (role !== undefined && allowedRoles.includes(role))
+    ? <>{children}</>
+    : <UnauthorizedCompanyMembers />;
 }
 
 /** Kept outside the legacy tree so platform code is only requested after verification. */
@@ -133,18 +161,44 @@ function AppContent() {
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
+  const [restoredTabForUid, setRestoredTabForUid] = useState<string | null>(null);
 
-  // Set default active tab to dashboard (or orders for workers) when logged in
+  // The browser history cannot be erased, but once a session ends every
+  // history navigation is rewritten to the public login URL before protected
+  // UI can render. This also covers platform URLs such as /platform/...
+  // restored through the browser Back button.
+  useEffect(() => {
+    if (loading || !usersInitialized || (user && profile)) return;
+
+    const forcePublicLoginUrl = () => {
+      if (window.location.pathname !== '/') {
+        window.history.replaceState({ loggedOut: true }, '', '/');
+      }
+    };
+
+    forcePublicLoginUrl();
+    window.addEventListener('popstate', forcePublicLoginUrl);
+    return () => window.removeEventListener('popstate', forcePublicLoginUrl);
+  }, [loading, usersInitialized, user, profile]);
+
+  // Restore the workspace page after a refresh. It is scoped to the signed-in
+  // user and kept only for this browser tab, so it cannot leak between users.
   useEffect(() => {
     if (user && profile) {
       setCreateOrderRequest(0);
-      if (profile.role === 'worker') {
-        setActiveTab('orders');
-      } else {
-        setActiveTab('dashboard');
+      if (authSession?.userType === 'platform') return;
+      let savedTab: string | null = null;
+      try {
+        savedTab = sessionStorage.getItem(activeTabStorageKey(user.uid));
+      } catch {
+        // Private browsing may disable storage; the normal default still works.
       }
+      setActiveTab(isActiveTab(savedTab) ? savedTab : profile.role === 'worker' ? 'orders' : 'dashboard');
+      setRestoredTabForUid(user.uid);
+    } else {
+      setRestoredTabForUid(null);
     }
-  }, [user?.uid, profile?.role]);
+  }, [user?.uid, profile?.role, authSession?.userType]);
 
   // A dashboard "create order" request is a one-shot signal. Clear it as
   // soon as Orders is left so reopening the section never reopens the modal.
@@ -173,6 +227,18 @@ function AppContent() {
       }
     }
   }, [profile?.role, activeTab]);
+
+  // Persist only after the saved tab has been restored. The role/permission
+  // guard above will replace an outdated or unauthorized tab before it is
+  // retained for the next refresh.
+  useEffect(() => {
+    if (!user || !profile || authSession?.userType === 'platform' || restoredTabForUid !== user.uid) return;
+    try {
+      sessionStorage.setItem(activeTabStorageKey(user.uid), activeTab);
+    } catch {
+      // Storage is optional; navigation remains fully functional without it.
+    }
+  }, [user?.uid, profile?.uid, authSession?.userType, restoredTabForUid, activeTab]);
 
   // Ctrl/Cmd + K shortcut for search
   useEffect(() => {
@@ -203,7 +269,7 @@ function AppContent() {
   };
 
   // 1. App Startup Loading State
-  if (loading || !usersInitialized) {
+  if (loading || !usersInitialized || (user && profile && authSession?.userType !== 'platform' && restoredTabForUid !== user.uid)) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 transition-colors">
         <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 mb-4 shadow-lg shadow-amber-500/20">

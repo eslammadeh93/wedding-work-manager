@@ -20,9 +20,10 @@ import {
   collection,
   onSnapshot,
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import firebaseConfigJson from '../../firebase-applet-config.json';
-import { auth, db } from '../firebase/config';
+import { auth, db, functions } from '../firebase/config';
 import { UserProfile, UserRole, Worker } from '../types';
 import { sanitizeData, sanitizeText } from '../utils/security';
 import { USE_MULTI_TENANT_DATA, getPostLoginPath, requestWorkerCustomToken, resolveMultiTenantSession, type AuthSession } from '../multiTenant';
@@ -215,6 +216,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (user) {
       try {
+        sessionStorage.removeItem(`wedding_manager_active_tab:${user.uid}`);
+      } catch {
+        // Storage is optional and must never prevent logout.
+      }
+      try {
+        const endServerSession = httpsCallable<undefined, { success: boolean; code: string }>(functions, 'logout');
+        await endServerSession();
+      } catch (err) {
+        // A server-side revocation failure must not trap the user in the app.
+        console.warn('Server logout info:', err);
+      }
+      try {
         await signOut(auth);
       } catch (err) {
         console.warn('Firebase signOut info:', err);
@@ -301,9 +314,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const tokenResult = session.role === 'worker' ? await currentUser.getIdTokenResult() : null;
             if (!isCurrent()) return;
             setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: tokenResult ? String(tokenResult.claims.workerId || '') : undefined });
-            const postLoginPath = getPostLoginPath(session);
-            if (window.location.pathname !== postLoginPath) window.history.replaceState({}, '', postLoginPath);
-            console.info('[auth-context] navigation completed', { destination: getPostLoginPath(session) });
+            const currentPath = `${window.location.pathname}${window.location.search}`;
+            // A platform route is represented in the URL, so retain it during
+            // refresh instead of returning the owner to the overview page.
+            const postLoginPath = session.userType === 'platform' && window.location.pathname.startsWith('/platform')
+              ? currentPath
+              : getPostLoginPath(session);
+            if (currentPath !== postLoginPath) window.history.replaceState({}, '', postLoginPath);
+            console.info('[auth-context] navigation completed', { destination: postLoginPath });
           } catch (error) {
             if (!isCurrent()) return;
             const message = error instanceof Error ? error.message : String(error);
