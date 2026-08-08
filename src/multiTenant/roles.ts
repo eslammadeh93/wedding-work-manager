@@ -1,6 +1,12 @@
 import type { CompanyMemberRole, PlatformUserRole, SaaSRole } from './types';
 
-export const PLATFORM_ROLES = ['platform_owner'] as const satisfies readonly PlatformUserRole[];
+export const PLATFORM_ROLES = [
+  'platform_owner',
+  'platform_admin',
+  'platform_support',
+  'platform_billing',
+  'platform_read_only',
+] as const satisfies readonly PlatformUserRole[];
 export const COMPANY_MEMBER_ROLES = [
   'company_super_admin',
   'manager',

@@ -4,7 +4,7 @@
  */
 export type RecordTimestamp = string | Date;
 
-export type PlatformUserRole = 'platform_owner';
+export type PlatformUserRole = 'platform_owner' | 'platform_admin' | 'platform_support' | 'platform_billing' | 'platform_read_only';
 export type CompanyMemberRole = 'company_super_admin' | 'manager' | 'employee' | 'worker';
 export type SaaSRole = PlatformUserRole | CompanyMemberRole;
 

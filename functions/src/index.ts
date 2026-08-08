@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { setGlobalOptions } from 'firebase-functions/v2/options';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
 import { CompanyMemberService, hashWorkerLoginCode } from './companyMembers.js';
@@ -16,6 +17,10 @@ import { createPlatformAggregationTriggers } from './platformAggregation.js';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
 
 initializeApp();
+// This back-office application has many small functions and modest traffic.
+// Capping instances and using the Gen 1 CPU profile avoids exhausting the
+// project's regional Cloud Run CPU quota during deployment or traffic spikes.
+setGlobalOptions({ region: 'us-central1', maxInstances: 1, cpu: 'gcf_gen1' });
 const db = getFirestore();
 const auth = getAuth();
 const platformDashboardService = new PlatformDashboardService({ db });
@@ -295,11 +300,9 @@ export const seedTestMultiTenantData = onCall({ region: 'us-central1', enforceAp
 /** Privileged provisioning endpoint, available only after an explicit local/staging setup gate. */
 export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateCompanyResponse> => {
   if (!setupEnvironmentAllowed()) return { success: false, code: 'UNKNOWN_ERROR', message: 'هذه العملية متاحة في Emulator أو Staging المصرح فقط.' };
-  const uid = request.auth?.uid;
-  if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const uid = await isActivePlatformUserFor(request, 'platform:companies:create');
+  if (!uid) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   try {
-    const platformUser = await db.doc(`platformUsers/${uid}`).get();
-    if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
     return await new CompanyProvisioningService({ db, auth }).create(request.data, uid);
   } catch (error) {
     logger.error('Company provisioning authorization failed', { uid, reason: error instanceof Error ? error.message : 'unknown' });
@@ -308,10 +311,8 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
 });
 
 export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<UpdateCompanyResponse> => {
-  const uid = request.auth?.uid;
-  if (!uid || request.auth?.token.platform_owner !== true) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
-  const platformUser = await db.doc(`platformUsers/${uid}`).get();
-  if (!platformUser.exists || platformUser.data()?.role !== 'platform_owner' || platformUser.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
+  const uid = await isActivePlatformUserFor(request, 'platform:companies:update');
+  if (!uid) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   const data = (request.data || {}) as Partial<UpdateCompanyRequest>;
   const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
   const name = typeof data.name === 'string' ? data.name.trim() : '';
@@ -364,6 +365,287 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
     const code = reason === 'SLUG_EXISTS' ? 'SLUG_EXISTS' : reason === 'COMPANY_CODE_EXISTS' ? 'COMPANY_CODE_EXISTS' : reason === 'MAX_USERS_TOO_LOW' ? 'INVALID_INPUT' : 'UNKNOWN_ERROR';
     return { success: false, code, message: reason === 'SLUG_EXISTS' ? 'Slug مستخدم بالفعل.' : reason === 'COMPANY_CODE_EXISTS' ? 'رمز الشركة مستخدم بالفعل.' : reason === 'MAX_USERS_TOO_LOW' ? 'لا يمكن أن يقل maxUsers عن عدد أعضاء الشركة الحالي.' : 'تعذر تحديث الشركة.' };
   }
+});
+
+type PlatformOwnerRequest = { auth?: { uid: string; token?: Record<string, unknown> }; data: unknown };
+const defaultPlatformConsoleSettings = { expiryDays: 30, compactMode: false, dailyDigest: true };
+type PlatformCapability = 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:settings:manage' | 'platform:admins:manage';
+const platformRoleCapabilities: Record<string, readonly PlatformCapability[]> = {
+  platform_owner: ['platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
+  platform_admin: ['platform:companies:update', 'platform:users:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
+  platform_support: ['platform:console:read', 'platform:support:manage'],
+  platform_billing: ['platform:subscriptions:manage'],
+  platform_read_only: [],
+};
+const isActivePlatformUserFor = async (request: PlatformOwnerRequest, capability: PlatformCapability): Promise<string | null> => {
+  const uid = request.auth?.uid;
+  if (!uid) return null;
+  const profile = await db.doc(`platformUsers/${uid}`).get();
+  const role = String(profile.data()?.role || '');
+  const matchingRoleClaim = request.auth?.token?.platformRole === role;
+  const legacyOwnerClaim = role === 'platform_owner' && request.auth?.token?.platform_owner === true;
+  return profile.exists && profile.data()?.status === 'active' && (matchingRoleClaim || legacyOwnerClaim) && platformRoleCapabilities[role]?.includes(capability) ? uid : null;
+};
+const isActivePlatformOwner = async (request: PlatformOwnerRequest): Promise<string | null> => {
+  const uid = request.auth?.uid;
+  if (!uid || request.auth?.token?.platform_owner !== true) return null;
+  const profile = await db.doc(`platformUsers/${uid}`).get();
+  return profile.exists && profile.data()?.role === 'platform_owner' && profile.data()?.status === 'active' ? uid : null;
+};
+const timestampIso = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate: () => Date }).toDate().toISOString();
+  return undefined;
+};
+
+/** Central, owner-only console data. Browser clients never write these paths directly. */
+export const getPlatformConsoleState = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:console:read');
+  if (!uid) throw new Error('UNAUTHORIZED');
+  const [settingsSnapshot, ticketsSnapshot, notificationsSnapshot] = await Promise.all([
+    db.doc('platformSettings/main').get(),
+    db.collection('platformSupportTickets').get(),
+    db.collection('platformNotifications').get(),
+  ]);
+  const stored = settingsSnapshot.data() || {};
+  const settings = {
+    expiryDays: Number.isInteger(stored.expiryDays) && stored.expiryDays >= 1 && stored.expiryDays <= 365 ? stored.expiryDays : defaultPlatformConsoleSettings.expiryDays,
+    compactMode: stored.compactMode === true,
+    dailyDigest: stored.dailyDigest !== false,
+  };
+  const supportTickets = ticketsSnapshot.docs.map(ticket => {
+    const data = ticket.data();
+    return {
+      id: ticket.id,
+      companyId: String(data.companyId || ''),
+      companyName: String(data.companyName || 'شركة غير معرّفة'),
+      subject: String(data.subject || 'طلب دعم'),
+      status: ['open', 'in_progress', 'resolved'].includes(String(data.status)) ? String(data.status) : 'open',
+      priority: ['low', 'normal', 'high', 'urgent'].includes(String(data.priority)) ? String(data.priority) : 'normal',
+      assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo : null,
+      commentCount: Math.max(0, Number(data.commentCount || 0)),
+      createdAt: timestampIso(data.createdAt),
+      updatedAt: timestampIso(data.updatedAt),
+    };
+  }).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  const notifications = notificationsSnapshot.docs.map(notification => {
+    const data = notification.data();
+    return {
+      id: notification.id,
+      title: String(data.title || 'إشعار المنصة'),
+      body: String(data.body || ''),
+      severity: ['info', 'warning', 'critical'].includes(String(data.severity)) ? String(data.severity) : 'info',
+      status: ['unread', 'read', 'archived'].includes(String(data.status)) ? String(data.status) : 'unread',
+      companyId: typeof data.companyId === 'string' ? data.companyId : null,
+      createdAt: timestampIso(data.createdAt),
+    };
+  }).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return { settings, supportTickets, notifications };
+});
+
+export const savePlatformConsoleSettings = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:settings:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const expiryDays = data.expiryDays;
+  if (!uid || !Number.isInteger(expiryDays) || Number(expiryDays) < 1 || Number(expiryDays) > 365 || typeof data.compactMode !== 'boolean' || typeof data.dailyDigest !== 'boolean') return { success: false, message: 'بيانات الإعدادات غير صالحة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await db.doc('platformSettings/main').set({ expiryDays, compactMode: data.compactMode, dailyDigest: data.dailyDigest, updatedAt: timestamp, updatedBy: uid }, { merge: true });
+  await db.collection('platformAuditLogs').add({ action: 'platform_console_settings_updated', createdBy: uid, timestamp });
+  return { success: true, message: 'تم حفظ الإعدادات.' };
+});
+
+export const createPlatformSupportTicket = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:support:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const subject = typeof data.subject === 'string' ? data.subject.trim() : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || subject.length < 4 || subject.length > 300) return { success: false, message: 'بيانات طلب الدعم غير صالحة.' };
+  const company = await db.doc(`companies/${companyId}`).get();
+  if (!company.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  const ticket = await db.collection('platformSupportTickets').add({ companyId, companyName: String(company.data()?.name || 'شركة'), subject, status: 'open', priority: 'normal', commentCount: 0, createdAt: timestamp, updatedAt: timestamp, createdBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_support_ticket_created', companyId, ticketId: ticket.id, createdBy: uid, timestamp });
+  return { success: true, message: 'تم تسجيل طلب الدعم.' };
+});
+
+export const updatePlatformSupportTicket = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:support:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const ticketId = typeof data.ticketId === 'string' ? data.ticketId.trim() : '';
+  const status = typeof data.status === 'string' ? data.status : '';
+  const priority = typeof data.priority === 'string' ? data.priority : undefined;
+  const assignedTo = data.assignedTo === null || typeof data.assignedTo === 'string' ? data.assignedTo : undefined;
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(ticketId) || !['open', 'in_progress', 'resolved'].includes(status) || (priority !== undefined && !['low', 'normal', 'high', 'urgent'].includes(priority))) return { success: false, message: 'بيانات طلب الدعم غير صالحة.' };
+  const ticket = db.doc(`platformSupportTickets/${ticketId}`);
+  const current = await ticket.get();
+  if (!current.exists) return { success: false, message: 'طلب الدعم غير موجود.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await ticket.update({ status, ...(priority !== undefined ? { priority } : {}), ...(assignedTo !== undefined ? { assignedTo } : {}), updatedAt: timestamp, updatedBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_support_ticket_updated', companyId: current.data()?.companyId || null, ticketId, createdBy: uid, timestamp, metadata: { status, priority: priority || null, assignedTo: assignedTo || null } });
+  return { success: true, message: 'تم تحديث طلب الدعم.' };
+});
+
+export const addPlatformSupportComment = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:support:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const ticketId = typeof data.ticketId === 'string' ? data.ticketId.trim() : '';
+  const body = typeof data.body === 'string' ? data.body.trim() : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(ticketId) || body.length < 1 || body.length > 2000) return { success: false, message: 'تعليق الدعم غير صالح.' };
+  const ticket = db.doc(`platformSupportTickets/${ticketId}`);
+  const current = await ticket.get();
+  if (!current.exists) return { success: false, message: 'طلب الدعم غير موجود.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await db.runTransaction(async tx => {
+    const fresh = await tx.get(ticket);
+    if (!fresh.exists) throw new Error('TICKET_NOT_FOUND');
+    tx.create(ticket.collection('comments').doc(), { body, createdBy: uid, createdAt: timestamp });
+    tx.update(ticket, { commentCount: FieldValue.increment(1), updatedAt: timestamp, updatedBy: uid });
+  });
+  await db.collection('platformAuditLogs').add({ action: 'platform_support_comment_added', companyId: current.data()?.companyId || null, ticketId, createdBy: uid, timestamp });
+  return { success: true, message: 'تمت إضافة التعليق.' };
+});
+
+export const createPlatformNotification = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:notifications:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const title = typeof data.title === 'string' ? data.title.trim() : '';
+  const body = typeof data.body === 'string' ? data.body.trim() : '';
+  const severity = typeof data.severity === 'string' ? data.severity : '';
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : null;
+  if (!uid || title.length < 3 || title.length > 160 || body.length < 3 || body.length > 1000 || !['info', 'warning', 'critical'].includes(severity)) return { success: false, message: 'بيانات الإشعار غير صالحة.' };
+  if (companyId && !(await db.doc(`companies/${companyId}`).get()).exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  const notification = await db.collection('platformNotifications').add({ title, body, severity, companyId, status: 'unread', createdBy: uid, createdAt: timestamp });
+  await db.collection('platformAuditLogs').add({ action: 'platform_notification_created', companyId, notificationId: notification.id, createdBy: uid, timestamp, metadata: { severity } });
+  return { success: true, message: 'تم إنشاء الإشعار.' };
+});
+
+export const updatePlatformNotification = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:notifications:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const notificationId = typeof data.notificationId === 'string' ? data.notificationId.trim() : '';
+  const status = typeof data.status === 'string' ? data.status : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(notificationId) || !['unread', 'read', 'archived'].includes(status)) return { success: false, message: 'بيانات الإشعار غير صالحة.' };
+  const notification = db.doc(`platformNotifications/${notificationId}`);
+  const current = await notification.get();
+  if (!current.exists) return { success: false, message: 'الإشعار غير موجود.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await notification.update({ status, updatedBy: uid, updatedAt: timestamp });
+  await db.collection('platformAuditLogs').add({ action: 'platform_notification_updated', companyId: current.data()?.companyId || null, notificationId, createdBy: uid, timestamp, metadata: { status } });
+  return { success: true, message: 'تم تحديث الإشعار.' };
+});
+
+export const setPlatformMemberStatus = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:users:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const memberUid = typeof data.memberUid === 'string' ? data.memberUid.trim() : '';
+  const status = typeof data.status === 'string' ? data.status : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !memberUid || !['active', 'disabled'].includes(status)) return { success: false, message: 'بيانات المستخدم غير صالحة.' };
+  const company = db.doc(`companies/${companyId}`), member = company.collection('members').doc(memberUid);
+  const current = await member.get();
+  if (!current.exists) return { success: false, message: 'المستخدم غير موجود.' };
+  if (current.data()?.status === status) return { success: true, message: 'الحالة محدثة بالفعل.' };
+  if (status === 'disabled' && current.data()?.role === 'company_super_admin') {
+    const owners = await company.collection('members').where('role', '==', 'company_super_admin').where('status', '==', 'active').get();
+    if (owners.size <= 1) return { success: false, message: 'لا يمكن تعطيل آخر صاحب شركة نشط.' };
+  }
+  await auth.updateUser(memberUid, { disabled: status === 'disabled' });
+  const timestamp = FieldValue.serverTimestamp();
+  await db.runTransaction(async tx => {
+    const fresh = await tx.get(member); if (!fresh.exists) throw new Error('MEMBER_NOT_FOUND');
+    tx.update(member, { status, updatedAt: timestamp, updatedBy: uid });
+    tx.update(company, { activeMemberCount: FieldValue.increment(status === 'active' ? 1 : -1), updatedAt: timestamp });
+  });
+  await db.collection('platformAuditLogs').add({ action: `platform_member_${status}`, companyId, targetUid: memberUid, createdBy: uid, timestamp });
+  return { success: true, message: 'تم تحديث حالة المستخدم.' };
+});
+
+export const setPlatformMemberTemporaryPassword = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:users:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const memberUid = typeof data.memberUid === 'string' ? data.memberUid.trim() : '';
+  const temporaryPassword = typeof data.temporaryPassword === 'string' ? data.temporaryPassword : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !memberUid || temporaryPassword.length < 12 || temporaryPassword.length > 128) return { success: false, message: 'بيانات كلمة المرور غير صالحة.' };
+  const member = await db.doc(`companies/${companyId}/members/${memberUid}`).get();
+  if (!member.exists) return { success: false, message: 'المستخدم غير موجود.' };
+  await auth.updateUser(memberUid, { password: temporaryPassword, disabled: false });
+  const timestamp = FieldValue.serverTimestamp();
+  await db.doc(`companies/${companyId}/members/${memberUid}`).update({ status: 'active', updatedAt: timestamp, updatedBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_member_temporary_password_set', companyId, targetUid: memberUid, createdBy: uid, timestamp });
+  return { success: true, message: 'تم تعيين كلمة المرور المؤقتة وتفعيل الحساب.' };
+});
+
+export const managePlatformSubscription = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:subscriptions:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const plan = typeof data.plan === 'string' ? data.plan.trim() : '';
+  const status = typeof data.status === 'string' ? data.status : '';
+  const subscriptionEnd = typeof data.subscriptionEnd === 'string' ? data.subscriptionEnd : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || plan.length < 2 || plan.length > 80 || !['trial', 'active', 'past_due', 'expired', 'suspended'].includes(status) || !Number.isFinite(Date.parse(subscriptionEnd))) return { success: false, message: 'بيانات الاشتراك غير صالحة.' };
+  const company = db.doc(`companies/${companyId}`);
+  const current = await company.get();
+  if (!current.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await company.update({ plan, status, subscriptionEnd, updatedAt: timestamp, updatedBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_subscription_updated', companyId, createdBy: uid, timestamp, metadata: { plan, status, subscriptionEnd } });
+  return { success: true, message: 'تم تحديث الاشتراك.' };
+});
+
+const platformRoles = ['platform_owner', 'platform_admin', 'platform_support', 'platform_billing', 'platform_read_only'] as const;
+type ManagedPlatformRole = typeof platformRoles[number];
+const validPlatformRole = (value: unknown): value is ManagedPlatformRole => typeof value === 'string' && (platformRoles as readonly string[]).includes(value);
+const claimsForPlatformRole = (role: ManagedPlatformRole) => ({ platformRole: role, ...(role === 'platform_owner' ? { platform_owner: true } : {}) });
+
+export const createPlatformAdmin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
+  const password = typeof data.password === 'string' ? data.password : '';
+  const role = data.role;
+  if (!actorUid || name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 12 || password.length > 128 || !validPlatformRole(role)) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  try {
+    const user = await auth.createUser({ displayName: name, email, password, emailVerified: false });
+    try {
+      await auth.setCustomUserClaims(user.uid, claimsForPlatformRole(role));
+      const timestamp = FieldValue.serverTimestamp();
+      await db.doc(`platformUsers/${user.uid}`).create({ uid: user.uid, name, email, role, status: 'active', createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
+      await db.collection('platformAuditLogs').add({ action: 'platform_admin_created', targetUid: user.uid, createdBy: actorUid, timestamp, metadata: { role } });
+      return { success: true, message: 'تم إنشاء حساب المشرف.' };
+    } catch (error) {
+      await auth.deleteUser(user.uid).catch(() => undefined);
+      throw error;
+    }
+  } catch (error) {
+    const code = (error as { code?: string }).code || '';
+    return { success: false, message: code === 'auth/email-already-exists' ? 'البريد الإلكتروني مستخدم بالفعل.' : 'تعذر إنشاء حساب المشرف.' };
+  }
+});
+
+export const updatePlatformAdmin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const targetUid = typeof data.uid === 'string' ? data.uid.trim() : '';
+  const role = data.role;
+  const status = data.status;
+  if (!actorUid || !targetUid || !validPlatformRole(role) || !['active', 'disabled'].includes(String(status))) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  if (targetUid === actorUid && (status !== 'active' || role !== 'platform_owner')) return { success: false, message: 'لا يمكنك تقليل صلاحية أو تعطيل حسابك الحالي.' };
+  const target = db.doc(`platformUsers/${targetUid}`);
+  const current = await target.get();
+  if (!current.exists) return { success: false, message: 'حساب المشرف غير موجود.' };
+  if (current.data()?.role === 'platform_owner' && current.data()?.status === 'active' && (role !== 'platform_owner' || status !== 'active')) {
+    const owners = await db.collection('platformUsers').where('role', '==', 'platform_owner').where('status', '==', 'active').get();
+    if (owners.size <= 1) return { success: false, message: 'لا يمكن تعديل أو تعطيل آخر صاحب منصة نشط.' };
+  }
+  await auth.setCustomUserClaims(targetUid, claimsForPlatformRole(role));
+  await auth.updateUser(targetUid, { disabled: status === 'disabled' });
+  const timestamp = FieldValue.serverTimestamp();
+  await target.update({ role, status, updatedAt: timestamp, updatedBy: actorUid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_admin_updated', targetUid, createdBy: actorUid, timestamp, metadata: { role, status } });
+  return { success: true, message: 'تم تحديث حساب المشرف.' };
 });
 
 export const createAdditionalCompanyOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateAdditionalCompanyOwnerResponse> => {

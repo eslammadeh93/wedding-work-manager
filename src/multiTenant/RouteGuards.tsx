@@ -9,7 +9,7 @@ interface GuardProps { children: ReactNode; fallback?: ReactNode; }
 export function PlatformRouteGuard({ children, fallback = null }: GuardProps) {
   const { authSession, loading } = useAuth();
   if (loading) return null;
-  return authSession?.userType === 'platform' && authSession.role === 'platform_owner' ? <>{children}</> : <>{fallback}</>;
+  return authSession?.userType === 'platform' ? <>{children}</> : <>{fallback}</>;
 }
 
 interface CompanyRouteGuardProps extends GuardProps { roles?: readonly CompanyMemberRole[]; permission?: Permission; }

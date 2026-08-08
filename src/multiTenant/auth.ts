@@ -4,7 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 import { firestorePaths } from './firestorePaths';
 import { effectivePermissions, PERMISSION_MATRIX, type Permission } from './permissions';
-import type { AuthSession, Company, CompanyMember, PlatformUser } from './types';
+import type { AuthSession, Company, CompanyMember, PlatformUser, PlatformUserRole } from './types';
 
 export class MultiTenantAuthError extends Error {}
 type WorkerLoginResult = { success: boolean; code: string; message: string; customToken?: string; retryAfterSeconds?: number };
@@ -27,15 +27,19 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
   const token = await user.getIdTokenResult(true);
   const tokenRole = typeof token.claims.role === 'string' ? token.claims.role : null;
   const tokenCompanyId = typeof token.claims.companyId === 'string' ? token.claims.companyId : null;
-  const hasClaim = token.claims.platform_owner === true;
-  debug('getIdTokenResult', { platformOwner: hasClaim, hasRole: Boolean(tokenRole), role: tokenRole, hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
-  if (hasClaim) {
+  const hasOwnerClaim = token.claims.platform_owner === true;
+  const platformRoleClaim = typeof token.claims.platformRole === 'string' ? token.claims.platformRole : null;
+  const isPlatformLogin = hasOwnerClaim || platformRoleClaim !== null;
+  debug('getIdTokenResult', { platformOwner: hasOwnerClaim, platformRole: platformRoleClaim, hasRole: Boolean(tokenRole), role: tokenRole, hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
+  if (isPlatformLogin) {
     const platformSnapshot = await getDoc(doc(db, firestorePaths.platformUser(user.uid)));
     const platformProfile = platformSnapshot.exists() ? platformSnapshot.data() as PlatformUser : null;
     debug('platform profile', { found: platformSnapshot.exists(), active: platformProfile?.status === 'active' });
-    if (platformProfile?.role !== 'platform_owner') throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
+    const platformRole = platformProfile?.role as PlatformUserRole | undefined;
+    if (!platformRole || !['platform_owner', 'platform_admin', 'platform_support', 'platform_billing', 'platform_read_only'].includes(platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
+    if ((hasOwnerClaim && platformRole !== 'platform_owner') || (platformRoleClaim && platformRoleClaim !== platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if (platformProfile.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل.');
-    return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: 'platform_owner', permissions: PERMISSION_MATRIX.platform_owner };
+    return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: platformRole, permissions: PERMISSION_MATRIX[platformRole] };
   }
   if (!tokenCompanyId || !tokenRole) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات الحساب.');
   const memberSnapshot = await getDoc(doc(db, firestorePaths.companyMember(tokenCompanyId, user.uid)));

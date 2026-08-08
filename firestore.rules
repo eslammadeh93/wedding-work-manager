@@ -8,12 +8,15 @@ service cloud.firestore {
     function platformProfileIsActive() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/platformUsers/$(request.auth.uid))
-        && platformProfile().data.role == 'platform_owner'
         && platformProfile().data.status == 'active';
     }
+    function isPlatformUser() {
+      return platformProfileIsActive()
+        && ((request.auth.token.platform_owner == true && platformProfile().data.role == 'platform_owner')
+          || request.auth.token.platformRole == platformProfile().data.role);
+    }
     function isPlatformOwner() {
-      return isSignedIn() && request.auth.token.platform_owner == true
-        && platformProfileIsActive();
+      return isPlatformUser() && platformProfile().data.role == 'platform_owner';
     }
 
     function companyMember(companyId) {
@@ -136,25 +139,28 @@ service cloud.firestore {
     }
 
     match /platformUsers/{uid} {
-      allow get: if isPlatformOwner() && (isSelf(uid) || platformProfileIsActive());
+      // Each platform account needs to read only its own profile during sign-in
+      // to verify its custom claim and active status. Managing/listing accounts
+      // remains exclusive to the platform owner.
+      allow get: if isSelf(uid) || isPlatformOwner();
       allow list: if isPlatformOwner();
       allow write: if false;
     }
-    match /platformAuditLogs/{logId} { allow read: if isPlatformOwner(); allow write: if false; }
+    match /platformAuditLogs/{logId} { allow read: if isPlatformUser(); allow write: if false; }
     // Dashboard aggregates are server-only. The callable returns a limited DTO.
     match /platformAggregates/{documentId} { allow read, write: if false; }
     match /platformAggregateEvents/{eventId} { allow read, write: if false; }
     match /platformRebuildRuns/{runId} { allow read, write: if false; }
 
     match /companies/{companyId} {
-      allow read: if isPlatformOwner() || memberIsActive(companyId);
+      allow read: if isPlatformUser() || memberIsActive(companyId);
       allow write: if false;
 
       match /members/{uid} {
-        allow get: if isPlatformOwner()
+        allow get: if isPlatformUser()
           || isSelf(uid) && memberIsActive(companyId)
           || hasCompanyPermission(companyId, 'members:read');
-        allow list: if isPlatformOwner() || hasCompanyPermission(companyId, 'members:read');
+        allow list: if isPlatformUser() || hasCompanyPermission(companyId, 'members:read');
         // Profile preference updates are backend-mediated in this phase.
         allow write: if false;
       }

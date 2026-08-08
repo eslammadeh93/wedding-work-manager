@@ -310,7 +310,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.info('[auth-context] session resolved', { userType: session.userType, role: session.role, companyId: session.companyId || null });
             setAuthSession(session);
             // Compatibility shape for legacy UI only; authorization remains AuthSession.
-            const compatibleRole: UserRole = session.role === 'company_super_admin' || session.role === 'platform_owner' ? 'super_admin' : session.role;
+            const compatibleRole: UserRole = session.role === 'company_super_admin' || session.userType === 'platform' ? 'super_admin' : session.role as UserRole;
             const tokenResult = session.role === 'worker' ? await currentUser.getIdTokenResult() : null;
             if (!isCurrent()) return;
             setProfile({ uid: session.uid, email: session.email, displayName: session.displayName, role: compatibleRole, isActive: true, workerId: tokenResult ? String(tokenResult.claims.workerId || '') : undefined });

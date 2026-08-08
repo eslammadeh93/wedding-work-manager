@@ -28,6 +28,7 @@ import type {
 import { PlatformLayout } from "./PlatformLayout";
 import { platformRouteForPath } from "./routes";
 import { PlatformPermissionGuard } from "./permissions/PlatformPermissionGuard";
+import { isPlatformRole, platformRoleHasPermission } from "./permissions/platformPermissions";
 import { PlatformPageHeader } from "./shared/PlatformPageHeader";
 import { LoadingState } from "./shared/LoadingState";
 import { EmptyState } from "./shared/EmptyState";
@@ -38,6 +39,10 @@ import { Pagination } from "./shared/Pagination";
 import { PlatformButton } from "./shared/PlatformButton";
 import { PlatformDashboard } from "./pages/dashboard/PlatformDashboard";
 import { DeveloperToolsPage } from "./pages/developerTools/DeveloperToolsPage";
+import {
+  PlatformManagementPages,
+  type ManagementPageId,
+} from "./pages/management/PlatformManagementPages";
 
 type View = "overview" | "companies" | "detail" | "developerTools" | "placeholder";
 const statusLabel: Record<string, string> = {
@@ -279,6 +284,12 @@ function CreateCompanyForm({ close }: { close: () => void }) {
 
 export function PlatformModule() {
   const { authSession, logout } = useAuth();
+  const platformRole = authSession?.role;
+  const hasPlatformPermission = (permission: Parameters<typeof platformRoleHasPermission>[1]) =>
+    authSession?.userType === "platform" && isPlatformRole(platformRole) && platformRoleHasPermission(platformRole, permission);
+  const canCreateCompanies = hasPlatformPermission("platform:companies:create");
+  const canUpdateCompanies = hasPlatformPermission("platform:companies:update");
+  const canAddCompanyOwners = platformRole === "platform_owner";
   const [path, setPath] = useState(() => window.location.pathname.startsWith("/platform") ? `${window.location.pathname}${window.location.search}` : "/platform");
   const [menu, setMenu] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -305,6 +316,9 @@ export function PlatformModule() {
           : "placeholder";
   const companyId =
     view === "detail" ? decodeURIComponent(cleanPath.split("/").pop() || "") : "";
+  const managementPage: ManagementPageId | null = (
+    ["users", "subscriptions", "analytics", "notifications", "activity", "support", "settings", "admins"] as const
+  ).find((id) => cleanPath === `/platform/${id}`) || null;
   const { companies, loading, error, reload } = usePlatformCompanies(view === "companies" || view === "detail");
   const selected = companies.find((company) => company.id === companyId);
   const route = platformRouteForPath(cleanPath);
@@ -332,12 +346,14 @@ export function PlatformModule() {
           ) : (
             <>
               {view === "overview" && (
-                <PlatformDashboard navigate={go} createCompany={() => setCreating(true)} />
+                <PlatformDashboard navigate={go} createCompany={canCreateCompanies ? () => setCreating(true) : undefined} />
               )}
               {view === "companies" && (
                 <Companies
                   companies={companies}
                   go={go}
+                  canCreate={canCreateCompanies}
+                  canUpdate={canUpdateCompanies}
                   openCreate={() => setCreating(true)}
                   initialStatus={new URLSearchParams(path.split("?")[1] || "").get("status") || ""}
                 />
@@ -346,10 +362,15 @@ export function PlatformModule() {
                 <CompanyDetail
                   company={selected}
                   back={() => go("/platform/companies")}
+                  canUpdate={canUpdateCompanies}
+                  canAddOwner={canAddCompanyOwners}
                 />
               )}
               {view === "developerTools" && <DeveloperToolsPage />}
-              {view === "placeholder" && (
+              {managementPage && (
+                <PlatformManagementPages page={managementPage} navigate={go} />
+              )}
+              {view === "placeholder" && !managementPage && (
                 <section>
                   <PlatformPageHeader title={route.label} />
                   <EmptyState text={`${route.label} — قريبًا`} />
@@ -399,11 +420,15 @@ function Companies({
   companies,
   go,
   openCreate,
+  canCreate,
+  canUpdate,
   initialStatus,
 }: {
   companies: PlatformCompany[];
   go: (path: string) => void;
   openCreate: () => void;
+  canCreate: boolean;
+  canUpdate: boolean;
   initialStatus: string;
 }) {
   const [search, setSearch] = useState("");
@@ -522,7 +547,7 @@ function Companies({
       header: "الإجراءات",
       render: (company) => (
         <div className="flex gap-3">
-          <button
+          {canUpdate && <button
             onClick={() => {
               setEditing(company);
               setEditError("");
@@ -531,7 +556,7 @@ function Companies({
           >
             <Pencil size={14} />
             تعديل
-          </button>
+          </button>}
           <button
             onClick={() => go(`/platform/companies/${company.id}`)}
             className="text-slate-600"
@@ -547,7 +572,7 @@ function Companies({
       <PlatformPageHeader
         title="الشركات"
         actions={
-          <PlatformButton onClick={openCreate}>إنشاء شركة</PlatformButton>
+          canCreate ? <PlatformButton onClick={openCreate}>إنشاء شركة</PlatformButton> : undefined
         }
       />
       {message && (
@@ -626,9 +651,13 @@ function Companies({
 function CompanyDetail({
   company,
   back,
+  canUpdate,
+  canAddOwner,
 }: {
   company?: PlatformCompany;
   back: () => void;
+  canUpdate: boolean;
+  canAddOwner: boolean;
 }) {
   const [current, setCurrent] = useState(company);
   const [editing, setEditing] = useState(false);
@@ -695,7 +724,7 @@ function CompanyDetail({
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-black">{current.name}</h1>
         <div className="flex flex-wrap gap-2">
-          <button
+          {canAddOwner && <button
             onClick={() => {
               setAddingOwner(true);
               setError("");
@@ -704,8 +733,8 @@ function CompanyDetail({
           >
             <Crown size={16} />
             إضافة شريك كصاحب مشروع
-          </button>
-          <button
+          </button>}
+          {canUpdate && <button
             onClick={() => {
               setEditing(true);
               setError("");
@@ -714,7 +743,7 @@ function CompanyDetail({
           >
             <Pencil size={16} />
             تعديل كل بيانات الشركة
-          </button>
+          </button>}
         </div>
       </div>
       {message && (

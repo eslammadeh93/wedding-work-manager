@@ -35,7 +35,7 @@ const CompanyMembersModule = lazy(() => import('./components/company/CompanyMemb
 const ProfileModule = lazy(() => import('./components/profile/ProfileModule').then(({ ProfileModule }) => ({ default: ProfileModule })));
 
 function UnauthorizedPlatform() {
-  return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لصاحب المنصة فقط.</p></div></div>;
+  return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لحسابات إدارة المنصة فقط.</p></div></div>;
 }
 
 function UnauthorizedCompanyMembers() {
@@ -90,7 +90,9 @@ function CompanyTabGuard({ tab, children }: { tab: ActiveTab; children: React.Re
 function PlatformEntry() {
   const { user, authSession, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>;
-  if (!user || authSession?.userType !== 'platform' || authSession.role !== 'platform_owner') return <UnauthorizedPlatform />;
+  // Any active platform role may enter the workspace. Individual pages and
+  // navigation items are guarded by the role permission matrix below.
+  if (!user || authSession?.userType !== 'platform') return <UnauthorizedPlatform />;
   return <PlatformRouteGuard fallback={<UnauthorizedPlatform />}><PlatformErrorBoundary><div className="platform-ui"><Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 text-amber-500 animate-spin" /></div>}><PlatformModule /></Suspense></div></PlatformErrorBoundary></PlatformRouteGuard>;
 }
 

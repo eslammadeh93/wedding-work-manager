@@ -58,6 +58,10 @@ const companyAdminPermissions: readonly Permission[] = [
 
 export const PERMISSION_MATRIX: Readonly<Record<SaaSRole, readonly Permission[]>> = {
   platform_owner: ['platform:companies:read', 'platform:companies:write', 'platform:users:read', 'platform:users:write', 'platform:audit_logs:read'],
+  platform_admin: ['platform:companies:read', 'platform:companies:write', 'platform:users:read', 'platform:users:write', 'platform:audit_logs:read'],
+  platform_support: ['platform:companies:read', 'platform:users:read'],
+  platform_billing: ['platform:companies:read', 'platform:companies:write', 'platform:audit_logs:read'],
+  platform_read_only: ['platform:companies:read', 'platform:users:read', 'platform:audit_logs:read'],
   company_super_admin: companyAdminPermissions,
   manager: companyAdminPermissions.filter((permission) => !permission.startsWith('company:expenses:')),
   employee: ['company:dashboard:read', 'company:calendar:read', 'company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write', 'company:inventory:read', 'company:notifications:read'],
