@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
 import { MobileManagerNav } from '../MobileManagerNav';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
+import { getOrderStatusLabel } from '../../utils/orderStatus';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
@@ -108,7 +109,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Banner Greetings */}
-      <div className="p-6 bg-white dark:bg-slate-900/90 rounded-2xl text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="theme-dashboard-welcome p-6 rounded-2xl border shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-amber-400"></span>
@@ -468,7 +469,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300">
-                          {ord.orderStatus}
+                          {getOrderStatusLabel(ord.orderStatus, t)}
                         </span>
                       </td>
                     </tr>

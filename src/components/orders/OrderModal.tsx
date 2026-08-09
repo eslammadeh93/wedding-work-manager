@@ -142,7 +142,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     initialOrder?.deliveryDate || localDateString()
   );
   const [returnDate, setReturnDate] = useState(
-    initialOrder?.returnDate || localDateString(new Date(Date.now() + 86400000 * 2))
+    initialOrder?.returnDate || ''
   );
   const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || '');
   const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || '');
@@ -315,7 +315,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       weddingDate,
       eventDate: weddingDate,
       deliveryDate,
-      returnDate,
+      // An empty string intentionally clears a previously saved return date.
+      // Some orders do not require dismantling/return.
+      returnDate: returnDate || '',
       eventLocation,
       locationLink: locationLink.trim(),
       salesEmployee,
@@ -613,13 +615,25 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-purple-500" />
-                <span>{t('returnDate')}</span>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1 whitespace-nowrap">
+                <Calendar className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                <span className="flex items-center gap-1">
+                  <span>{t('returnDate')}</span>
+                </span>
+                {returnDate && (
+                  <button
+                    type="button"
+                    onClick={() => setReturnDate('')}
+                    title={language === 'ar' ? 'إلغاء التاريخ' : 'Clear date'}
+                    aria-label={language === 'ar' ? 'إلغاء التاريخ' : 'Clear date'}
+                    className="ms-auto p-0.5 text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </label>
               <input
                 type="date"
-                required
                 value={returnDate}
                 onChange={(e) => setReturnDate(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500 font-medium"

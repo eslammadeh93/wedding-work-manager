@@ -39,7 +39,8 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const contentClass = isDesktop
     ? 'grid grid-cols-3 gap-1.5'
     : 'mx-auto grid max-w-lg grid-cols-3 gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]';
-  const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/70' : 'min-h-[58px]';
+  const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 dark:border-slate-700' : 'min-h-[58px]';
+  const secondaryButtonClass = isDesktop ? `${buttonClass} bg-slate-50 dark:bg-slate-800/70` : buttonClass;
 
   return (
     <nav
@@ -62,7 +63,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           <button
             type="button"
             onClick={onOpenTodaysOrders}
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 active:scale-95 ${buttonClass}`}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 active:scale-95 ${secondaryButtonClass}`}
           >
             <CalendarDays className="h-5 w-5 text-amber-500" />
             <span className="text-[10px] font-bold">أوردرات اليوم</span>
@@ -73,7 +74,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           <button
             type="button"
             onClick={onOpenWorkerMovementNotifications}
-            className={`relative flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 active:scale-95 ${buttonClass}`}
+            className={`relative flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 active:scale-95 ${secondaryButtonClass}`}
           >
             <BellRing className="h-5 w-5 text-amber-500" />
             {unreadMovements > 0 && (

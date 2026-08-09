@@ -30,6 +30,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Order, OrderStatus, WorkerMovement } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
 import { localDateString } from '../../utils/localDate';
+import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
@@ -194,7 +195,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-xl font-mono">{order.orderNumber}</span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/20 uppercase">
-                {order.orderStatus === 'cancelled_deposit_retained' ? t('statusCancelledDepositRetained') : order.orderStatus.replace('_', ' ')}
+                {getOrderStatusLabel(order.orderStatus, t)}
               </span>
             </div>
             <p className="text-xs text-amber-100 mt-0.5">
@@ -388,7 +389,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                   >
                     <option value="InstaPay">InstaPay (انستا باي)</option>
                     <option value="Cash">Cash (كاش / نقدي)</option>

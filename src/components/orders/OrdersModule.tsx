@@ -19,7 +19,6 @@ import {
   CheckCircle2,
   Sparkles,
   ArrowUpDown,
-  RotateCcw,
   Wrench,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -30,6 +29,7 @@ import { OrderModal } from './OrderModal';
 import { OrderDetailModal } from './OrderDetailModal';
 import { OrderInvoicePrint } from './OrderInvoicePrint';
 import { localDateString } from '../../utils/localDate';
+import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 
@@ -41,11 +41,18 @@ type QuickFilterType =
   | 'this_weeks_events'
   | 'this_months_bookings'
   | 'this_months_events'
-  | 'upcoming_events'
-  | 'completed_events';
+  | 'upcoming_events';
 
 type SortField = 'bookingDate' | 'eventDate' | 'orderNumber' | 'totalPrice';
 type SortOrder = 'asc' | 'desc';
+type OrderListScope = 'active' | 'finished';
+
+const finishedOrderStatuses = new Set<OrderStatus>([
+  'completed',
+  'returned',
+  'cancelled',
+  'cancelled_deposit_retained',
+]);
 
 interface OrdersModuleProps {
   createOrderRequest?: number;
@@ -95,6 +102,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [selectedPayment, setSelectedPayment] = useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
   const [selectedExecutor, setSelectedExecutor] = useState<string>('all');
+  const [orderListScope, setOrderListScope] = useState<OrderListScope>('active');
 
   const uniqueExecutorsList = useMemo(() => {
     const fromOrders = (orders || []).map((o) => o.executorName).filter(Boolean) as string[];
@@ -149,6 +157,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   useEffect(() => {
     if (todaysOrdersRequest > 0) {
       resetFilters();
+      setOrderListScope('active');
       setQuickFilter('todays_events');
     }
   }, [todaysOrdersRequest]);
@@ -181,6 +190,34 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     setEventYear('all');
   };
 
+  const setListScope = (scope: OrderListScope) => {
+    setOrderListScope(scope);
+    setSelectedStatus('all');
+    setQuickFilter('all');
+  };
+
+  const matchesWorkerAccess = (ord: Order) => {
+    if (!isWorker) return true;
+    if (workerId) return ord.workerId === workerId;
+    if (profile?.displayName) return ord.workerName === profile.displayName || ord.executorName === profile.displayName;
+    return true;
+  };
+
+  const scopedOrders = useMemo(
+    () => orders.filter(matchesWorkerAccess),
+    [orders, isWorker, workerId, profile?.displayName],
+  );
+
+  const activeOrdersCount = useMemo(
+    () => scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
+    [scopedOrders],
+  );
+
+  const finishedOrdersCount = useMemo(
+    () => scopedOrders.filter(order => finishedOrderStatuses.has(order.orderStatus)).length,
+    [scopedOrders],
+  );
+
   // Filter & Sort Logic
   const filteredOrders = useMemo(() => {
     const today = new Date();
@@ -196,16 +233,11 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     endOfWeek.setDate(endOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
 
-    return orders
+    return scopedOrders
       .filter((ord) => {
-        // 0. Worker Role Filter
-        if (isWorker) {
-          if (workerId) {
-            if (ord.workerId !== workerId) return false;
-          } else if (profile?.displayName) {
-            if (ord.workerName !== profile.displayName && ord.executorName !== profile.displayName) return false;
-          }
-        }
+        // 0. Keep terminal orders in the dedicated completed section.
+        const isFinished = finishedOrderStatuses.has(ord.orderStatus);
+        if (orderListScope === 'finished' ? !isFinished : isFinished) return false;
 
         const bDate = getBookingDate(ord);
         const eDate = getEventDate(ord);
@@ -259,9 +291,6 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             if (eDate < todayStr || ord.orderStatus === 'cancelled') return false;
           }
 
-          if (quickFilter === 'completed_events') {
-            if (ord.orderStatus !== 'completed' && ord.orderStatus !== 'returned') return false;
-          }
         }
 
         // 4. Booking Month & Year
@@ -316,7 +345,8 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
         return 0;
       });
   }, [
-    orders,
+    scopedOrders,
+    orderListScope,
     searchTerm,
     selectedStatus,
     selectedPayment,
@@ -378,21 +408,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     }
   };
 
-  const getStatusLabel = (status: OrderStatus) =>
-    status === 'cancelled_deposit_retained' ? t('statusCancelledDepositRetained') : status;
-
-  // Quick Filter Badges definitions
-  const quickFiltersList: { id: QuickFilterType; labelKey: string }[] = [
-    { id: 'all', labelKey: 'all' },
-    { id: 'todays_bookings', labelKey: 'todaysBookings' },
-    { id: 'todays_events', labelKey: 'todaysEvents' },
-    { id: 'this_weeks_bookings', labelKey: 'thisWeeksBookings' },
-    { id: 'this_weeks_events', labelKey: 'thisWeeksEvents' },
-    { id: 'this_months_bookings', labelKey: 'thisMonthsBookings' },
-    { id: 'this_months_events', labelKey: 'thisMonthsEvents' },
-    { id: 'upcoming_events', labelKey: 'upcomingEvents' },
-    { id: 'completed_events', labelKey: 'statusCompleted' },
-  ];
+  const getStatusLabel = (status: OrderStatus) => getOrderStatusLabel(status, t);
 
   const monthsList = [
     { value: '1', nameEn: 'January (01)', nameAr: 'يناير (01)' },
@@ -537,49 +553,42 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
         </div>
       </div>
 
-      {/* QUICK FILTERS BAR */}
-      <div className="p-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-        <div className="flex items-center justify-between mb-2 px-1">
-          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Quick Filters:</span>
-          </span>
-          {(quickFilter !== 'all' ||
-            searchTerm ||
-            selectedStatus !== 'all' ||
-            selectedPayment !== 'all' ||
-            dateFrom ||
-            dateTo ||
-            bookingMonth !== 'all' ||
-            eventMonth !== 'all') && (
-            <button
-              onClick={resetFilters}
-              className="text-[11px] font-bold text-rose-500 hover:text-rose-600 flex items-center gap-1 cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset Filters</span>
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-          {quickFiltersList.map((qf) => {
-            const isActive = quickFilter === qf.id;
-            return (
-              <button
-                key={qf.id}
-                onClick={() => setQuickFilter(qf.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                {t(qf.labelKey) || qf.id}
-              </button>
-            );
-          })}
-        </div>
+      {/* Orders are split by lifecycle for both managers and assigned workers. */}
+      <div
+        role="tablist"
+        aria-label={language === 'ar' ? 'أقسام الطلبات' : 'Order sections'}
+        className="inline-flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-700 dark:bg-slate-800"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={orderListScope === 'active'}
+          onClick={() => setListScope('active')}
+          className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs font-black transition-colors ${
+            orderListScope === 'active'
+              ? 'bg-white text-amber-700 shadow-sm dark:bg-slate-700 dark:text-amber-300'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+          }`}
+        >
+          <ClipboardList className="h-4 w-4" />
+          <span>{language === 'ar' ? 'الطلبات الجارية' : 'Active orders'}</span>
+          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] dark:bg-slate-800">{activeOrdersCount}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={orderListScope === 'finished'}
+          onClick={() => setListScope('finished')}
+          className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs font-black transition-colors ${
+            orderListScope === 'finished'
+              ? 'bg-white text-emerald-700 shadow-sm dark:bg-slate-700 dark:text-emerald-300'
+              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          <span>{language === 'ar' ? 'تم الانتهاء' : 'Finished'}</span>
+          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] dark:bg-slate-800">{finishedOrdersCount}</span>
+        </button>
       </div>
 
       {/* ADVANCED DUAL-DATE SEARCH & FILTERING BAR */}
@@ -605,14 +614,17 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
           >
             <option value="all">{t('all')} {t('orderStatus')}</option>
-            <option value="new">{t('statusNew')}</option>
-            <option value="confirmed">{t('statusConfirmed')}</option>
-            <option value="preparing">{t('statusPreparing')}</option>
-            <option value="out_for_delivery">{t('statusOutForDelivery')}</option>
-            <option value="completed">{t('statusCompleted')}</option>
-            <option value="returned">{t('statusReturned')}</option>
-            <option value="cancelled">{t('statusCancelled')}</option>
-            <option value="cancelled_deposit_retained">{t('statusCancelledDepositRetained')}</option>
+            {orderListScope === 'active' ? <>
+              <option value="new">{t('statusNew')}</option>
+              <option value="confirmed">{t('statusConfirmed')}</option>
+              <option value="preparing">{t('statusPreparing')}</option>
+              <option value="out_for_delivery">{t('statusOutForDelivery')}</option>
+            </> : <>
+              <option value="completed">{t('statusCompleted')}</option>
+              <option value="returned">{t('statusReturned')}</option>
+              <option value="cancelled">{t('statusCancelled')}</option>
+              <option value="cancelled_deposit_retained">{t('statusCancelledDepositRetained')}</option>
+            </>}
           </select>
 
           {/* Payment Status Select */}
@@ -774,7 +786,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       {/* Orders Output Count & Sorting summary */}
       <div className="flex items-center justify-between px-1 text-xs text-slate-500">
         <span>
-          Showing <strong>{filteredOrders.length}</strong> of {orders.length} orders
+          Showing <strong>{filteredOrders.length}</strong> of {orderListScope === 'active' ? activeOrdersCount : finishedOrdersCount} orders
         </span>
 
         <div className="flex items-center gap-2">

@@ -91,6 +91,42 @@ body {
   color: #f5f1ec;
 }
 
+/* Use a named surface for the dashboard greeting, so it always tracks the
+   root theme even when utility styles are loaded from an older cached chunk. */
+.theme-dashboard-welcome {
+  background-color: #fffefe;
+  border-color: #e8ddd4;
+  color: #3c2b31;
+}
+
+.dark .theme-dashboard-welcome {
+  background-color: rgb(34 24 29 / 0.9);
+  border-color: #33252d;
+  color: #f5f1ec;
+}
+
+/* Native select menus are rendered by the browser outside the component styles.
+   Set their colour scheme explicitly so the opened options follow the app theme too. */
+select {
+  color-scheme: light;
+}
+
+.dark select {
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: #fffefe;
+  color: #3c2b31;
+}
+
+.dark select option,
+.dark select optgroup {
+  background-color: #33252d;
+  color: #f5f1ec;
+}
+
 ::selection {
   background: #8f3655;
   color: #fff;
