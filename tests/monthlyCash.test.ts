@@ -34,3 +34,16 @@ test('uses booking date for legacy payments without history', () => {
   const result = calculateMonthlyCash([order({ totalPaid: 500, paymentHistory: [] })], [], 2026, 7);
   assert.equal(result.advancesFromUpcomingOrders, 500);
 });
+
+test('keeps a retained cancelled deposit in finance, separate from upcoming order advances', () => {
+  const result = calculateMonthlyCash([
+    order({ id: 'retained', orderStatus: 'cancelled_deposit_retained', totalPaid: 500, paymentHistory: [] }),
+    order({ id: 'cancelled', orderStatus: 'cancelled', totalPaid: 500, paymentHistory: [] }),
+  ], [], 2026, 7);
+
+  assert.equal(result.retainedCancelledDeposits, 500);
+  assert.equal(result.advancesFromUpcomingOrders, 0);
+  assert.equal(result.orderCashNet, 500);
+  assert.equal(result.orderCashBalanceToDate, 500);
+  assert.equal(result.collections[0]?.isRetainedDeposit, true);
+});

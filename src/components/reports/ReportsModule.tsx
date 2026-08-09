@@ -100,6 +100,7 @@ export const ReportsModule: React.FC = () => {
       body: [
         ['Cash collected from completed orders', `$${cashSummary.collectedFromCompletedOrders.toLocaleString()}`],
         ['Advance collections from upcoming orders', `$${cashSummary.advancesFromUpcomingOrders.toLocaleString()}`],
+        ['Retained deposits from cancelled orders', `$${cashSummary.retainedCancelledDeposits.toLocaleString()}`],
         ['Capital added', `$${cashSummary.capitalAdded.toLocaleString()}`],
         ['Operating expenses paid', `$${cashSummary.operatingExpenses.toLocaleString()}`],
         ['Completed order costs', `$${cashSummary.completedOrderCosts.toLocaleString()}`],
@@ -139,6 +140,7 @@ export const ReportsModule: React.FC = () => {
       { Metric: 'Period', Value: `${selectedMonth + 1}/${selectedYear}` },
       { Metric: 'Cash from completed orders', Value: cashSummary.collectedFromCompletedOrders },
       { Metric: 'Advance cash from upcoming orders', Value: cashSummary.advancesFromUpcomingOrders },
+      { Metric: 'Retained deposits from cancelled orders', Value: cashSummary.retainedCancelledDeposits },
       { Metric: 'Capital added', Value: cashSummary.capitalAdded },
       { Metric: 'Operating expenses paid', Value: cashSummary.operatingExpenses },
       { Metric: 'Completed order costs', Value: cashSummary.completedOrderCosts },
@@ -282,10 +284,11 @@ export const ReportsModule: React.FC = () => {
           <p className={`text-4xl md:text-5xl font-black tracking-tight ${cashSummary.orderCashBalanceToDate >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{formatMoney(cashSummary.orderCashBalanceToDate)}</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-4">
           {[
             { label: language === 'ar' ? 'تحصيل أوردرات مكتملة' : 'Completed order collections', value: cashSummary.collectedFromCompletedOrders, note: language === 'ar' ? 'دفعات دخلت من أوردرات مكتملة' : 'Cash received from completed orders', color: 'text-emerald-400', icon: ReceiptText },
             { label: language === 'ar' ? 'مقدمات أوردرات قادمة' : 'Upcoming order advances', value: cashSummary.advancesFromUpcomingOrders, note: language === 'ar' ? 'دفعات استلمتها قبل التنفيذ' : 'Payments received before service', color: 'text-cyan-400', icon: Calendar },
+            { label: language === 'ar' ? 'عربونات طلبات ملغاة محتفظ بها' : 'Retained cancelled deposits', value: cashSummary.retainedCancelledDeposits, note: language === 'ar' ? 'تحصيلات محفوظة بعد الإلغاء' : 'Collections kept after cancellation', color: 'text-violet-300', icon: ReceiptText },
             { label: language === 'ar' ? 'تكاليف أوردرات مكتملة' : 'Completed order costs', value: cashSummary.completedOrderCosts, note: language === 'ar' ? 'عمالة ونقل ومصروفات تنفيذ' : 'Labor, transport & fulfillment', color: 'text-orange-400', icon: ClipboardList },
             { label: language === 'ar' ? 'مصاريف أخرى لأوردرات قادمة' : 'Upcoming order other expenses', value: cashSummary.upcomingOrderOtherExpenses, note: language === 'ar' ? 'تُخصم قبل اكتمال الأوردر' : 'Deducted before order completion', color: 'text-rose-400', icon: TrendingDown },
             { label: language === 'ar' ? 'صافي فلوس الأوردرات' : 'Net order cash', value: cashSummary.orderCashNet, note: language === 'ar' ? 'الرقم النهائي للأوردرات فقط' : 'Final number for orders only', color: cashSummary.orderCashNet >= 0 ? 'text-amber-300' : 'text-rose-400', icon: DollarSign },
@@ -304,8 +307,9 @@ export const ReportsModule: React.FC = () => {
       <section className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800">
           <div><h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-5 h-5 text-emerald-500" />{language === 'ar' ? 'كشف التحصيلات الفعلية' : 'Actual collections ledger'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'كل دفعة تم استلامها خلال الشهر المختار.' : 'Every customer payment received during the selected month.'}</p></div>
-          <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatMoney(cashSummary.collectedFromCompletedOrders + cashSummary.advancesFromUpcomingOrders)}</span>
+          <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">{formatMoney(cashSummary.collectedFromCompletedOrders + cashSummary.advancesFromUpcomingOrders + cashSummary.retainedCancelledDeposits)}</span>
         </div>
+        {cashSummary.retainedCancelledDeposits > 0 && <p className="px-5 py-2.5 bg-violet-50 text-xs font-bold text-violet-800 dark:bg-violet-950/30 dark:text-violet-200">{language === 'ar' ? `يشمل ${formatMoney(cashSummary.retainedCancelledDeposits)} عربونات محفوظة من طلبات أُلغيت.` : `Includes ${formatMoney(cashSummary.retainedCancelledDeposits)} in retained deposits from cancelled bookings.`}</p>}
         {cashSummary.collections.length === 0 ? <p className="p-8 text-center text-sm text-slate-400">{language === 'ar' ? 'لا توجد تحصيلات مسجلة في هذا الشهر.' : 'No collections recorded this month.'}</p> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs text-start"><thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500"><tr><th className="p-3.5 text-start">{language === 'ar' ? 'التاريخ' : 'Date'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'الأوردر / العميل' : 'Order / customer'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'نوع التحصيل' : 'Collection type'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'طريقة الدفع' : 'Method'}</th><th className="p-3.5 text-end">{language === 'ar' ? 'المبلغ' : 'Amount'}</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{cashSummary.collections.map((collection) => <tr key={collection.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td className="p-3.5 font-semibold text-slate-500">{collection.date}</td><td className="p-3.5"><p className="font-bold text-slate-900 dark:text-white">{collection.orderNumber}</p><p className="text-slate-500 mt-0.5">{collection.customerName}</p></td><td className="p-3.5"><span className={`inline-flex px-2.5 py-1 rounded-lg font-bold ${collection.isCompletedOrder ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{collection.isCompletedOrder ? (language === 'ar' ? 'أوردر مكتمل' : 'Completed order') : (language === 'ar' ? 'مقدم أوردر قادم' : 'Upcoming advance')}{collection.isLegacyEstimate ? ` · ${language === 'ar' ? 'تقديري' : 'Estimated'}` : ''}</span></td><td className="p-3.5 text-slate-600 dark:text-slate-300">{collection.method}</td><td className="p-3.5 text-end font-black text-emerald-600 dark:text-emerald-400">+{formatMoney(collection.amount)}</td></tr>)}</tbody></table></div>}
         <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: تكاليف الأوردرات تُخصم عند اكتمال الأوردر وبحسب تاريخ المناسبة، لعدم وجود تاريخ صرف منفصل لكل تكلفة. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order costs are deducted on the completed event date because individual cost payment dates are not yet stored. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
       </section>

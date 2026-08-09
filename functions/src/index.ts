@@ -598,6 +598,8 @@ const platformRoles = ['platform_owner', 'platform_admin', 'platform_support', '
 type ManagedPlatformRole = typeof platformRoles[number];
 const validPlatformRole = (value: unknown): value is ManagedPlatformRole => typeof value === 'string' && (platformRoles as readonly string[]).includes(value);
 const claimsForPlatformRole = (role: ManagedPlatformRole) => ({ platformRole: role, ...(role === 'platform_owner' ? { platform_owner: true } : {}) });
+const protectedPlatformAdminEmail = 'eslam.madeh93@gmail.com';
+const isProtectedPlatformAdmin = (data: { email?: unknown } | undefined) => String(data?.email || '').trim().toLowerCase() === protectedPlatformAdminEmail;
 
 export const createPlatformAdmin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
@@ -629,23 +631,51 @@ export const updatePlatformAdmin = onCall({ region: 'us-central1', enforceAppChe
   const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
   const data = (request.data || {}) as Record<string, unknown>;
   const targetUid = typeof data.uid === 'string' ? data.uid.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : undefined;
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : undefined;
   const role = data.role;
   const status = data.status;
-  if (!actorUid || !targetUid || !validPlatformRole(role) || !['active', 'disabled'].includes(String(status))) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  if (!actorUid || !targetUid || !validPlatformRole(role) || !['active', 'disabled'].includes(String(status)) || (name !== undefined && (name.length < 2 || name.length > 120)) || (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return { success: false, message: 'بيانات المشرف غير صالحة.' };
   if (targetUid === actorUid && (status !== 'active' || role !== 'platform_owner')) return { success: false, message: 'لا يمكنك تقليل صلاحية أو تعطيل حسابك الحالي.' };
   const target = db.doc(`platformUsers/${targetUid}`);
   const current = await target.get();
   if (!current.exists) return { success: false, message: 'حساب المشرف غير موجود.' };
+  if (isProtectedPlatformAdmin(current.data())) {
+    const actor = await auth.getUser(actorUid);
+    if (targetUid !== actorUid || actor.email?.trim().toLowerCase() !== protectedPlatformAdminEmail) return { success: false, message: 'هذا الحساب محمي ولا يمكن تعديله إلا عند تسجيل الدخول به.' };
+    if (email !== undefined && email !== protectedPlatformAdminEmail) return { success: false, message: 'البريد الإلكتروني للحساب المحمي لا يمكن تغييره.' };
+  }
   if (current.data()?.role === 'platform_owner' && current.data()?.status === 'active' && (role !== 'platform_owner' || status !== 'active')) {
     const owners = await db.collection('platformUsers').where('role', '==', 'platform_owner').where('status', '==', 'active').get();
     if (owners.size <= 1) return { success: false, message: 'لا يمكن تعديل أو تعطيل آخر صاحب منصة نشط.' };
   }
   await auth.setCustomUserClaims(targetUid, claimsForPlatformRole(role));
-  await auth.updateUser(targetUid, { disabled: status === 'disabled' });
+  await auth.updateUser(targetUid, { disabled: status === 'disabled', ...(name !== undefined ? { displayName: name } : {}), ...(email !== undefined ? { email } : {}) });
   const timestamp = FieldValue.serverTimestamp();
-  await target.update({ role, status, updatedAt: timestamp, updatedBy: actorUid });
-  await db.collection('platformAuditLogs').add({ action: 'platform_admin_updated', targetUid, createdBy: actorUid, timestamp, metadata: { role, status } });
+  await target.update({ role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}), updatedAt: timestamp, updatedBy: actorUid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_admin_updated', targetUid, createdBy: actorUid, timestamp, metadata: { role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}) } });
   return { success: true, message: 'تم تحديث حساب المشرف.' };
+});
+
+export const deletePlatformAdmin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const targetUid = typeof data.uid === 'string' ? data.uid.trim() : '';
+  if (!actorUid || !targetUid) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  if (targetUid === actorUid) return { success: false, message: 'لا يمكنك حذف حسابك الحالي.' };
+  const target = db.doc(`platformUsers/${targetUid}`);
+  const current = await target.get();
+  if (!current.exists) return { success: false, message: 'حساب المشرف غير موجود.' };
+  if (isProtectedPlatformAdmin(current.data())) return { success: false, message: 'هذا الحساب محمي ولا يمكن حذفه.' };
+  if (current.data()?.role === 'platform_owner' && current.data()?.status === 'active') {
+    const owners = await db.collection('platformUsers').where('role', '==', 'platform_owner').where('status', '==', 'active').get();
+    if (owners.size <= 1) return { success: false, message: 'لا يمكن حذف آخر صاحب منصة نشط.' };
+  }
+  await auth.deleteUser(targetUid);
+  const timestamp = FieldValue.serverTimestamp();
+  await target.delete();
+  await db.collection('platformAuditLogs').add({ action: 'platform_admin_deleted', targetUid, createdBy: actorUid, timestamp });
+  return { success: true, message: 'تم حذف حساب المشرف.' };
 });
 
 export const createAdditionalCompanyOwner = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token: Record<string, unknown> }; data: unknown }): Promise<CreateAdditionalCompanyOwnerResponse> => {

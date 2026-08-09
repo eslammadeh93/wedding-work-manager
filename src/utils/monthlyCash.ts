@@ -10,6 +10,8 @@ export interface CashCollection {
   date: string;
   method: string;
   isCompletedOrder: boolean;
+  /** A cancelled booking whose recorded payment was retained by the company. */
+  isRetainedDeposit: boolean;
   isLegacyEstimate?: boolean;
 }
 
@@ -17,6 +19,8 @@ export interface MonthlyCashSummary {
   collections: CashCollection[];
   collectedFromCompletedOrders: number;
   advancesFromUpcomingOrders: number;
+  /** Payments retained from bookings cancelled with a non-refundable deposit. */
+  retainedCancelledDeposits: number;
   capitalAdded: number;
   operatingExpenses: number;
   completedOrderCosts: number;
@@ -64,6 +68,7 @@ export const orderCashCollections = (order: Order): CashCollection[] => {
     orderNumber: order.orderNumber,
     customerName: order.customerName,
     isCompletedOrder: order.orderStatus === 'completed',
+    isRetainedDeposit: order.orderStatus === 'cancelled_deposit_retained',
   };
 
   const entries: CashCollection[] = history.map((payment: PaymentEntry) => ({
@@ -107,7 +112,8 @@ export const calculateMonthlyCash = (
 
   const sum = (items: Array<{ amount: number }>) => items.reduce((total, item) => total + item.amount, 0);
   const collectedFromCompletedOrders = sum(collections.filter((collection) => collection.isCompletedOrder));
-  const advancesFromUpcomingOrders = sum(collections.filter((collection) => !collection.isCompletedOrder));
+  const retainedCancelledDeposits = sum(collections.filter((collection) => collection.isRetainedDeposit));
+  const advancesFromUpcomingOrders = sum(collections.filter((collection) => !collection.isCompletedOrder && !collection.isRetainedDeposit));
 
   const monthlyEntries = financeEntries.filter((entry) => inMonth(dateKey(entry.date), year, month));
   const capitalAdded = monthlyEntries.filter(isCapital).reduce((total, entry) => total + positiveAmount(entry.amount), 0);
@@ -125,11 +131,11 @@ export const calculateMonthlyCash = (
   // Worker and transport costs remain pending until the order is completed.
   // `bookingDate` is the best available date for this expense in the current data model.
   const upcomingOrderOtherExpenses = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
 
-  const orderCashNet = collectedFromCompletedOrders + advancesFromUpcomingOrders - completedOrderCosts - upcomingOrderOtherExpenses;
-  const cashMovement = collectedFromCompletedOrders + advancesFromUpcomingOrders + capitalAdded - operatingExpenses - completedOrderCosts;
+  const orderCashNet = collectedFromCompletedOrders + advancesFromUpcomingOrders + retainedCancelledDeposits - completedOrderCosts - upcomingOrderOtherExpenses;
+  const cashMovement = collectedFromCompletedOrders + advancesFromUpcomingOrders + retainedCancelledDeposits + capitalAdded - operatingExpenses - completedOrderCosts;
 
   const collectedToDate = sum(allCollections.filter((collection) => onOrBeforeMonthEnd(dateKey(collection.date), year, month)));
   const capitalToDate = financeEntries
@@ -144,7 +150,7 @@ export const calculateMonthlyCash = (
   // Other expenses are paid before fulfillment, so they remain deducted from
   // the safe for every later month while their order is still not completed.
   const upcomingOrderOtherExpensesToDate = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && onOrBeforeMonthEnd(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && onOrBeforeMonthEnd(dateKey(order.bookingDate || order.createdAt), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
   const orderCashBalanceToDate = collectedToDate - completedCostsToDate - upcomingOrderOtherExpensesToDate;
 
@@ -152,6 +158,7 @@ export const calculateMonthlyCash = (
     collections,
     collectedFromCompletedOrders,
     advancesFromUpcomingOrders,
+    retainedCancelledDeposits,
     capitalAdded,
     operatingExpenses,
     completedOrderCosts,

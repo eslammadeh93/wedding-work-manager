@@ -8,7 +8,7 @@ import { localDateString } from '../../utils/localDate';
 type Period = 'all' | 'month' | 'week';
 type WorkerPerformance = { id: string; name: string; assigned: number; completed: number; active: number; overdue: number; completionRate: number; orders: Order[] };
 const doneStatuses = new Set(['completed', 'returned']);
-const cancelledStatuses = new Set(['cancelled']);
+const cancelledStatuses = new Set(['cancelled', 'cancelled_deposit_retained']);
 const orderDate = (order: Order) => order.weddingDate || order.eventDate || order.createdAt?.slice(0, 10) || '';
 
 export function WorkerPerformanceModule() {

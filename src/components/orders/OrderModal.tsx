@@ -735,6 +735,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   <option value="completed">{t('statusCompleted')}</option>
                   <option value="returned">{t('statusReturned')}</option>
                   <option value="cancelled">{t('statusCancelled')}</option>
+                  <option value="cancelled_deposit_retained">{t('statusCancelledDepositRetained')}</option>
                 </select>
               </div>
             </div>

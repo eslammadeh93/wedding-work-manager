@@ -8,6 +8,8 @@ export type OrderStatus =
   | 'completed'
   | 'returned'
   | 'cancelled'
+  /** The booking was cancelled, but its recorded deposit remains company income. */
+  | 'cancelled_deposit_retained'
   | 'pending' // legacy alias for new/preparing
   | 'in_progress'; // legacy alias for preparing
 

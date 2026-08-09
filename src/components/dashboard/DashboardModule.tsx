@@ -67,7 +67,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   const completedOrdersCount = orders.filter((o) => o.orderStatus === 'completed').length;
 
   const upcomingWeddings = orders
-    .filter((o) => o.orderStatus !== 'completed' && o.orderStatus !== 'cancelled')
+    .filter((o) => o.orderStatus !== 'completed' && o.orderStatus !== 'cancelled' && o.orderStatus !== 'cancelled_deposit_retained')
     .sort((a, b) => new Date(a.weddingDate).getTime() - new Date(b.weddingDate).getTime());
 
   const lowInventoryItems = inventory.filter((i) => i.availableQuantity <= i.minStockLevel);
@@ -78,7 +78,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
     confirmed: orders.filter((o) => o.orderStatus === 'confirmed').length,
     in_progress: orders.filter((o) => o.orderStatus === 'in_progress').length,
     completed: orders.filter((o) => o.orderStatus === 'completed').length,
-    cancelled: orders.filter((o) => o.orderStatus === 'cancelled').length,
+    cancelled: orders.filter((o) => o.orderStatus === 'cancelled' || o.orderStatus === 'cancelled_deposit_retained').length,
   };
 
   // 6 Month Revenue Chart based on real orders & expenses

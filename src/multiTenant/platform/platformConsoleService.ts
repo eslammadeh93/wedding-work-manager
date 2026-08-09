@@ -146,10 +146,18 @@ export async function createPlatformAdmin(data: {
 
 export async function updatePlatformAdmin(data: {
   uid: string;
+  name?: string;
+  email?: string;
   role: "platform_owner" | "platform_admin" | "platform_support" | "platform_billing" | "platform_read_only";
   status: "active" | "disabled";
 }): Promise<void> {
   const call = httpsCallable<typeof data, Result>(functions, "updatePlatformAdmin");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
+export async function deletePlatformAdmin(data: { uid: string }): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "deletePlatformAdmin");
   const result = await call(data);
   if (!result.data.success) throw new Error(result.data.message);
 }

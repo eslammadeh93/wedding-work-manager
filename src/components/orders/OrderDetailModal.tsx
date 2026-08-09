@@ -194,7 +194,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-xl font-mono">{order.orderNumber}</span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/20 uppercase">
-                {order.orderStatus.replace('_', ' ')}
+                {order.orderStatus === 'cancelled_deposit_retained' ? t('statusCancelledDepositRetained') : order.orderStatus.replace('_', ' ')}
               </span>
             </div>
             <p className="text-xs text-amber-100 mt-0.5">
@@ -332,6 +332,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   <option value="completed">{t('statusCompleted')}</option>
                   <option value="returned">{t('statusReturned')}</option>
                   <option value="cancelled">{t('statusCancelled')}</option>
+                  <option value="cancelled_deposit_retained">{t('statusCancelledDepositRetained')}</option>
                 </select>
               </div>
 

@@ -199,6 +199,7 @@ export const translations = {
     statusCompleted: 'Completed',
     statusReturned: 'Returned',
     statusCancelled: 'Cancelled',
+    statusCancelledDepositRetained: 'Cancelled — Deposit Retained',
     statusPending: 'Pending',
     statusInProgress: 'In Progress',
 
@@ -560,6 +561,7 @@ export const translations = {
     statusCompleted: 'مكتمل',
     statusReturned: 'تم الترجيع للمستودع',
     statusCancelled: 'ملغي',
+    statusCancelledDepositRetained: 'ملغي مع الاحتفاظ بالعربون',
     statusPending: 'قيد الانتظار',
     statusInProgress: 'قيد التجهيز والتركيب',
     selectCustomer: 'اختر عميل أو أدخل بيانات عميل جديد',
