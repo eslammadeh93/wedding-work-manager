@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ActivityLogRecord, AppNotification, CategoryItem, CompanySettings, Customer, Expense, InventoryItem, Order, PaymentEntry, Worker, WorkerMovement } from '../../types';
-import { DataContext, type DataContextType, type NewCategoryData, type NewOrderCustomer, type NewOrderData } from '../../context/DataContext';
+import type { ActivityLogRecord, AppNotification, CategoryItem, CompanySettings, Customer, Expense, InventoryItem, Order, PaymentEntry, Worker, WorkerMovement, WorkTask } from '../../types';
+import { DataContext, type DataContextType, type NewCategoryData, type NewOrderCustomer, type NewOrderData, type NewWorkTaskData } from '../../context/DataContext';
 import { initialCompanySettings } from '../../data/sampleData';
 import { sanitizeData } from '../../utils/security';
 import { useAuth } from '../../context/AuthContext';
@@ -19,13 +19,14 @@ const sortCreated = <T extends { createdAt?: string }>(items: T[]) => [...items]
 export function MultiTenantDataProvider({ children }: { children: React.ReactNode }) {
   const { authSession, profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]); const [customers, setCustomers] = useState<Customer[]>([]);
+  const [workTasks, setWorkTasks] = useState<WorkTask[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]); const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]); const [categories, setCategories] = useState<CategoryItem[]>(defaultCategories);
   const [activityLogs, setActivityLogs] = useState<ActivityLogRecord[]>([]); const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [settings, setSettings] = useState<CompanySettings>(initialCompanySettings);
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState<string | null>(null); const [retryVersion, setRetryVersion] = useState(0);
 
-  const clear = useCallback(() => { setOrders([]); setCustomers([]); setWorkers([]); setInventory([]); setExpenses([]); setCategories(defaultCategories); setActivityLogs([]); setNotifications([]); setSettings(initialCompanySettings); }, []);
+  const clear = useCallback(() => { setOrders([]); setWorkTasks([]); setCustomers([]); setWorkers([]); setInventory([]); setExpenses([]); setCategories(defaultCategories); setActivityLogs([]); setNotifications([]); setSettings(initialCompanySettings); }, []);
   useEffect(() => {
     clear(); setLoadError(null);
     let companyId: string;
@@ -68,6 +69,8 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
         })()
       : allowed('company:orders:read') ? listen<Order>('orders', (items) => setOrders(sortCreated(items))) : () => undefined;
     const unsubs = [orderListener];
+    if (workerOnly && workerId) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items)), { field: 'workerId', value: workerId }));
+    else if (allowed('company:orders:read')) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items))));
     if (allowed('company:customers:read')) unsubs.push(listen<Customer>('customers', setCustomers));
     if (allowed('company:workers:read')) unsubs.push(listen<Worker>('workers', (items) => setWorkers(sortCreated(items))));
     if (allowed('company:inventory:read')) unsubs.push(listen<InventoryItem>('inventory', setInventory));
@@ -111,6 +114,20 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     if (!result.success) failure(result);
   }, [authSession?.role, company, orders]);
   const deleteOrder = useCallback(async (id: string) => { const result = await orderInventoryTransaction.remove(company(), id); if (!result.success) failure(result); }, [company]);
+  const addWorkTask = useCallback(async (data: NewWorkTaskData) => {
+    const id = newId('task'); const now = new Date().toISOString();
+    const task: WorkTask = { ...sanitizeData(data), id, companyId: company(), status: 'pending', createdAt: now, updatedAt: now };
+    await write('workTasks', id, task); return id;
+  }, [company, write]);
+  const updateWorkTask = useCallback(async (id: string, data: Partial<WorkTask>) => {
+    const existing = workTasks.find((task) => task.id === id);
+    if (!existing) throw new Error('لم يتم العثور على المهمة.');
+    const workerUpdate = authSession?.role === 'worker';
+    if (workerUpdate && existing.workerId !== profile?.workerId) throw new Error('لا يُسمح لك بتعديل هذه المهمة.');
+    const changes = workerUpdate ? { status: data.status, completedAt: data.status === 'completed' ? new Date().toISOString() : '' } : sanitizeData(data);
+    await write('workTasks', id, { ...changes, updatedAt: new Date().toISOString() }, true);
+  }, [authSession?.role, profile?.workerId, workTasks, write]);
+  const deleteWorkTask = useCallback(async (id: string) => { if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بحذف المهمة.'); await remove('workTasks', id); }, [authSession?.role, remove]);
   const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'>) => { const order = orders.find((item) => item.id === id); if (!order) throw new Error('لم يتم العثور على الطلب.'); await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: newId('pay') }] }); }, [orders, updateOrder]);
   const addRecord = useCallback(async <T extends object>(name: CompanyCollection, prefix: string, data: T) => { const id = newId(prefix); await write(name, id, { ...sanitizeData(data), id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); return id; }, [write]);
   const updateRecord = useCallback(async <T extends object>(name: CompanyCollection, id: string, data: T) => write(name, id, { ...sanitizeData(data), updatedAt: new Date().toISOString() }, true), [write]);
@@ -141,6 +158,6 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     await write('categories', category.id, category);
     return category;
   }, [write]);
-  const value = useMemo<DataContextType>(() => ({ orders, customers, workers, inventory, expenses, settings, notifications, categories, activityLogs, loading, ...financialTotals, addOrder, updateOrder, deleteOrder, addPaymentToOrder, addWorker: async () => { throw new Error('إنشاء العامل متاح من قسم العمال فقط.'); }, updateWorker: updateWorkerSafe, deleteWorker: deleteWorkerSafe, toggleWorkerStatus: toggleWorkerStatusSafe, addCustomer: (data) => addRecord('customers', 'cus', data), updateCustomer: (id, data) => updateRecord('customers', id, data), deleteCustomer: (id) => remove('customers', id), addInventoryItem: (data) => addRecord('inventory', 'inv', { ...data, reservedQuantity: 0, availableQuantity: data.quantity }), updateInventoryItem: (id, data) => updateRecord('inventory', id, data), deleteInventoryItem: (id) => remove('inventory', id), addExpense: (data) => { if (data.linkedOrderId && !orders.some((order) => order.id === data.linkedOrderId)) return Promise.reject(new Error('الطلب المرتبط لا يتبع الشركة الحالية.')); return addRecord('expenses', 'exp', data); }, updateExpense: (id, data) => updateRecord('expenses', id, data), deleteExpense: (id) => remove('expenses', id), addCategory, updateSettings, seedSampleData: async () => { throw new Error('البيانات التجريبية معطلة في وضع الشركات.'); }, exportBackupJson, restoreBackupJson, addActivityLog: addActivityLogSafe, recordWorkerMovement: recordWorkerMovementSafe, markNotificationAsRead: async (id) => markNotificationsSafe([id]), clearAllNotifications: async () => markNotificationsSafe(notifications.filter((item) => !item.read).map((item) => item.id)), checkStockAvailability }), [activityLogs, addActivityLogSafe, addCategory, addOrder, addPaymentToOrder, addRecord, categories, checkStockAvailability, customers, deleteOrder, deleteWorkerSafe, expenses, exportBackupJson, financialTotals, inventory, loading, markNotificationsSafe, notifications, orders, recordWorkerMovementSafe, remove, restoreBackupJson, settings, toggleWorkerStatusSafe, updateOrder, updateRecord, updateSettings, updateWorkerSafe, workers, write]);
+  const value = useMemo<DataContextType>(() => ({ orders, workTasks, customers, workers, inventory, expenses, settings, notifications, categories, activityLogs, loading, ...financialTotals, addOrder, updateOrder, deleteOrder, addPaymentToOrder, addWorkTask, updateWorkTask, deleteWorkTask, addWorker: async () => { throw new Error('إنشاء العامل متاح من قسم العمال فقط.'); }, updateWorker: updateWorkerSafe, deleteWorker: deleteWorkerSafe, toggleWorkerStatus: toggleWorkerStatusSafe, addCustomer: (data) => addRecord('customers', 'cus', data), updateCustomer: (id, data) => updateRecord('customers', id, data), deleteCustomer: (id) => remove('customers', id), addInventoryItem: (data) => addRecord('inventory', 'inv', { ...data, reservedQuantity: 0, availableQuantity: data.quantity }), updateInventoryItem: (id, data) => updateRecord('inventory', id, data), deleteInventoryItem: (id) => remove('inventory', id), addExpense: (data) => { if (data.linkedOrderId && !orders.some((order) => order.id === data.linkedOrderId)) return Promise.reject(new Error('الطلب المرتبط لا يتبع الشركة الحالية.')); return addRecord('expenses', 'exp', data); }, updateExpense: (id, data) => updateRecord('expenses', id, data), deleteExpense: (id) => remove('expenses', id), addCategory, updateSettings, seedSampleData: async () => { throw new Error('البيانات التجريبية معطلة في وضع الشركات.'); }, exportBackupJson, restoreBackupJson, addActivityLog: addActivityLogSafe, recordWorkerMovement: recordWorkerMovementSafe, markNotificationAsRead: async (id) => markNotificationsSafe([id]), clearAllNotifications: async () => markNotificationsSafe(notifications.filter((item) => !item.read).map((item) => item.id)), checkStockAvailability }), [activityLogs, addActivityLogSafe, addCategory, addOrder, addPaymentToOrder, addRecord, addWorkTask, categories, checkStockAvailability, customers, deleteOrder, deleteWorkTask, deleteWorkerSafe, expenses, exportBackupJson, financialTotals, inventory, loading, markNotificationsSafe, notifications, orders, recordWorkerMovementSafe, remove, restoreBackupJson, settings, toggleWorkerStatusSafe, updateOrder, updateRecord, updateSettings, updateWorkTask, updateWorkerSafe, workTasks, workers, write]);
   return <DataContext.Provider value={value}>{loadError && <div role="alert" dir="rtl" className="fixed z-[100] bottom-4 left-4 max-w-sm rounded-xl bg-red-600 text-white px-4 py-3 shadow-lg text-sm"><p>{loadError}</p><button type="button" className="mt-2 underline font-bold" onClick={() => setRetryVersion((version) => version + 1)}>حاول مرة أخرى</button></div>}{children}</DataContext.Provider>;
 }

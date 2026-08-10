@@ -106,6 +106,21 @@ export interface WorkerMovement {
   createdByRole: 'worker';
 }
 
+/** A standalone operational task; it is not linked to a wedding order. */
+export interface WorkTask {
+  id: string;
+  companyId?: string;
+  title: string;
+  details?: string;
+  executionDate: string; // YYYY-MM-DD
+  workerId: string;
+  workerName: string;
+  status: 'pending' | 'completed';
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 export interface Order {
   id: string;
   /** Tenant owning this order. The Firestore path remains the security boundary. */

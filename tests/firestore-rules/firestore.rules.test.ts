@@ -37,6 +37,8 @@ async function seed() {
       setDoc(doc(db, `${company('companyA')}/orders/contactRevokedAndDeleted`), { id: 'contactRevokedAndDeleted', companyId: 'companyA', workerId: 'worker1', workerCanContactCustomer: false, createdBy: 'system', createdAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderLegacy`), { id: 'orderLegacy', companyId: 'companyA', workerId: 'worker1', customerPhone: '+201008888888', createdBy: 'system', createdAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderOtherWorker`), { id: 'orderOtherWorker', companyId: 'companyA', workerId: 'worker2', customerPhone: '+201007777777', workerCanContactCustomer: true, createdBy: 'system', createdAt: 'now' }),
+      setDoc(doc(db, `${company('companyA')}/workTasks/taskWorker1`), { id: 'taskWorker1', companyId: 'companyA', title: 'Buy flowers', details: 'Get white roses', executionDate: '2026-08-12', workerId: 'worker1', workerName: 'Worker 1', status: 'pending', createdAt: 'now', updatedAt: 'now' }),
+      setDoc(doc(db, `${company('companyA')}/workTasks/taskWorker2`), { id: 'taskWorker2', companyId: 'companyA', title: 'Collect chairs', executionDate: '2026-08-12', workerId: 'worker2', workerName: 'Worker 2', status: 'pending', createdAt: 'now', updatedAt: 'now' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderA/workerMovements/worker1_arrived`), { companyId: 'companyA', orderId: 'orderA', workerId: 'worker1', action: 'arrived', createdByUid: 'companyAWorker1' }),
       setDoc(doc(db, `${company('companyA')}/orders/orderA/workerMovements/worker2_arrived`), { companyId: 'companyA', orderId: 'orderA', workerId: 'worker2', action: 'arrived', createdByUid: 'companyAWorker2' }),
       setDoc(doc(db, `${company('companyA')}/orders/contactIdentityMismatch`), { id: 'contactIdentityMismatch', companyId: 'companyA', workerId: 'worker1', customerPhone: '+201006666666', workerCanContactCustomer: true, createdBy: 'system', createdAt: 'now' }),
@@ -134,3 +136,15 @@ test('45 assigned worker reads only their own movement records and cannot write 
   await assertFails(setDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderA/workerMovements/client`), { workerId: 'worker1' }));
 });
 test('46 unassigned worker cannot read another worker order movements', async () => assertFails(getDoc(doc(db('companyAWorker2'), `${company('companyA')}/orders/orderA/workerMovements/worker1_arrived`))));
+test('47 manager can create standalone work tasks and workers can query only their own tasks', async () => {
+  const tasks = collection(db('companyAWorker1'), `${company('companyA')}/workTasks`);
+  await assertSucceeds(setDoc(doc(db('companyAManager'), `${company('companyA')}/workTasks/managerTask`), { companyId: 'companyA', title: 'Purchase supplies', details: '', executionDate: '2026-08-13', workerId: 'worker1', workerName: 'Worker 1', status: 'pending' }));
+  await assertSucceeds(getDocs(query(tasks, where('workerId', '==', 'worker1'))));
+  await assertFails(getDocs(tasks));
+  await assertFails(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/workTasks/taskWorker2`)));
+});
+test('48 assigned worker may only update work-task completion status', async () => {
+  const task = doc(db('companyAWorker1'), `${company('companyA')}/workTasks/taskWorker1`);
+  await assertSucceeds(updateDoc(task, { status: 'completed', completedAt: 'now', updatedAt: 'now' }));
+  await assertFails(updateDoc(task, { title: 'Changed by worker' }));
+});

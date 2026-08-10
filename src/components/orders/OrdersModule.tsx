@@ -33,6 +33,8 @@ import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { getOrderSource, OrderSourceBadge } from './OrderSourceBadge';
+import { WorkTaskModal } from './WorkTaskModal';
+import { WorkTasksPanel } from './WorkTasksPanel';
 
 type QuickFilterType =
   | 'all'
@@ -91,7 +93,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
 
 export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, todaysOrdersRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
-  const { orders, deleteOrder } = useData();
+  const { orders, workTasks, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
   const { profile, authSession } = useAuth();
 
   const isWorker = profile?.role === 'worker';
@@ -139,6 +141,8 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [printingOrder, setPrintingOrder] = useState<Order | null>(null);
+  const [isWorkTaskOpen, setIsWorkTaskOpen] = useState(false);
+  const [editingWorkTask, setEditingWorkTask] = useState<import('../../types').WorkTask | null>(null);
 
   const managerCompanyId = useMemo(() => {
     if (isWorker || !authSession) return null;
@@ -548,6 +552,16 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
 
           {!isWorker && (
             <button
+              onClick={() => { setEditingWorkTask(null); setIsWorkTaskOpen(true); }}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-indigo-500/20 transition-all cursor-pointer flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة عمل</span>
+            </button>
+          )}
+
+          {!isWorker && (
+            <button
               onClick={() => setIsCreateOpen(true)}
               className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-2"
             >
@@ -557,6 +571,18 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
           )}
         </div>
       </div>
+
+      <WorkTasksPanel
+        tasks={workTasks}
+        isWorker={Boolean(isWorker)}
+        onToggle={async (task) => {
+          await updateWorkTask(task.id, { status: task.status === 'completed' ? 'pending' : 'completed' });
+        }}
+        onEdit={(task) => { setEditingWorkTask(task); setIsWorkTaskOpen(true); }}
+        onDelete={async (task) => {
+          if (window.confirm(`هل تريد حذف العمل «${task.title}»؟`)) await deleteWorkTask(task.id);
+        }}
+      />
 
       {/* Orders are split by lifecycle for both managers and assigned workers. */}
       <div
@@ -1174,6 +1200,10 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       {/* Create Modal */}
       {isCreateOpen && !isWorker && (
         <OrderModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} />
+      )}
+
+      {isWorkTaskOpen && !isWorker && (
+        <WorkTaskModal isOpen={isWorkTaskOpen} initialTask={editingWorkTask} onClose={() => { setIsWorkTaskOpen(false); setEditingWorkTask(null); }} />
       )}
 
       {/* Edit Modal */}

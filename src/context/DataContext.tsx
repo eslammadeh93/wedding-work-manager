@@ -24,6 +24,7 @@ import {
   Worker,
   ActivityLogRecord,
   WorkerMovement,
+  WorkTask,
 } from '../types';
 import {
   initialCompanySettings,
@@ -57,6 +58,7 @@ const defaultCategories: CategoryItem[] = [
 
 export interface DataContextType {
   orders: Order[];
+  workTasks: WorkTask[];
   customers: Customer[];
   inventory: InventoryItem[];
   expenses: Expense[];
@@ -79,6 +81,9 @@ export interface DataContextType {
   updateOrder: (id: string, orderData: Partial<Order>) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
   addPaymentToOrder: (orderId: string, payment: Omit<PaymentEntry, 'id'>) => Promise<void>;
+  addWorkTask: (taskData: NewWorkTaskData) => Promise<string>;
+  updateWorkTask: (id: string, taskData: Partial<WorkTask>) => Promise<void>;
+  deleteWorkTask: (id: string) => Promise<void>;
   
   // Workers
   addWorker: (workerData: Omit<Worker, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
@@ -120,6 +125,7 @@ export interface DataContextType {
 export type NewOrderData = Omit<Order, 'id' | 'createdAt' | 'updatedAt' | 'remainingBalance' | 'totalPaid' | 'paymentStatus' | 'customerId'> & { customerId?: string };
 export type NewOrderCustomer = Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'companyId' | 'orderIds'>;
 export type NewCategoryData = Omit<CategoryItem, 'id' | 'isCustom'>;
+export type NewWorkTaskData = Omit<WorkTask, 'id' | 'companyId' | 'status' | 'createdAt' | 'updatedAt' | 'completedAt'>;
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
 
@@ -138,6 +144,7 @@ const createRecordId = (prefix: string) =>
 const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [workTasks, setWorkTasks] = useState<WorkTask[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -151,6 +158,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sync from Firestore or load fallback
   useEffect(() => {
     let unsubOrders: () => void = () => {};
+    let unsubWorkTasks: () => void = () => {};
     let unsubCustomers: () => void = () => {};
     let unsubInventory: () => void = () => {};
     let unsubExpenses: () => void = () => {};
@@ -160,7 +168,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubActivityLogs: () => void = () => {};
 
     if (!profile) {
-      setOrders([]); setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
+      setOrders([]); setWorkTasks([]); setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
       setActivityLogs([]); setNotifications([]); setLoading(false);
       return () => {};
     }
@@ -179,12 +187,17 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         setOrders([]);
       }
+      if (profile.workerId) {
+        unsubWorkTasks = onSnapshot(query(collection(db, 'workTasks'), where('workerId', '==', profile.workerId)), (snapshot) => {
+          setWorkTasks(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as WorkTask)));
+        });
+      } else setWorkTasks([]);
       unsubSettings = onSnapshot(doc(db, 'settings', 'company'), (docSnap) => {
         setSettings(docSnap.exists() ? docSnap.data() as CompanySettings : initialCompanySettings);
       });
       setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
       setActivityLogs([]); setCategories(defaultCategories); setNotifications([]); setLoading(false);
-      return () => { unsubOrders(); unsubSettings(); };
+      return () => { unsubOrders(); unsubWorkTasks(); unsubSettings(); };
     }
 
     try {
@@ -215,6 +228,10 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else {
           setOrders([]);
         }
+      });
+
+      unsubWorkTasks = onSnapshot(collection(db, 'workTasks'), (snapshot) => {
+        setWorkTasks(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as WorkTask)));
       });
 
       // Listener for Workers
@@ -306,6 +323,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Firestore listener error, fallback to local empty state:', err);
       setOrders([]);
+      setWorkTasks([]);
       setWorkers([]);
       setCustomers([]);
       setInventory([]);
@@ -319,6 +337,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       unsubActivityLogs();
       unsubOrders();
+      unsubWorkTasks();
       unsubWorkers();
       unsubCustomers();
       unsubInventory();
@@ -839,6 +858,27 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return logId;
   };
 
+  const addWorkTask = async (taskData: NewWorkTaskData): Promise<string> => {
+    const id = createRecordId('task');
+    const now = new Date().toISOString();
+    const task: WorkTask = { ...sanitizeData(taskData), id, status: 'pending', createdAt: now, updatedAt: now };
+    try { await setDoc(doc(db, 'workTasks', id), task); } catch (error) { console.warn('Saving work task locally:', error); }
+    setWorkTasks((current) => upsertById(current, task));
+    return id;
+  };
+
+  const updateWorkTask = async (id: string, taskData: Partial<WorkTask>) => {
+    const now = new Date().toISOString();
+    const updates = { ...sanitizeData(taskData), updatedAt: now };
+    try { await setDoc(doc(db, 'workTasks', id), updates, { merge: true }); } catch (error) { console.warn('Updating work task locally:', error); }
+    setWorkTasks((current) => current.map((task) => task.id === id ? { ...task, ...updates } : task));
+  };
+
+  const deleteWorkTask = async (id: string) => {
+    try { await deleteDoc(doc(db, 'workTasks', id)); } catch (error) { console.warn('Deleting work task locally:', error); }
+    setWorkTasks((current) => current.filter((task) => task.id !== id));
+  };
+
   const recordWorkerMovement = async (): Promise<string> => {
     throw new Error('تسجيل تحركات المنفذ متاح فقط عبر المسار الآمن للشركات.');
   };
@@ -865,6 +905,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <DataContext.Provider
       value={{
         orders,
+        workTasks,
         customers,
         inventory,
         expenses,
@@ -883,6 +924,9 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateOrder,
         deleteOrder,
         addPaymentToOrder,
+        addWorkTask,
+        updateWorkTask,
+        deleteWorkTask,
         addWorker,
         updateWorker,
         deleteWorker,

@@ -102,6 +102,14 @@ service cloud.firestore {
       return !('orderSource' in request.resource.data)
         || request.resource.data.orderSource in ['organic', 'campaign', 'other'];
     }
+    function validWorkTask() {
+      return request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.executionDate is string
+        && request.resource.data.workerId is string
+        && request.resource.data.workerName is string
+        && request.resource.data.status in ['pending', 'completed'];
+    }
     function workerAssignmentChanged() {
       return request.resource.data.diff(resource.data).affectedKeys().hasAny(['workerId']);
     }
@@ -176,6 +184,22 @@ service cloud.firestore {
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
           && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
           && workerContactUpdateAllowed(companyId) && validOrderSource();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
+      }
+      match /workTasks/{taskId} {
+        allow read: if hasCompanyPermission(companyId, 'orders:read')
+          || (canReadOperations(companyId) && isWorker(companyId)
+            && resource.data.workerId == companyMember(companyId).data.workerId);
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
+          && companyIdMatchesPath(companyId) && validWorkTask();
+        allow update: if canWriteOperations(companyId) && (
+          (hasCompanyPermission(companyId, 'orders:write')
+            && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && validWorkTask())
+          || (isWorker(companyId)
+            && resource.data.workerId == companyMember(companyId).data.workerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'completedAt'])
+            && request.resource.data.status in ['pending', 'completed'])
+        );
         allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
       }
       match /orders/{orderId}/workerMovements/{movementId} {
