@@ -3,6 +3,7 @@ import { Printer, X } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Order } from '../../types';
+import { OrderSourceBadge } from './OrderSourceBadge';
 
 interface OrderInvoicePrintProps {
   order: Order | null;
@@ -68,6 +69,7 @@ export const OrderInvoicePrint: React.FC<OrderInvoicePrintProps> = ({ order, onC
                 {t('orderDetails')}
               </span>
               <p className="text-lg font-extrabold text-slate-900 mt-2">{order.orderNumber}</p>
+              <div className="mt-1.5 flex justify-end"><OrderSourceBadge source={order.orderSource} language={language} /></div>
               <p className="text-xs text-slate-500">
                 {t('date')}: {new Date().toLocaleDateString()}
               </p>

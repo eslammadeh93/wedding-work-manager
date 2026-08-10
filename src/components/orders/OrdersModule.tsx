@@ -32,6 +32,7 @@ import { localDateString } from '../../utils/localDate';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { getOrderSource, OrderSourceBadge } from './OrderSourceBadge';
 
 type QuickFilterType =
   | 'all'
@@ -102,6 +103,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [selectedPayment, setSelectedPayment] = useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
   const [selectedExecutor, setSelectedExecutor] = useState<string>('all');
+  const [selectedOrderSource, setSelectedOrderSource] = useState<string>('all');
   const [orderListScope, setOrderListScope] = useState<OrderListScope>('active');
 
   const uniqueExecutorsList = useMemo(() => {
@@ -181,6 +183,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     setSelectedPayment('all');
     setSelectedPaymentMethod('all');
     setSelectedExecutor('all');
+    setSelectedOrderSource('all');
     setQuickFilter('all');
     setDateFrom('');
     setDateTo('');
@@ -258,6 +261,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
         if (selectedPayment !== 'all' && ord.paymentStatus !== selectedPayment) return false;
         if (selectedPaymentMethod !== 'all' && ord.paymentMethod !== selectedPaymentMethod) return false;
         if (selectedExecutor !== 'all' && ord.executorName !== selectedExecutor) return false;
+        if (!isWorker && selectedOrderSource !== 'all' && getOrderSource(ord.orderSource) !== selectedOrderSource) return false;
 
         // 3. Quick Filters
         if (quickFilter !== 'all') {
@@ -352,6 +356,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     selectedPayment,
     selectedPaymentMethod,
     selectedExecutor,
+    selectedOrderSource,
     quickFilter,
     dateFilterType,
     dateFrom,
@@ -665,6 +670,20 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             <option value="E-Wallet">E-Wallet</option>
             <option value="PayPal">PayPal</option>
           </select>
+
+          {!isWorker && (
+            <select
+              value={selectedOrderSource}
+              onChange={(e) => setSelectedOrderSource(e.target.value)}
+              aria-label={language === 'ar' ? 'مصدر الأوردر' : 'Order source'}
+              className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+            >
+              <option value="all">{language === 'ar' ? 'كل المصادر' : 'All sources'}</option>
+              <option value="organic">{language === 'ar' ? 'أورجانيك' : 'Organic'}</option>
+              <option value="campaign">{language === 'ar' ? 'كامبين' : 'Campaign'}</option>
+              <option value="other">{language === 'ar' ? 'أخرى' : 'Other'}</option>
+            </select>
+          )}
         </div>
 
         {/* Row 2: Dual-Date System Filters (Month/Year & Date Range) */}
@@ -828,6 +847,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                 <tr>
                   <th className="p-4">{t('orderNumber')}</th>
+                  {!isWorker && <th className="p-4">{language === 'ar' ? 'المصدر' : 'Source'}</th>}
                   <th className="p-4">{t('customerName')}</th>
                   <th
                     className="p-4 cursor-pointer hover:text-amber-600 transition-colors"
@@ -868,6 +888,8 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                       <td className="p-4 font-mono font-extrabold text-amber-600 dark:text-amber-400">
                         {ord.orderNumber}
                       </td>
+
+                      {!isWorker && <td className="p-4"><OrderSourceBadge source={ord.orderSource} language={language} /></td>}
 
                       <td className="p-4 font-bold">
                         <div>{ord.customerName}</div>
@@ -1012,13 +1034,16 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                     <span className="font-extrabold text-base text-amber-600 dark:text-amber-400">
                       {ord.orderNumber}
                     </span>
-                    <span
-                      className={`px-2.5 py-0.5 text-[10px] font-extrabold uppercase rounded-full ${getStatusBadge(
-                        ord.orderStatus
-                      )}`}
-                    >
-                      {getStatusLabel(ord.orderStatus)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {!isWorker && <OrderSourceBadge source={ord.orderSource} language={language} compact />}
+                      <span
+                        className={`px-2.5 py-0.5 text-[10px] font-extrabold uppercase rounded-full ${getStatusBadge(
+                          ord.orderStatus
+                        )}`}
+                      >
+                        {getStatusLabel(ord.orderStatus)}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Customer info */}

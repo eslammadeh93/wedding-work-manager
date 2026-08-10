@@ -7,12 +7,15 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { Order } from '../../types';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
 import { localDateString } from '../../utils/localDate';
+import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 
 export const CalendarModule: React.FC = () => {
   const { t, language } = useLanguage();
+  const { profile } = useAuth();
   const { orders } = useData();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -155,6 +158,7 @@ export const CalendarModule: React.FC = () => {
                       <span className="truncate">
                         {language === 'ar' ? `تركيب: ${ord.customerName}` : `Setup: ${ord.customerName}`}
                       </span>
+                      {profile?.role !== 'worker' && <OrderSourceBadge source={ord.orderSource} language={language} compact />}
                     </div>
                   ))}
                 </div>

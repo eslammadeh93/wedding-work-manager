@@ -98,6 +98,10 @@ service cloud.firestore {
       return !('workerCanContactCustomer' in request.resource.data)
         || request.resource.data.workerCanContactCustomer is bool;
     }
+    function validOrderSource() {
+      return !('orderSource' in request.resource.data)
+        || request.resource.data.orderSource in ['organic', 'campaign', 'other'];
+    }
     function workerAssignmentChanged() {
       return request.resource.data.diff(resource.data).affectedKeys().hasAny(['workerId']);
     }
@@ -168,10 +172,10 @@ service cloud.firestore {
         // Workers use the field-safe projection below; rules cannot redact customerPhone here.
         allow read: if hasCompanyPermission(companyId, 'orders:read');
         allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
-          && companyIdMatchesPath(companyId) && workerContactCreateAllowed(companyId);
+          && companyIdMatchesPath(companyId) && workerContactCreateAllowed(companyId) && validOrderSource();
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
           && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
-          && workerContactUpdateAllowed(companyId);
+          && workerContactUpdateAllowed(companyId) && validOrderSource();
         allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
       }
       match /orders/{orderId}/workerMovements/{movementId} {

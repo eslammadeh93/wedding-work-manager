@@ -94,7 +94,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const id = newId('ord'); const customerId = data.customerId || (newCustomer ? newId('cus') : '');
     if (!customerId) throw new Error('يرجى اختيار عميل أو إدخال بيانات عميل جديد.');
     const now = new Date().toISOString(); const companyId = company(); const history = data.paymentHistory || []; const totalPaid = Math.max(data.deposit || 0, history.reduce((sum, entry) => sum + (entry.amount || 0), 0)); const totalPrice = data.totalPrice || 0;
-    const order: Order = { ...sanitizeData(data), id, companyId, customerId, workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: now, updatedAt: now };
+    const order: Order = { ...sanitizeData(data), id, companyId, customerId, orderSource: data.orderSource || 'other', workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: now, updatedAt: now };
     const customer: Customer | undefined = newCustomer ? { ...sanitizeData(newCustomer), id: customerId, companyId, orderIds: [id], createdAt: now, updatedAt: now } : undefined;
     const result = await orderInventoryTransaction.create(companyId, order, customer);
     if (!result.success) failure(result);

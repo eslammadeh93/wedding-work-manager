@@ -15,6 +15,9 @@ export type OrderStatus =
 
 export type PaymentStatus = 'unpaid' | 'partially_paid' | 'fully_paid';
 
+/** Where the order lead originated. Legacy orders without a value are shown as "other". */
+export type OrderSource = 'organic' | 'campaign' | 'other';
+
 export type PredefinedCategory =
   | 'wedding_chairs'
   | 'golden_chairs'
@@ -119,6 +122,8 @@ export interface Order {
   eventLocation: string;
   locationLink?: string; // رابط موقع التنفيذ (Google Maps)
   salesEmployee?: string;
+  /** Lead source. This is intentionally omitted from the worker-safe order projection. */
+  orderSource?: OrderSource;
   executorName?: string; // المنفذ / Executor
   workerId?: string; // Worker Firestore Document ID
   workerName?: string; // Worker display name

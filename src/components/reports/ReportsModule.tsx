@@ -21,6 +21,7 @@ import { useData } from '../../context/DataContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 import { calculateMonthlyCash } from '../../utils/monthlyCash';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
+import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
@@ -118,10 +119,11 @@ export const ReportsModule: React.FC = () => {
 
     autoTable(doc, {
       startY: lastY + 5,
-      head: [['Order #', 'Customer', 'Executor', 'Location', 'Location Link', 'Wedding Date', 'Total ($)', 'Status']],
+      head: [['Order #', 'Customer', 'Source', 'Executor', 'Location', 'Location Link', 'Wedding Date', 'Total ($)', 'Status']],
       body: reportOrders.map((o) => [
         o.orderNumber,
         o.customerName,
+        getOrderSourceLabel(o.orderSource, 'en'),
         o.executorName || '-',
         o.eventLocation,
         o.locationLink || '-',
@@ -155,6 +157,7 @@ export const ReportsModule: React.FC = () => {
       return {
         'Order Number': o.orderNumber,
         Customer: o.customerName,
+        'Order Source': getOrderSourceLabel(o.orderSource, language),
         Phone: o.customerPhone,
         Executor: o.executorName || '',
         'Sales Employee': o.salesEmployee || '',

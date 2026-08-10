@@ -18,6 +18,7 @@ import { ActiveTab } from '../Sidebar';
 import { MobileManagerNav } from '../MobileManagerNav';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
+import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
@@ -455,7 +456,10 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
                     >
                       <td className="p-3 font-extrabold text-amber-600 dark:text-amber-400 uppercase">
-                        {ord.orderNumber}
+                        <span className="inline-flex items-center gap-1.5">
+                          {ord.orderNumber}
+                          {profile?.role !== 'worker' && <OrderSourceBadge source={ord.orderSource} language={language} compact />}
+                        </span>
                       </td>
                       <td className="p-3 font-semibold text-slate-900 dark:text-white">
                         {ord.customerName}

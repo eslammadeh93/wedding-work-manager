@@ -35,6 +35,7 @@ import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { OrderSourceBadge } from './OrderSourceBadge';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -194,6 +195,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-xl font-mono">{order.orderNumber}</span>
+              {!isWorker && <OrderSourceBadge source={order.orderSource} language={language} />}
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/20 uppercase">
                 {getOrderStatusLabel(order.orderStatus, t)}
               </span>
@@ -451,6 +453,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     <UserCheck className="w-3.5 h-3.5" />
                     <span>{t('salesEmployee')}: {order.salesEmployee}</span>
                   </p>
+                )}
+                {!isWorker && (
+                  <div className="mt-2">
+                    <OrderSourceBadge source={order.orderSource} language={language} />
+                  </div>
                 )}
                 {order.executorName && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1 font-semibold">

@@ -439,6 +439,8 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newOrder: Order = {
       ...sanitizeData(orderData),
       customerId,
+      // Default legacy-compatible callers to "other"; the order form always supplies a value.
+      orderSource: orderData.orderSource || 'other',
       workerCanContactCustomer: orderData.workerCanContactCustomer === true,
       id: newId,
       totalPaid,

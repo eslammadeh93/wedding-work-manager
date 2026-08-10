@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, Alert
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker } from '../../types';
+import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource } from '../../types';
 import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput } from '../../utils/phone';
 
@@ -147,6 +147,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || '');
   const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || '');
   const [salesEmployee, setSalesEmployee] = useState(initialOrder?.salesEmployee || '');
+  const [orderSource, setOrderSource] = useState<OrderSource>(initialOrder?.orderSource || 'other');
   
   // Worker assignment
   const [workerId, setWorkerId] = useState(initialOrder?.workerId || '');
@@ -321,6 +322,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       eventLocation,
       locationLink: locationLink.trim(),
       salesEmployee,
+      orderSource,
       workerId: workerId.trim(),
       workerName: workerName.trim(),
       executorName: workerName.trim(),
@@ -464,6 +466,21 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 placeholder="e.g. Fahad Al-Shammari"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                {language === 'ar' ? 'مصدر الأوردر' : 'Order source'}
+              </label>
+              <select
+                value={orderSource}
+                onChange={(e) => setOrderSource(e.target.value as OrderSource)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500 font-semibold"
+              >
+                <option value="organic">{language === 'ar' ? 'أورجانيك' : 'Organic'}</option>
+                <option value="campaign">{language === 'ar' ? 'كامبين' : 'Campaign'}</option>
+                <option value="other">{language === 'ar' ? 'أخرى' : 'Other'}</option>
+              </select>
             </div>
 
             <div>
