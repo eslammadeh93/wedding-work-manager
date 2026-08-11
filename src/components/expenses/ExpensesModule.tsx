@@ -17,6 +17,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Expense, FinanceType } from '../../types';
 import { ExpenseModal } from './ExpenseModal';
+import { MoneyValue } from '../ui/MoneyValue';
 
 export const ExpensesModule: React.FC = () => {
   const { t, language } = useLanguage();
@@ -105,18 +106,16 @@ export const ExpensesModule: React.FC = () => {
       {/* Financial Overview Banner (KPIs) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Total Capital */}
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex min-w-0 items-center gap-3.5">
             <div className="p-3 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl">
               <Building2 className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
                 {t('totalCapital')}
               </span>
-              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
-                ${totalCapital.toLocaleString()}
-              </p>
+              <MoneyValue amount={totalCapital} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400" />
             </div>
           </div>
           <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-lg">
@@ -125,18 +124,16 @@ export const ExpensesModule: React.FC = () => {
         </div>
 
         {/* Total General Expenses */}
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex min-w-0 items-center gap-3.5">
             <div className="p-3 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-2xl">
               <TrendingDown className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
                 {t('totalGeneralExpenses')}
               </span>
-              <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-0.5">
-                ${totalGeneralExpenses.toLocaleString()}
-              </p>
+              <MoneyValue amount={totalGeneralExpenses} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-rose-600 dark:text-rose-400" />
             </div>
           </div>
           <span className="p-1.5 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-lg">
@@ -145,8 +142,8 @@ export const ExpensesModule: React.FC = () => {
         </div>
 
         {/* Current Cash Balance */}
-        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex min-w-0 items-center gap-3.5">
             <div
               className={`p-3 rounded-2xl ${
                 currentCashBalance >= 0
@@ -156,19 +153,18 @@ export const ExpensesModule: React.FC = () => {
             >
               <TrendingUp className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
                 {t('currentCashBalance')}
               </span>
-              <p
-                className={`text-2xl font-black mt-0.5 ${
+              <MoneyValue
+                amount={currentCashBalance}
+                className={`mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black ${
                   currentCashBalance >= 0
                     ? 'text-amber-600 dark:text-amber-400'
                     : 'text-rose-600 dark:text-rose-400'
                 }`}
-              >
-                ${currentCashBalance.toLocaleString()}
-              </p>
+              />
             </div>
           </div>
           <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
@@ -292,15 +288,11 @@ export const ExpensesModule: React.FC = () => {
                       </td>
 
                       {/* Amount */}
-                      <td className="p-3.5 font-black text-sm whitespace-nowrap">
+                      <td className="p-3.5 text-end font-black text-sm whitespace-nowrap">
                         {isCapital ? (
-                          <span className="text-emerald-600 dark:text-emerald-400">
-                            +${exp.amount.toLocaleString()}
-                          </span>
+                          <MoneyValue amount={exp.amount} prefix="+" className="text-emerald-600 dark:text-emerald-400" />
                         ) : (
-                          <span className="text-rose-600 dark:text-rose-400">
-                            -${exp.amount.toLocaleString()}
-                          </span>
+                          <MoneyValue amount={exp.amount} prefix="-" className="text-rose-600 dark:text-rose-400" />
                         )}
                       </td>
 

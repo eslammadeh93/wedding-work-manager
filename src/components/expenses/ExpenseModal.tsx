@@ -169,7 +169,9 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                 value={amount || ''}
                 onChange={(e) => setAmount(Number(e.target.value))}
                 placeholder="0.00"
-                className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 font-bold ${
+                inputMode="decimal"
+                dir="ltr"
+                className={`w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm text-end tabular-nums outline-none focus:ring-2 font-bold ${
                   type === 'capital'
                     ? 'focus:ring-emerald-500 text-emerald-600 dark:text-emerald-400'
                     : 'focus:ring-rose-500 text-rose-600 dark:text-rose-400'

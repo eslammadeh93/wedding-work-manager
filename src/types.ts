@@ -60,11 +60,15 @@ export interface OrderAttachment {
   type: 'contract' | 'image' | 'file' | 'pdf' | 'other';
 }
 
+export type PaymentType = 'deposit' | 'settlement';
+
 export interface PaymentEntry {
   id: string;
   amount: number;
   date: string;
   method: 'cash' | 'credit_card' | 'bank_transfer' | 'cheque' | 'online' | 'other' | string;
+  /** Deposit at booking or settlement payment tied to the execution date. */
+  type?: PaymentType;
   notes?: string;
 }
 

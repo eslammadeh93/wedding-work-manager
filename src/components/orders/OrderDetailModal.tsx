@@ -139,9 +139,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setIsSavingPayment(true);
       await addPaymentToOrder(order.id, {
         amount: Number(paymentAmount),
-        date: localDateString(),
+        // Settlement payments belong to the execution month, not the day the
+        // record happens to be edited.
+        date: order.eventDate || order.weddingDate || localDateString(),
         method: paymentMethod,
-        notes: paymentNotes || 'Partial Payment',
+        type: 'settlement',
+        notes: paymentNotes || 'Settlement Payment',
       });
 
       setPaymentAmount(0);
@@ -349,7 +352,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>{t('addPayment')}</span>
+                  <span>{language === 'ar' ? 'إضافة دفعة سداد' : 'Add Settlement Payment'}</span>
                 </button>
               )}
             </div>
@@ -361,7 +364,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
                   <CreditCard className="w-4 h-4" />
-                  <span>{t('addPayment')}</span>
+                  <span>{language === 'ar' ? 'إضافة دفعة سداد' : 'Add Settlement Payment'}</span>
                 </h4>
                 <button type="button" onClick={() => setShowAddPayment(false)} className="text-slate-400 hover:text-slate-600">
                   <X className="w-4 h-4" />
@@ -413,6 +416,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   />
                 </div>
               </div>
+
+              <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                {language === 'ar'
+                  ? `سيُسجَّل السداد بتاريخ التنفيذ: ${order.eventDate || order.weddingDate || localDateString()}`
+                  : `This settlement will be recorded on the execution date: ${order.eventDate || order.weddingDate || localDateString()}`}
+              </p>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -742,6 +751,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     <div>
                       <span className="font-bold text-slate-900 dark:text-white">${pay.amount.toLocaleString()}</span>
                       <span className="mx-2 text-slate-400">({pay.method})</span>
+                      {pay.type && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${pay.type === 'settlement' ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{pay.type === 'settlement' ? (language === 'ar' ? 'سداد' : 'Settlement') : (language === 'ar' ? 'عربون' : 'Deposit')}</span>}
                       {pay.notes && <span className="text-slate-500 italic">- {pay.notes}</span>}
                     </div>
                     <span className="text-slate-400 font-mono">{pay.date}</span>

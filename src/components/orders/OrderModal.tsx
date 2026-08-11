@@ -349,6 +349,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           // today's date makes historical monthly cash reports inaccurate.
           date: bookingDate || localDateString(),
           method: paymentMethod,
+          type: 'deposit',
           notes: 'Initial Deposit Payment',
         },
       ],

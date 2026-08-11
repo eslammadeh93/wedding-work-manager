@@ -24,15 +24,53 @@ test('separates completed collections, future-order advances, and monthly outflo
   assert.equal(result.advancesFromUpcomingOrders, 400);
   assert.equal(result.completedOrderCosts, 275);
   assert.equal(result.upcomingOrderOtherExpenses, 75);
+  assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 725);
+  assert.equal(result.upcomingOrderAdvancesNet, 325);
   assert.equal(result.orderCashNet, 1050);
   assert.equal(result.orderCashBalanceToDate, 1050);
-  assert.equal(result.cashMovement, 1325);
-  assert.equal(result.expectedSafeBalance, 1325);
+  assert.equal(result.cashMovement, 1250);
+  assert.equal(result.expectedSafeBalance, 1250);
 });
 
 test('uses booking date for legacy payments without history', () => {
   const result = calculateMonthlyCash([order({ totalPaid: 500, paymentHistory: [] })], [], 2026, 7);
   assert.equal(result.advancesFromUpcomingOrders, 500);
+});
+
+test('records an upcoming order other expense in its booking month', () => {
+  const futureCollectionOrder = order({
+    id: 'future-collection', bookingDate: '2026-07-22', createdAt: '2026-07-22', totalPaid: 400, otherExpenses: 100,
+    paymentHistory: [{ id: 'august-payment', amount: 400, date: '2026-08-10', method: 'cash' }],
+  });
+
+  const july = calculateMonthlyCash([futureCollectionOrder], [], 2026, 6);
+  const august = calculateMonthlyCash([futureCollectionOrder], [], 2026, 7);
+
+  assert.equal(july.upcomingOrderOtherExpenses, 100);
+  assert.equal(july.orderCashBalanceToDate, -100);
+  assert.equal(august.upcomingOrderOtherExpenses, 0);
+  assert.equal(august.orderCashBalanceToDate, 300);
+});
+
+test('separates monthly deposits and settlements while deducting booking and completion costs', () => {
+  const result = calculateMonthlyCash([
+    order({ id: 'upcoming', bookingDate: '2026-08-02', totalPaid: 500, otherExpenses: 100, paymentHistory: [{ id: 'deposit', amount: 500, date: '2026-08-02', method: 'cash', type: 'deposit' }] }),
+    order({ id: 'completed', bookingDate: '2026-07-15', eventDate: '2026-08-20', weddingDate: '2026-08-20', orderStatus: 'completed', totalPaid: 1000, workerCost: 200, transportationCost: 50, paymentHistory: [{ id: 'settlement', amount: 1000, date: '2026-08-20', method: 'cash', type: 'settlement' }] }),
+    order({ id: 'retained', bookingDate: '2026-08-04', orderStatus: 'cancelled_deposit_retained', totalPaid: 300, paymentHistory: [{ id: 'retained-deposit', amount: 300, date: '2026-08-04', method: 'cash', type: 'deposit' }] }),
+  ], [], 2026, 7);
+
+  assert.equal(result.totalDepositsPaid, 800);
+  assert.equal(result.totalSettlementPayments, 1000);
+  assert.equal(result.expectedSettlementPayments, 2500);
+  assert.equal(result.grossMonthlyIncome, 1800);
+  assert.equal(result.bookedOrderOtherExpenses, 100);
+  assert.equal(result.completedWorkerTransportCosts, 250);
+  assert.equal(result.totalMonthlyOrderExpenses, 100);
+  assert.equal(result.netMonthlyCash, 1450);
+  assert.equal(result.netMonthlyOrderProfit, 3950);
+  assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 1050);
+  assert.equal(result.upcomingOrderDepositsPaid, 500);
+  assert.equal(result.upcomingOrderDepositsNet, 400);
 });
 
 test('keeps a retained cancelled deposit in finance, separate from upcoming order advances', () => {
@@ -42,6 +80,7 @@ test('keeps a retained cancelled deposit in finance, separate from upcoming orde
   ], [], 2026, 7);
 
   assert.equal(result.retainedCancelledDeposits, 500);
+  assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 500);
   assert.equal(result.advancesFromUpcomingOrders, 0);
   assert.equal(result.orderCashNet, 500);
   assert.equal(result.orderCashBalanceToDate, 500);
