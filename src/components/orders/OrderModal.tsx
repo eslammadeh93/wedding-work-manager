@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, Alert
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderItemReservation, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource } from '../../types';
+import { Order, OrderItemReservation, OrderSupplierRental, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource } from '../../types';
 import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput } from '../../utils/phone';
 
@@ -119,7 +119,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   initialOrder,
 }) => {
   const { t, language } = useLanguage();
-  const { orders, customers, inventory, workers, addOrder, updateOrder, checkStockAvailability } = useData();
+  const { orders, customers, suppliers, inventory, workers, addOrder, updateOrder, checkStockAvailability } = useData();
   const { authSession } = useAuth();
 
   const isEdit = !!initialOrder;
@@ -200,6 +200,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [reservedItems, setReservedItems] = useState<OrderItemReservation[]>(
     initialOrder?.reservedItems || []
   );
+  const [supplierRentals, setSupplierRentals] = useState<OrderSupplierRental[]>(initialOrder?.supplierRentals || []);
   const [attachmentUrlInput, setAttachmentUrlInput] = useState('');
   const [attachmentType, setAttachmentType] = useState<'contract' | 'image' | 'file'>('contract');
   const [attachments, setAttachments] = useState(initialOrder?.attachments || []);
@@ -273,6 +274,32 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setReservedItems(updated);
   };
 
+  const addSupplierRental = () => {
+    setSupplierRentals((current) => [...current, {
+      id: `supplier_rental_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`,
+      supplierId: '', supplierName: '', serviceType: '', itemDescription: '', quantity: 1, notes: '',
+    }]);
+  };
+
+  const updateSupplierRental = (id: string, changes: Partial<OrderSupplierRental>) => {
+    setSupplierRentals((current) => current.map((line) => line.id === id ? { ...line, ...changes } : line));
+  };
+
+  const selectSupplierForRental = (id: string, supplierId: string) => {
+    const supplier = suppliers.find((item) => item.id === supplierId);
+    if (!supplier) return;
+    const line = supplierRentals.find((item) => item.id === id);
+    updateSupplierRental(id, {
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      // Start with the supplier's registered service, while allowing it to
+      // be customized for the exact service used in this order.
+      serviceType: line?.serviceType || supplier.service || '',
+    });
+  };
+
+  const removeSupplierRental = (id: string) => setSupplierRentals((current) => current.filter((line) => line.id !== id));
+
   const handleAddAttachment = () => {
     if (!attachmentUrlInput.trim()) return;
     setAttachments([
@@ -340,6 +367,13 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       designImageUrl: firstDesignImageUrl,
       designImages: cleanedDesignImages,
       reservedItems,
+      supplierRentals: supplierRentals.map((line) => ({
+        ...line,
+        serviceType: line.serviceType.trim(),
+        itemDescription: line.itemDescription.trim(),
+        notes: line.notes?.trim() || '',
+        quantity: Math.max(1, Number(line.quantity) || 1),
+      })),
       attachments,
       paymentHistory: initialOrder?.paymentHistory || [
         {
@@ -841,6 +875,29 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Section: Suppliers & external rentals */}
+          <div className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-4 dark:border-violet-900/50 dark:bg-violet-950/15">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-1.5 text-xs font-black text-slate-800 dark:text-slate-100"><Wrench className="h-4 w-4 text-violet-600 dark:text-violet-400" /> الموردين والتأجير الخارجي</h3>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">أضف كل بند منفصلًا؛ يمكنك اختيار نفس المورد في أكثر من بند.</p>
+              </div>
+              <button type="button" onClick={addSupplierRental} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-violet-700"><Plus className="h-3.5 w-3.5" /> إضافة بند</button>
+            </div>
+            {supplierRentals.length === 0 ? <p className="rounded-xl border border-dashed border-violet-200 bg-white/70 p-3 text-xs text-slate-500 dark:border-violet-900/60 dark:bg-slate-900/40 dark:text-slate-400">اضغط «إضافة بند» لاختيار المورد وتسجيل الخدمة أو الشيء المستأجر.</p> : <div className="space-y-3">
+              {supplierRentals.map((line, index) => <div key={line.id} className="rounded-xl border border-violet-100 bg-white p-3 dark:border-violet-900/50 dark:bg-slate-900">
+                <div className="mb-3 flex items-center justify-between"><span className="text-[11px] font-black text-violet-700 dark:text-violet-300">بند تأجير #{index + 1}</span><button type="button" onClick={() => removeSupplierRental(line.id)} className="rounded-lg p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30" title="حذف البند"><Trash2 className="h-4 w-4" /></button></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">المورد *<select required value={line.supplierId} onChange={(event) => selectSupplierForRental(line.id, event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-900 outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"><option value="">اختر المورد</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name} — {supplier.service}{supplier.status === 'inactive' ? ' (موقوف)' : ''}</option>)}</select></label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">نوع الخدمة *<input required value={line.serviceType} onChange={(event) => updateSupplierRental(line.id, { serviceType: event.target.value })} placeholder="مثال: إضاءة، ورد، كراسي" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">البند المستأجر *<input required value={line.itemDescription} onChange={(event) => updateSupplierRental(line.id, { itemDescription: event.target.value })} placeholder="مثال: 200 كرسي شيافاري ذهبي" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">الكمية<input type="number" min="1" value={line.quantity || 1} onChange={(event) => updateSupplierRental(line.id, { quantity: Math.max(1, Number(event.target.value) || 1) })} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
+                </div>
+                <label className="mt-3 block text-xs font-bold text-slate-700 dark:text-slate-300">ملاحظات البند<input value={line.notes || ''} onChange={(event) => updateSupplierRental(line.id, { notes: event.target.value })} placeholder="مقاس، لون، موعد استلام أو تفاصيل إضافية" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
+              </div>)}
+            </div>}
           </div>
 
           {/* Section: Design Image / صورة التصميم */}

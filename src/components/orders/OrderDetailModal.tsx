@@ -789,6 +789,23 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             )}
           </div>
 
+          {/* External supplier rentals */}
+          {order.supplierRentals && order.supplierRentals.length > 0 && (
+            <div>
+              <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-3 flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-violet-500" />
+                <span>الموردين والتأجير الخارجي</span>
+              </h4>
+              <div className="divide-y divide-violet-100 overflow-hidden rounded-xl border border-violet-200 dark:divide-violet-900/50 dark:border-violet-900/60">
+                {order.supplierRentals.map((rental) => (
+                  <div key={rental.id} className="bg-violet-50/40 p-3 dark:bg-violet-950/15">
+                    <div className="flex items-start justify-between gap-3"><div><p className="font-bold text-slate-900 dark:text-white">{rental.itemDescription}</p><p className="mt-1 text-xs font-semibold text-violet-700 dark:text-violet-300">{rental.supplierName} · {rental.serviceType}</p>{rental.notes && <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{rental.notes}</p>}</div><span className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-xs font-black text-violet-700 shadow-xs dark:bg-slate-800 dark:text-violet-300">الكمية: {rental.quantity || 1}</span></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Notes */}
           {order.notes && (
             <div>

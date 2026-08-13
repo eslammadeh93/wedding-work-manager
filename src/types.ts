@@ -48,6 +48,18 @@ export interface OrderItemReservation {
   quantity: number;
 }
 
+/** A rented service or item supplied externally for one wedding order. */
+export interface OrderSupplierRental {
+  id: string;
+  supplierId: string;
+  /** Snapshot retained so historical orders remain readable if a contact changes. */
+  supplierName: string;
+  serviceType: string;
+  itemDescription: string;
+  quantity?: number;
+  notes?: string;
+}
+
 export interface DesignImageItem {
   url: string;
   createdAt: string;
@@ -162,6 +174,8 @@ export interface Order {
   orderStatus: OrderStatus;
   notes?: string;
   reservedItems: OrderItemReservation[];
+  /** External rental/service lines. The same supplier may appear on multiple lines. */
+  supplierRentals?: OrderSupplierRental[];
   attachments: OrderAttachment[];
   designImageUrl?: string;
   designImages?: DesignImageItem[];
