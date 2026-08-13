@@ -17,9 +17,14 @@ export const enforceAssignmentContactReset = (before: OrderDocument | undefined,
 
 /** Firestore cannot hide individual fields, so worker documents never contain the phone. */
 export const buildWorkerOrderProjection = (companyId: string, orderId: string, order: OrderDocument): OrderDocument => {
-  // The lead source is commercial/sales data. Remove it server-side instead
-  // of relying on the worker UI to hide it.
-  const { customerPhone: _customerPhone, orderSource: _orderSource, ...safeOrder } = order;
+  // Commercial and procurement data must not be delivered to workers. Remove
+  // it server-side instead of relying on the worker UI to hide it.
+  const {
+    customerPhone: _customerPhone,
+    orderSource: _orderSource,
+    supplierRentals: _supplierRentals,
+    ...safeOrder
+  } = order;
   return {
     ...safeOrder,
     id: orderId,

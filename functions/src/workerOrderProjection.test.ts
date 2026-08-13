@@ -4,10 +4,11 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
 
-test('worker projection never contains the customer phone', () => {
-  const view = buildWorkerOrderProjection('company-1', 'order-1', { workerId: 'worker-1', customerPhone: '+201001112233', workerCanContactCustomer: true, orderSource: 'campaign' });
+test('worker projection never contains customer, commercial, or supplier-rental data', () => {
+  const view = buildWorkerOrderProjection('company-1', 'order-1', { workerId: 'worker-1', customerPhone: '+201001112233', workerCanContactCustomer: true, orderSource: 'campaign', supplierRentals: [{ supplierName: 'Private supplier' }] });
   assert.equal('customerPhone' in view, false);
   assert.equal('orderSource' in view, false);
+  assert.equal('supplierRentals' in view, false);
   assert.equal(view.active, true);
   assert.equal(view.workerCanContactCustomer, true);
 });
