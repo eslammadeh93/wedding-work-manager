@@ -201,6 +201,31 @@ export interface Customer {
   updatedAt?: string;
 }
 
+/** A supplier or external contact the company can hire for an event. */
+export interface Supplier {
+  id: string;
+  /** Tenant owning this contact. The Firestore path remains the security boundary. */
+  companyId?: string;
+  name: string;
+  contactPerson?: string;
+  phone: string;
+  secondaryPhone?: string;
+  whatsapp?: string;
+  service: string;
+  /** Primary city, neighbourhood, or area where this supplier operates. */
+  area: string;
+  /** Additional areas, stored as a clean list for future matching/filtering. */
+  serviceAreas?: string[];
+  address?: string;
+  locationLink?: string;
+  priceNotes?: string;
+  notes?: string;
+  rating?: number;
+  status: 'active' | 'inactive';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InventoryItem {
   id: string;
   /** Present on company-scoped inventory documents. */

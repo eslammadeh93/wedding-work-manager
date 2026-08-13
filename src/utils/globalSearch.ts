@@ -1,4 +1,4 @@
-import type { CategoryItem, Customer, Expense, InventoryItem, Order, Worker } from '../types';
+import type { CategoryItem, Customer, Expense, InventoryItem, Order, Supplier, Worker } from '../types';
 
 export const normalizeSearchText = (value: unknown): string =>
   String(value ?? '').trim().toLowerCase();
@@ -8,6 +8,7 @@ export type SearchRecord<T extends object> = Partial<T> & Record<string, unknown
 export interface GlobalSearchSources {
   orders?: readonly unknown[] | null;
   customers?: readonly unknown[] | null;
+  suppliers?: readonly unknown[] | null;
   workers?: readonly unknown[] | null;
   inventory?: readonly unknown[] | null;
   expenses?: readonly unknown[] | null;
@@ -17,6 +18,7 @@ export interface GlobalSearchSources {
 export interface GlobalSearchResults {
   orders: SearchRecord<Order>[];
   customers: SearchRecord<Customer>[];
+  suppliers: SearchRecord<Supplier>[];
   workers: SearchRecord<Worker>[];
   inventory: SearchRecord<InventoryItem>[];
   expenses: SearchRecord<Expense>[];
@@ -54,6 +56,11 @@ const CUSTOMER_FIELDS = [
   'name', 'phone', 'secondaryPhone', 'email', 'address', 'notes', 'createdAt',
 ] as const;
 
+const SUPPLIER_FIELDS = [
+  'name', 'contactPerson', 'phone', 'secondaryPhone', 'whatsapp', 'service', 'area',
+  'serviceAreas', 'address', 'priceNotes', 'notes', 'status',
+] as const;
+
 const WORKER_FIELDS = [
   'fullName', 'username', 'phone', 'jobTitle', 'loginCode', 'notes', 'status',
 ] as const;
@@ -80,6 +87,7 @@ export const searchGlobalData = (
   return {
     orders: filterRecords<Order>(sources.orders, normalizedQuery, ORDER_FIELDS),
     customers: filterRecords<Customer>(sources.customers, normalizedQuery, CUSTOMER_FIELDS),
+    suppliers: filterRecords<Supplier>(sources.suppliers, normalizedQuery, SUPPLIER_FIELDS),
     workers: filterRecords<Worker>(sources.workers, normalizedQuery, WORKER_FIELDS),
     inventory: filterRecords<InventoryItem>(sources.inventory, normalizedQuery, INVENTORY_FIELDS),
     expenses: filterRecords<Expense>(sources.expenses, normalizedQuery, EXPENSE_FIELDS),

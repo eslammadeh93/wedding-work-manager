@@ -15,6 +15,7 @@ import { localDateString } from '../utils/localDate';
 import {
   Order,
   Customer,
+  Supplier,
   InventoryItem,
   Expense,
   CompanySettings,
@@ -60,6 +61,7 @@ export interface DataContextType {
   orders: Order[];
   workTasks: WorkTask[];
   customers: Customer[];
+  suppliers: Supplier[];
   inventory: InventoryItem[];
   expenses: Expense[];
   workers: Worker[];
@@ -95,6 +97,11 @@ export interface DataContextType {
   addCustomer: (customerData: Omit<Customer, 'id' | 'createdAt'>) => Promise<string>;
   updateCustomer: (id: string, customerData: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+
+  // Suppliers / external contacts
+  addSupplier: (supplierData: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt' | 'companyId'>) => Promise<string>;
+  updateSupplier: (id: string, supplierData: Partial<Supplier>) => Promise<void>;
+  deleteSupplier: (id: string) => Promise<void>;
   
   // Inventory
   addInventoryItem: (itemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'reservedQuantity' | 'availableQuantity'>) => Promise<string>;
@@ -146,6 +153,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orders, setOrders] = useState<Order[]>([]);
   const [workTasks, setWorkTasks] = useState<WorkTask[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
@@ -160,6 +168,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubOrders: () => void = () => {};
     let unsubWorkTasks: () => void = () => {};
     let unsubCustomers: () => void = () => {};
+    let unsubSuppliers: () => void = () => {};
     let unsubInventory: () => void = () => {};
     let unsubExpenses: () => void = () => {};
     let unsubWorkers: () => void = () => {};
@@ -168,7 +177,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubActivityLogs: () => void = () => {};
 
     if (!profile) {
-      setOrders([]); setWorkTasks([]); setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
+      setOrders([]); setWorkTasks([]); setWorkers([]); setCustomers([]); setSuppliers([]); setInventory([]); setExpenses([]);
       setActivityLogs([]); setNotifications([]); setLoading(false);
       return () => {};
     }
@@ -195,7 +204,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubSettings = onSnapshot(doc(db, 'settings', 'company'), (docSnap) => {
         setSettings(docSnap.exists() ? docSnap.data() as CompanySettings : initialCompanySettings);
       });
-      setWorkers([]); setCustomers([]); setInventory([]); setExpenses([]);
+      setWorkers([]); setCustomers([]); setSuppliers([]); setInventory([]); setExpenses([]);
       setActivityLogs([]); setCategories(defaultCategories); setNotifications([]); setLoading(false);
       return () => { unsubOrders(); unsubWorkTasks(); unsubSettings(); };
     }
@@ -258,6 +267,11 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else {
           setCustomers([]);
         }
+      });
+
+      unsubSuppliers = onSnapshot(collection(db, 'suppliers'), (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Supplier));
+        setSuppliers(list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))));
       });
 
       // Listener for Inventory
@@ -326,6 +340,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setWorkTasks([]);
       setWorkers([]);
       setCustomers([]);
+      setSuppliers([]);
       setInventory([]);
       setExpenses([]);
       setSettings(initialCompanySettings);
@@ -340,6 +355,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubWorkTasks();
       unsubWorkers();
       unsubCustomers();
+      unsubSuppliers();
       unsubInventory();
       unsubExpenses();
       unsubSettings();
@@ -661,6 +677,30 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomers((prev) => prev.filter((c) => c.id !== id));
   };
 
+  // Supplier / external contact operations
+  const addSupplier = async (supplierData: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt' | 'companyId'>): Promise<string> => {
+    const id = createRecordId('sup');
+    const now = new Date().toISOString();
+    const supplier: Supplier = { ...sanitizeData(supplierData), id, createdAt: now, updatedAt: now };
+    try { await setDoc(doc(db, 'suppliers', id), supplier); }
+    catch (error) { console.warn('Saving supplier locally:', error); }
+    setSuppliers((current) => upsertById(current, supplier));
+    return id;
+  };
+
+  const updateSupplier = async (id: string, supplierData: Partial<Supplier>) => {
+    const updates = { ...sanitizeData(supplierData), updatedAt: new Date().toISOString() };
+    try { await setDoc(doc(db, 'suppliers', id), updates, { merge: true }); }
+    catch (error) { console.warn('Updating supplier locally:', error); }
+    setSuppliers((current) => current.map((supplier) => supplier.id === id ? { ...supplier, ...updates } : supplier));
+  };
+
+  const deleteSupplier = async (id: string) => {
+    try { await deleteDoc(doc(db, 'suppliers', id)); }
+    catch (error) { console.warn('Deleting supplier locally:', error); }
+    setSuppliers((current) => current.filter((supplier) => supplier.id !== id));
+  };
+
   // Inventory Operations
   const addInventoryItem = async (
     itemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt' | 'reservedQuantity' | 'availableQuantity'>
@@ -775,6 +815,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await setDoc(doc(db, 'settings', 'company'), initialCompanySettings);
       setSettings(initialCompanySettings);
       setCustomers([]);
+      setSuppliers([]);
       setOrders([]);
       setInventory([]);
       setExpenses([]);
@@ -793,6 +834,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       exportDate: new Date().toISOString(),
       settings,
       customers,
+      suppliers,
       inventory,
       orders,
       expenses,
@@ -816,6 +858,10 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (Array.isArray(parsed.customers)) {
           for (const c of parsed.customers) await setDoc(doc(db, 'customers', c.id), c);
           setCustomers(parsed.customers);
+        }
+        if (Array.isArray(parsed.suppliers)) {
+          for (const supplier of parsed.suppliers) await setDoc(doc(db, 'suppliers', supplier.id), supplier);
+          setSuppliers(parsed.suppliers);
         }
         if (Array.isArray(parsed.inventory)) {
           for (const i of parsed.inventory) await setDoc(doc(db, 'inventory', i.id), i);
@@ -907,6 +953,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         orders,
         workTasks,
         customers,
+        suppliers,
         inventory,
         expenses,
         workers,
@@ -934,6 +981,9 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addCustomer,
         updateCustomer,
         deleteCustomer,
+        addSupplier,
+        updateSupplier,
+        deleteSupplier,
         addInventoryItem,
         updateInventoryItem,
         deleteInventoryItem,

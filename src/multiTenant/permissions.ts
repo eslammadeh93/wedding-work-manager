@@ -12,6 +12,8 @@ export const PERMISSIONS = [
   'company:orders:write',
   'company:customers:read',
   'company:customers:write',
+  'company:suppliers:read',
+  'company:suppliers:write',
   'company:workers:read',
   'company:workers:write',
   'company:inventory:read',
@@ -35,7 +37,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 /** Arabic labels and grouping used by the employee-permissions editor. */
 export const COMPANY_PERMISSION_GROUPS: ReadonlyArray<{ title: string; permissions: readonly Permission[] }> = [
   { title: 'لوحة العمل', permissions: ['company:dashboard:read', 'company:calendar:read', 'company:notifications:read'] },
-  { title: 'العملاء والطلبات', permissions: ['company:customers:read', 'company:customers:write', 'company:orders:read', 'company:orders:write'] },
+  { title: 'العملاء والطلبات', permissions: ['company:customers:read', 'company:customers:write', 'company:suppliers:read', 'company:suppliers:write', 'company:orders:read', 'company:orders:write'] },
   { title: 'التشغيل والمخزون', permissions: ['company:workers:read', 'company:workers:write', 'company:worker_performance:read', 'company:inventory:read', 'company:inventory:write', 'company:categories:read', 'company:categories:write'] },
   { title: 'المالية والتقارير', permissions: ['company:expenses:read', 'company:expenses:write', 'company:reports:read', 'company:activity_logs:read'] },
   { title: 'الإدارة', permissions: ['company:settings:read', 'company:settings:write', 'company:members:read', 'company:members:write'] },
@@ -43,12 +45,13 @@ export const COMPANY_PERMISSION_GROUPS: ReadonlyArray<{ title: string; permissio
 
 export const PERMISSION_LABELS: Readonly<Record<Permission, string>> = {
   'platform:companies:read': 'عرض الشركات', 'platform:companies:write': 'إدارة الشركات', 'platform:users:read': 'عرض مستخدمي المنصة', 'platform:users:write': 'إدارة مستخدمي المنصة', 'platform:audit_logs:read': 'سجل المنصة',
-  'company:dashboard:read': 'لوحة التحكم', 'company:calendar:read': 'التقويم', 'company:orders:read': 'عرض الطلبات', 'company:orders:write': 'إضافة وتعديل الطلبات', 'company:customers:read': 'عرض العملاء', 'company:customers:write': 'إضافة وتعديل العملاء', 'company:workers:read': 'عرض العمال', 'company:workers:write': 'إدارة العمال', 'company:worker_performance:read': 'متابعة أداء العمال (تتطلب عرض الطلبات)', 'company:inventory:read': 'عرض المخزن', 'company:inventory:write': 'إدارة المخزن', 'company:expenses:read': 'عرض المالية والمصروفات', 'company:expenses:write': 'إدارة المالية والمصروفات', 'company:categories:read': 'عرض التصنيفات', 'company:categories:write': 'إدارة التصنيفات', 'company:activity_logs:read': 'سجل النشاط', 'company:reports:read': 'التقارير', 'company:settings:read': 'عرض الإعدادات', 'company:settings:write': 'إدارة الإعدادات', 'company:members:read': 'عرض الموظفين', 'company:members:write': 'إدارة الموظفين', 'company:notifications:read': 'الإشعارات',
+  'company:dashboard:read': 'لوحة التحكم', 'company:calendar:read': 'التقويم', 'company:orders:read': 'عرض الطلبات', 'company:orders:write': 'إضافة وتعديل الطلبات', 'company:customers:read': 'عرض العملاء', 'company:customers:write': 'إضافة وتعديل العملاء', 'company:suppliers:read': 'عرض الموردين وجهات الاتصال', 'company:suppliers:write': 'إدارة الموردين وجهات الاتصال', 'company:workers:read': 'عرض العمال', 'company:workers:write': 'إدارة العمال', 'company:worker_performance:read': 'متابعة أداء العمال (تتطلب عرض الطلبات)', 'company:inventory:read': 'عرض المخزن', 'company:inventory:write': 'إدارة المخزن', 'company:expenses:read': 'عرض المالية والمصروفات', 'company:expenses:write': 'إدارة المالية والمصروفات', 'company:categories:read': 'عرض التصنيفات', 'company:categories:write': 'إدارة التصنيفات', 'company:activity_logs:read': 'سجل النشاط', 'company:reports:read': 'التقارير', 'company:settings:read': 'عرض الإعدادات', 'company:settings:write': 'إدارة الإعدادات', 'company:members:read': 'عرض الموظفين', 'company:members:write': 'إدارة الموظفين', 'company:notifications:read': 'الإشعارات',
 };
 
 const companyAdminPermissions: readonly Permission[] = [
   'company:dashboard:read', 'company:calendar:read', 'company:orders:read', 'company:orders:write',
   'company:customers:read', 'company:customers:write', 'company:workers:read',
+  'company:suppliers:read', 'company:suppliers:write',
   'company:workers:write', 'company:worker_performance:read', 'company:inventory:read', 'company:inventory:write',
   'company:expenses:read', 'company:expenses:write', 'company:categories:read',
   'company:categories:write', 'company:activity_logs:read', 'company:reports:read',
@@ -64,7 +67,7 @@ export const PERMISSION_MATRIX: Readonly<Record<SaaSRole, readonly Permission[]>
   platform_read_only: ['platform:companies:read', 'platform:users:read', 'platform:audit_logs:read'],
   company_super_admin: companyAdminPermissions,
   manager: companyAdminPermissions.filter((permission) => !permission.startsWith('company:expenses:')),
-  employee: ['company:dashboard:read', 'company:calendar:read', 'company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write', 'company:inventory:read', 'company:notifications:read'],
+  employee: ['company:dashboard:read', 'company:calendar:read', 'company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write', 'company:suppliers:read', 'company:suppliers:write', 'company:inventory:read', 'company:notifications:read'],
   worker: ['company:orders:read', 'company:worker_performance:read', 'company:notifications:read'],
 };
 

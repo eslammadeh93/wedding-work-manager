@@ -8,6 +8,7 @@ import {
   Search,
   Tags,
   Users,
+  ContactRound,
   X,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -77,13 +78,13 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   onNavigate,
 }) => {
   const { t, language } = useLanguage();
-  const { orders, customers, workers, inventory, expenses, categories } = useData();
+  const { orders, customers, suppliers, workers, inventory, expenses, categories } = useData();
   const [query, setQuery] = useState('');
 
   const normalizedQuery = normalizeSearchText(query);
   const results = useMemo(
-    () => searchGlobalData({ orders, customers, workers, inventory, expenses, categories }, normalizedQuery),
-    [orders, customers, workers, inventory, expenses, categories, normalizedQuery],
+    () => searchGlobalData({ orders, customers, suppliers, workers, inventory, expenses, categories }, normalizedQuery),
+    [orders, customers, suppliers, workers, inventory, expenses, categories, normalizedQuery],
   );
 
   if (!isOpen) return null;
@@ -91,6 +92,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   const totalResults =
     results.orders.length +
     results.customers.length +
+    results.suppliers.length +
     results.workers.length +
     results.inventory.length +
     results.expenses.length +
@@ -166,6 +168,20 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 {results.customers.slice(0, 5).map((customer, index) => (
                   <button type="button" key={recordId(customer.id) ?? `customer-${index}`} onClick={() => navigate('customers', customer.id)} className="w-full text-start p-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-blue-500/10 dark:hover:bg-blue-500/20 rounded-xl cursor-pointer flex items-center justify-between border border-slate-100 dark:border-slate-800 transition-colors">
                     <div><span className="font-bold text-sm text-slate-900 dark:text-white">{firstText(customer.name, customer.phone, customer.email)}</span><p className="text-xs text-slate-400">{firstText(customer.phone, customer.email, customer.address)}</p></div>
+                    <ArrowRight className="w-4 h-4 text-slate-400 rtl:rotate-180" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {results.suppliers.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-2"><ContactRound className="w-4 h-4 text-amber-500" /><span>جهات الاتصال والموردين ({results.suppliers.length})</span></div>
+              <div className="space-y-1.5">
+                {results.suppliers.slice(0, 5).map((supplier, index) => (
+                  <button type="button" key={recordId(supplier.id) ?? `supplier-${index}`} onClick={() => navigate('suppliers', supplier.id)} className="w-full text-start p-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-amber-500/10 dark:hover:bg-amber-500/20 rounded-xl cursor-pointer flex items-center justify-between border border-slate-100 dark:border-slate-800 transition-colors">
+                    <div><span className="font-bold text-sm text-slate-900 dark:text-white">{firstText(supplier.name, supplier.contactPerson, supplier.phone)}</span><p className="text-xs text-slate-400">{firstText(supplier.service, supplier.area, supplier.phone)}</p></div>
                     <ArrowRight className="w-4 h-4 text-slate-400 rtl:rotate-180" />
                   </button>
                 ))}

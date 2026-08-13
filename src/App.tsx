@@ -23,6 +23,7 @@ const DashboardModule = lazy(() => import('./components/dashboard/DashboardModul
 const OrdersModule = lazy(() => import('./components/orders/OrdersModule').then(({ OrdersModule }) => ({ default: OrdersModule })));
 const WorkersModule = lazy(() => import('./components/workers/WorkersModule').then(({ WorkersModule }) => ({ default: WorkersModule })));
 const CustomersModule = lazy(() => import('./components/customers/CustomersModule').then(({ CustomersModule }) => ({ default: CustomersModule })));
+const SuppliersModule = lazy(() => import('./components/suppliers/SuppliersModule').then(({ SuppliersModule }) => ({ default: SuppliersModule })));
 const InventoryModule = lazy(() => import('./components/inventory/InventoryModule').then(({ InventoryModule }) => ({ default: InventoryModule })));
 const ExpensesModule = lazy(() => import('./components/expenses/ExpensesModule').then(({ ExpensesModule }) => ({ default: ExpensesModule })));
 const CalendarModule = lazy(() => import('./components/calendar/CalendarModule').then(({ CalendarModule }) => ({ default: CalendarModule })));
@@ -43,13 +44,13 @@ function UnauthorizedCompanyMembers() {
 }
 
 const tabPermission: Partial<Record<ActiveTab, Permission>> = {
-  dashboard: 'company:dashboard:read', orders: 'company:orders:read', customers: 'company:customers:read',
+  dashboard: 'company:dashboard:read', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
   settings: 'company:settings:read', members: 'company:members:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -62,6 +63,7 @@ const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<
   workers: ['super_admin', 'admin', 'manager'],
   workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
   customers: ['super_admin', 'admin', 'manager', 'employee'],
+  suppliers: ['super_admin', 'admin', 'manager', 'employee'],
   inventory: ['super_admin', 'admin', 'manager'],
   expenses: ['super_admin'],
   calendar: ['super_admin', 'admin', 'manager', 'employee'],
@@ -109,6 +111,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'متابعة الأداء';
       case 'customers':
         return 'العملاء';
+      case 'suppliers':
+        return 'جهات الاتصال والموردين';
       case 'inventory':
         return 'المخزن';
       case 'expenses':
@@ -140,6 +144,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Worker Performance';
       case 'customers':
         return 'Customers';
+      case 'suppliers':
+        return 'Supplier Contacts';
       case 'inventory':
         return 'Inventory';
       case 'expenses':
@@ -233,7 +239,7 @@ function AppContent() {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
-      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'calendar'];
+      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'suppliers', 'calendar'];
       if (!allowedEmployeeTabs.includes(activeTab)) {
         setActiveTab('orders');
       }
@@ -357,6 +363,7 @@ function AppContent() {
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
             {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}
             {activeTab === 'customers' && <CompanyTabGuard tab="customers"><CustomersModule /></CompanyTabGuard>}
+            {activeTab === 'suppliers' && <CompanyTabGuard tab="suppliers"><SuppliersModule /></CompanyTabGuard>}
             {activeTab === 'inventory' && <CompanyTabGuard tab="inventory"><InventoryModule /></CompanyTabGuard>}
             {activeTab === 'expenses' && <CompanyTabGuard tab="expenses"><ExpensesModule /></CompanyTabGuard>}
             {activeTab === 'calendar' && <CompanyTabGuard tab="calendar"><CalendarModule /></CompanyTabGuard>}

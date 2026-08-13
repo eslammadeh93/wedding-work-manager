@@ -11,6 +11,7 @@ import {
   HardHat,
   UsersRound,
   UserRound,
+  ContactRound,
   Wallet,
   Target,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ export type ActiveTab =
   | 'orders'
   | 'workers'
   | 'customers'
+  | 'suppliers'
   | 'inventory'
   | 'expenses'
   | 'calendar'
@@ -74,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', group: 'workspace', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
     { id: 'orders', group: 'sales', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
     { id: 'customers', group: 'sales', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
+    { id: 'suppliers', group: 'sales', label: language === 'ar' ? 'جهات الاتصال والموردين' : 'Supplier Contacts', icon: ContactRound, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:suppliers:read' },
     { id: 'workers', group: 'operations', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
     { id: 'workerPerformance', group: 'operations', label: language === 'ar' ? (userRole === 'worker' ? 'متابعة أدائي' : 'متابعة أداء العمال') : (userRole === 'worker' ? 'My Performance' : 'Worker Performance'), icon: Target, roles: ['super_admin', 'admin', 'manager', 'worker'], permission: 'company:worker_performance:read' },
     { id: 'inventory', group: 'operations', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },

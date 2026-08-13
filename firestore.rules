@@ -52,6 +52,8 @@ service cloud.firestore {
         || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'customers:write' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'suppliers:read' && memberRole(companyId) in ['manager', 'employee'])
+        || (permission == 'suppliers:write' && memberRole(companyId) in ['manager', 'employee'])
         || (permission == 'workers:read' && memberRole(companyId) == 'manager')
         || (permission == 'workers:write' && memberRole(companyId) == 'manager')
         || (permission == 'inventory:read' && memberRole(companyId) in ['manager', 'employee'])
@@ -227,6 +229,12 @@ service cloud.firestore {
         allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId);
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
         allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write');
+      }
+      match /suppliers/{supplierId} {
+        allow read: if hasCompanyPermission(companyId, 'suppliers:read');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'suppliers:write') && companyIdMatchesPath(companyId);
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'suppliers:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
+        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'suppliers:write');
       }
       match /workers/{workerId} {
         // A document containing loginCodeHash is deliberately unreadable: rules cannot hide fields.
