@@ -324,20 +324,32 @@ export const ReportsModule: React.FC = () => {
           <span>{language === 'ar' ? 'حسابات رأس المال والمصروفات' : 'Capital & Operating Expenses'}</span>
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-5 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('totalCapital')}</span>
-            <MoneyValue amount={monthCapital} className="mt-2 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400" />
-            <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Monthly capital</span>
+          <div className="p-5 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 sm:block">
+            <div className="flex w-full items-center justify-between gap-3 text-right sm:block">
+              <div className="min-w-0">
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase block">{t('totalCapital')}</span>
+                <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Monthly capital</span>
+              </div>
+              <MoneyValue amount={monthCapital} className="shrink-0 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400 sm:mt-2" />
+            </div>
           </div>
-          <div className="p-5 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/50">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('totalGeneralExpenses')}</span>
-            <MoneyValue amount={monthGeneralExpenses} className="mt-2 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-rose-600 dark:text-rose-400" />
-            <span className="text-[11px] text-rose-500 font-medium mt-1 block">Company operating expenses</span>
+          <div className="p-5 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/50 sm:block">
+            <div className="flex w-full items-center justify-between gap-3 text-right sm:block">
+              <div className="min-w-0">
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase block">{t('totalGeneralExpenses')}</span>
+                <span className="text-[11px] text-rose-500 font-medium mt-1 block">Company operating expenses</span>
+              </div>
+              <MoneyValue amount={monthGeneralExpenses} className="shrink-0 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-rose-600 dark:text-rose-400 sm:mt-2" />
+            </div>
           </div>
-          <div className="p-5 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/50">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{t('currentCashBalance')}</span>
-            <MoneyValue amount={monthCashBalance} className={`mt-2 text-[clamp(1.25rem,5vw,1.5rem)] font-black ${monthCashBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} />
-            <span className="text-[11px] text-slate-400 font-medium mt-1 block">Capital − expenses</span>
+          <div className="p-5 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/50 sm:block">
+            <div className="flex w-full items-center justify-between gap-3 text-right sm:block">
+              <div className="min-w-0">
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase block">{t('currentCashBalance')}</span>
+                <span className="text-[11px] text-slate-400 font-medium mt-1 block">Capital − expenses</span>
+              </div>
+              <MoneyValue amount={monthCashBalance} className={`shrink-0 text-[clamp(1.25rem,5vw,1.5rem)] font-black sm:mt-2 ${monthCashBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} />
+            </div>
           </div>
         </div>
       </section>
