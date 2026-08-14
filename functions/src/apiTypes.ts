@@ -4,7 +4,8 @@ export type ManagedRole = 'manager' | 'employee' | 'worker';
 export type CompanyRole = ManagedRole | 'company_super_admin';
 export type CompanyPermission =
   | 'company:dashboard:read' | 'company:calendar:read' | 'company:orders:read' | 'company:orders:write'
-  | 'company:customers:read' | 'company:customers:write' | 'company:workers:read' | 'company:workers:write'
+  | 'company:customers:read' | 'company:customers:write' | 'company:suppliers:read' | 'company:suppliers:write'
+  | 'company:workers:read' | 'company:workers:write'
   | 'company:inventory:read' | 'company:inventory:write' | 'company:expenses:read' | 'company:expenses:write'
   | 'company:categories:read' | 'company:categories:write' | 'company:activity_logs:read' | 'company:worker_performance:read' | 'company:reports:read'
   | 'company:settings:read' | 'company:settings:write' | 'company:members:read' | 'company:members:write' | 'company:notifications:read';

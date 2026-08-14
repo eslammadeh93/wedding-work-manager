@@ -10,8 +10,8 @@ import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, 
 const projectId = 'wedding-manager-rules';
 let env: RulesTestEnvironment;
 const company = (id: string) => `companies/${id}`;
-const member = (companyId: string, uid: string, role: string, status = 'active', workerId?: string) =>
-  ({ uid, companyId, role, status, ...(workerId ? { workerId } : {}) });
+const member = (companyId: string, uid: string, role: string, status = 'active', workerId?: string, permissions?: string[]) =>
+  ({ uid, companyId, role, status, ...(workerId ? { workerId } : {}), ...(permissions ? { permissions } : {}) });
 
 async function seed() {
   await env.withSecurityRulesDisabled(async context => {
@@ -25,6 +25,7 @@ async function seed() {
       setDoc(doc(db, `${company('companyA')}/members/companyASuperAdmin`), member('companyA', 'companyASuperAdmin', 'company_super_admin')),
       setDoc(doc(db, `${company('companyA')}/members/companyAManager`), member('companyA', 'companyAManager', 'manager')),
       setDoc(doc(db, `${company('companyA')}/members/companyAEmployee`), member('companyA', 'companyAEmployee', 'employee')),
+      setDoc(doc(db, `${company('companyA')}/members/companyAExplicitEmployee`), member('companyA', 'companyAExplicitEmployee', 'employee', 'active', undefined, ['company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write'])),
       setDoc(doc(db, `${company('companyA')}/members/companyAWorker1`), member('companyA', 'companyAWorker1', 'worker', 'active', 'worker1')),
       setDoc(doc(db, `${company('companyA')}/members/companyAWorker2`), member('companyA', 'companyAWorker2', 'worker', 'active', 'worker2')),
       setDoc(doc(db, `${company('companyA')}/members/companyADisabledMember`), member('companyA', 'companyADisabledMember', 'employee', 'disabled')),
@@ -84,6 +85,7 @@ test('5 super admin reads company orders', async () => assertSucceeds(getDoc(doc
 test('6 super admin creates an order in its company', async () => assertSucceeds(setDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/orders/new`), { companyId: 'companyA' })));
 test('7 manager keeps operational access but company finance is owner-only', async () => { await assertSucceeds(setDoc(doc(db('companyAManager'), `${company('companyA')}/orders/manager`), { companyId: 'companyA' })); await assertFails(getDoc(doc(db('companyAManager'), `${company('companyA')}/expenses/expenseA`))); await assertSucceeds(getDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/expenses/expenseA`))); });
 test('8 employee reads and writes orders and customers per matrix', async () => { await assertSucceeds(getDoc(doc(db('companyAEmployee'), `${company('companyA')}/customers/customerA`))); await assertSucceeds(setDoc(doc(db('companyAEmployee'), `${company('companyA')}/orders/employee`), { companyId: 'companyA' })); });
+test('8b employee with explicit company-prefixed permissions reads and writes only granted data', async () => { await assertSucceeds(getDoc(doc(db('companyAExplicitEmployee'), `${company('companyA')}/customers/customerA`))); await assertSucceeds(setDoc(doc(db('companyAExplicitEmployee'), `${company('companyA')}/orders/explicit-employee`), { companyId: 'companyA' })); await assertFails(getDoc(doc(db('companyAExplicitEmployee'), `${company('companyA')}/inventory/itemA`))); });
 test('9 employee cannot write inventory', async () => assertFails(updateDoc(doc(db('companyAEmployee'), `${company('companyA')}/inventory/itemA`), { quantity: 3 })));
 test('10 worker cannot read canonical order containing private phone', async () => assertFails(getDoc(doc(db('companyAWorker1'), `${company('companyA')}/orders/orderA`))));
 // The deployed source rule has no resource.data.active predicate. This guards
