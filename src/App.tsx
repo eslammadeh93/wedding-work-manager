@@ -340,7 +340,7 @@ function AppContent() {
         {/* Content Area */}
         <main className="flex-1 p-3 pb-24 sm:p-6 lg:p-8 min-w-0">
           {/* Mobile hamburger menu button */}
-          <div className="lg:hidden mb-3.5">
+          <div className="min-[1700px]:hidden mb-3.5">
             <button
               onClick={() => setIsSidebarOpen(true)}
               className="px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-slate-200 shadow-2xs font-extrabold text-xs flex items-center gap-2 cursor-pointer min-h-[44px] hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"

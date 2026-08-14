@@ -102,17 +102,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 lg:hidden"
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 min-[1700px]:hidden"
           onClick={onClose}
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:sticky top-0 lg:top-14 sm:lg:top-16 ltr:left-0 rtl:right-0 z-50 lg:z-10 h-screen lg:h-[calc(100vh-3.5rem)] sm:lg:h-[calc(100vh-4rem)] w-64 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-transform duration-300 ease-in-out ${
+        className={`fixed min-[1700px]:sticky top-0 min-[1700px]:top-14 sm:min-[1700px]:top-16 ltr:left-0 rtl:right-0 z-50 min-[1700px]:z-10 h-screen min-[1700px]:h-[calc(100vh-3.5rem)] sm:min-[1700px]:h-[calc(100vh-4rem)] w-64 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-transform duration-300 ease-in-out ${
           isOpen
             ? 'translate-x-0'
-            : 'ltr:-translate-x-full rtl:translate-x-full lg:translate-x-0'
+            : 'ltr:-translate-x-full rtl:translate-x-full min-[1700px]:translate-x-0'
         }`}
       >
         {/* Mobile / Sidebar Top Header */}
@@ -129,7 +129,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
           <button
             onClick={onClose}
-            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
+            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl min-[1700px]:hidden transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>

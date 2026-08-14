@@ -34,8 +34,8 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
 
   const isDesktop = variant === 'desktop';
   const containerClass = isDesktop
-    ? 'hidden lg:grid grid-cols-3 gap-1.5 w-full lg:w-auto lg:min-w-[345px]'
-    : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg lg:hidden';
+    ? 'hidden min-[1700px]:grid grid-cols-3 gap-1.5 w-full min-[1700px]:w-auto min-[1700px]:min-w-[345px]'
+    : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg min-[1700px]:hidden';
   const contentClass = isDesktop
     ? 'grid grid-cols-3 gap-1.5'
     : 'mx-auto grid max-w-lg grid-cols-3 gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]';
