@@ -49,7 +49,6 @@ export const ReportsModule: React.FC = () => {
 
   const monthCapital = monthCapitalList.reduce((sum, e) => sum + e.amount, 0);
   const monthGeneralExpenses = monthGeneralExpensesList.reduce((sum, e) => sum + e.amount, 0);
-  const monthCashBalance = monthCapital - monthGeneralExpenses;
   const cashSummary = calculateMonthlyCash(orders, expenses, selectedYear, selectedMonth);
   const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' });
 
@@ -346,9 +345,9 @@ export const ReportsModule: React.FC = () => {
             <div className="flex w-full items-center justify-between gap-3 text-right sm:block">
               <div className="min-w-0">
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase block">{t('currentCashBalance')}</span>
-                <span className="text-[11px] text-slate-400 font-medium mt-1 block">Capital − expenses</span>
+                <span className="text-[11px] text-slate-400 font-medium mt-1 block">{language === 'ar' ? 'تحصيلات + رأس مال − مصروفات وتنفيذ' : 'Collections + capital − operating and order costs'}</span>
               </div>
-              <MoneyValue amount={monthCashBalance} className={`shrink-0 text-[clamp(1.25rem,5vw,1.5rem)] font-black sm:mt-2 ${monthCashBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} />
+              <MoneyValue amount={cashSummary.expectedSafeBalance} className={`shrink-0 text-[clamp(1.25rem,5vw,1.5rem)] font-black sm:mt-2 ${cashSummary.expectedSafeBalance >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} />
             </div>
           </div>
         </div>

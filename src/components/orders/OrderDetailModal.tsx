@@ -156,7 +156,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(t('confirmDelete')) || isDeleting) return;
+    if (!window.confirm('سيُنقل الأوردر إلى سلة المحذوفات لمدة 30 يومًا وسيتم تحرير مخزونه المحجوز. هل تريد المتابعة؟') || isDeleting) return;
     try {
       setIsDeleting(true);
       await deleteOrder(order.id);

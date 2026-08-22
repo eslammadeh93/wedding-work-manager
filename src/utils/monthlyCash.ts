@@ -61,6 +61,42 @@ export interface MonthlyCashSummary {
   expectedSafeBalance: number;
 }
 
+/**
+ * The actual amount expected in the company safe at the end of a given day.
+ * This is intentionally date-based: future-dated payments and costs must not
+ * affect the cash figure shown in the dashboard today.
+ */
+export const calculateSafeBalanceToDate = (
+  orders: Order[],
+  financeEntries: CompanyFinanceEntry[],
+  asOf = new Date(),
+): number => {
+  const asOfDate = `${asOf.getFullYear()}-${String(asOf.getMonth() + 1).padStart(2, '0')}-${String(asOf.getDate()).padStart(2, '0')}`;
+  const isOnOrBefore = (value: string | null) => Boolean(value && value <= asOfDate);
+  const allCollections = orders
+    .filter((order) => order.orderStatus !== 'cancelled')
+    .flatMap(orderCashCollections);
+
+  const collected = allCollections
+    .filter((collection) => isOnOrBefore(dateKey(collection.date)))
+    .reduce((total, collection) => total + positiveAmount(collection.amount), 0);
+  const capital = financeEntries
+    .filter((entry) => isCapital(entry) && isOnOrBefore(dateKey(entry.date)))
+    .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
+  const operatingExpenses = financeEntries
+    .filter((entry) => !isCapital(entry) && isOnOrBefore(dateKey(entry.date)))
+    .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
+  const completedOrderCosts = orders
+    .filter((order) => order.orderStatus === 'completed' && isOnOrBefore(dateKey(order.eventDate || order.weddingDate)))
+    .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
+  const upcomingOrderOtherExpenses = orders
+    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
+      && isOnOrBefore(dateKey(order.bookingDate || order.createdAt)))
+    .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
+
+  return collected + capital - operatingExpenses - completedOrderCosts - upcomingOrderOtherExpenses;
+};
+
 const dateKey = (value?: string): string | null => {
   if (!value) return null;
   const matched = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -236,13 +272,9 @@ export const calculateMonthlyCash = (
   const orderCashNet = collectedFromCompletedOrders + advancesFromUpcomingOrders + retainedCancelledDeposits - completedOrderCosts - upcomingOrderOtherExpenses;
   const cashMovement = orderCashNet + capitalAdded - operatingExpenses;
 
+  const monthEnd = new Date(year, month + 1, 0);
+  const expectedSafeBalance = calculateSafeBalanceToDate(orders, financeEntries, monthEnd);
   const collectedToDate = sum(allCollections.filter((collection) => onOrBeforeMonthEnd(dateKey(collection.date), year, month)));
-  const capitalToDate = financeEntries
-    .filter((entry) => isCapital(entry) && onOrBeforeMonthEnd(dateKey(entry.date), year, month))
-    .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
-  const operatingExpensesToDate = financeEntries
-    .filter((entry) => !isCapital(entry) && onOrBeforeMonthEnd(dateKey(entry.date), year, month))
-    .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
   const completedCostsToDate = orders
     .filter((order) => order.orderStatus === 'completed' && onOrBeforeMonthEnd(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
@@ -278,6 +310,6 @@ export const calculateMonthlyCash = (
     upcomingOrderAdvancesNet,
     upcomingOrderDepositsNet,
     upcomingOrderDepositsPaid: upcomingOrderDeposits,
-    expectedSafeBalance: collectedToDate + capitalToDate - operatingExpensesToDate - completedCostsToDate - upcomingOrderOtherExpensesToDate,
+    expectedSafeBalance,
   };
 };

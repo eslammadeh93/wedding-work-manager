@@ -1022,7 +1022,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                               </button>
                               <button
                                 onClick={async () => {
-                                  if (window.confirm(t('confirmDelete'))) {
+                                  if (window.confirm('سيُنقل الأوردر إلى سلة المحذوفات لمدة 30 يومًا وسيتم تحرير مخزونه المحجوز. هل تريد المتابعة؟')) {
                                     await deleteOrder(ord.id);
                                   }
                                 }}

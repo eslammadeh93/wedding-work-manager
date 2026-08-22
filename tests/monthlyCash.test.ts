@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateMonthlyCash } from '../src/utils/monthlyCash';
+import { calculateMonthlyCash, calculateSafeBalanceToDate } from '../src/utils/monthlyCash';
 import type { Order } from '../src/types';
 
 const order = (changes: Partial<Order>): Order => ({
@@ -85,4 +85,18 @@ test('keeps a retained cancelled deposit in finance, separate from upcoming orde
   assert.equal(result.orderCashNet, 500);
   assert.equal(result.orderCashBalanceToDate, 500);
   assert.equal(result.collections[0]?.isRetainedDeposit, true);
+});
+
+test('calculates the current safe balance from collections, capital, and recognised costs only', () => {
+  const orders = [
+    order({ id: 'completed', orderStatus: 'completed', eventDate: '2026-08-20', weddingDate: '2026-08-20', totalPaid: 1_000, paymentHistory: [{ id: 'paid', amount: 1_000, date: '2026-08-15', method: 'cash' }], workerCost: 200, transportationCost: 50, otherExpenses: 25 }),
+    order({ id: 'upcoming', bookingDate: '2026-08-10', totalPaid: 400, paymentHistory: [{ id: 'deposit', amount: 400, date: '2026-08-10', method: 'cash' }], otherExpenses: 75 }),
+  ];
+  const finance = [
+    { id: 'capital', type: 'capital' as const, category: 'رأس مال', amount: 300, date: '2026-08-05', createdAt: '' },
+    { id: 'expense', type: 'expense' as const, category: 'إيجار', amount: 100, date: '2026-08-12', createdAt: '' },
+  ];
+
+  assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 10)), 625);
+  assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 31)), 1_250);
 });

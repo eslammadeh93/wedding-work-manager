@@ -168,7 +168,7 @@ export const ExpensesModule: React.FC = () => {
             </div>
           </div>
           <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
-            {language === 'ar' ? 'رأس المال - المصروفات' : 'Capital - Expenses'}
+            {language === 'ar' ? 'تحصيلات + رأس مال − مصروفات وتنفيذ' : 'Collections + capital − operating and order costs'}
           </span>
         </div>
       </div>

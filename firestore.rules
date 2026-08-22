@@ -81,6 +81,9 @@ service cloud.firestore {
     function protectedOperationalFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['id', 'companyId', 'createdBy', 'createdAt']);
     }
+    function recycleBinUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt', 'purgeAt', 'updatedAt']);
+    }
     function safeWorkerDocument() { return !('loginCodeHash' in resource.data); }
     function validInventory() {
       return (!('quantity' in request.resource.data) || request.resource.data.quantity >= 0)
@@ -184,7 +187,8 @@ service cloud.firestore {
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
           && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
           && workerContactUpdateAllowed(companyId) && validOrderSource();
-        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write');
+        // Orders remain recoverable for 30 days; only the scheduled backend may permanently purge them.
+        allow delete: if false;
       }
       match /workTasks/{taskId} {
         allow read: if hasCompanyPermission(companyId, 'orders:read')
@@ -226,7 +230,8 @@ service cloud.firestore {
         allow read: if hasCompanyPermission(companyId, 'customers:read');
         allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId);
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged();
-        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'customers:write');
+        // Customers remain recoverable for 30 days; only the scheduled backend may permanently purge them.
+        allow delete: if false;
       }
       match /suppliers/{supplierId} {
         allow read: if hasCompanyPermission(companyId, 'suppliers:read');
@@ -249,7 +254,8 @@ service cloud.firestore {
         allow read: if hasCompanyPermission(companyId, 'inventory:read');
         allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write') && companyIdMatchesPath(companyId) && validInventory();
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && validInventory();
-        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'inventory:write');
+        // Inventory remains recoverable for 30 days; only the scheduled backend may permanently purge it.
+        allow delete: if false;
       }
       match /expenses/{expenseId} {
         allow read: if hasCompanyPermission(companyId, 'expenses:read');

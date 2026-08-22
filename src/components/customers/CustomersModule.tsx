@@ -36,7 +36,7 @@ export const CustomersModule: React.FC = () => {
   );
 
   const handleDelete = async (id: string) => {
-    if (window.confirm(t('confirmDelete'))) {
+    if (window.confirm('سيُنقل العميل إلى سلة المحذوفات لمدة 30 يومًا. هل تريد المتابعة؟')) {
       await deleteCustomer(id);
     }
   };

@@ -6,7 +6,6 @@ import {
   Moon,
   Sun,
   Download,
-  Upload,
   Database,
   Save,
   CheckCircle2,
@@ -23,7 +22,6 @@ export const SettingsModule: React.FC = () => {
     settings,
     updateSettings,
     exportBackupJson,
-    restoreBackupJson,
     seedSampleData,
   } = useData();
 
@@ -39,7 +37,6 @@ export const SettingsModule: React.FC = () => {
   const [termsEn, setTermsEn] = useState(settings.termsEn || '');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
-  const [restoreMessage, setRestoreMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -56,26 +53,6 @@ export const SettingsModule: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        const success = await restoreBackupJson(content);
-        if (success) {
-          setRestoreMessage('Backup restored successfully!');
-        } else {
-          setRestoreMessage('Invalid JSON backup file format.');
-        }
-        setTimeout(() => setRestoreMessage(''), 4000);
-      }
-    };
-    reader.readAsText(file);
   };
 
   return (
@@ -308,24 +285,25 @@ export const SettingsModule: React.FC = () => {
         </div>
       </form>
 
-      {/* Backup, Restore & Demo Seed Card */}
+      {/* Backup Card */}
       <div className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
           <Database className="w-5 h-5 text-amber-500" />
           <span>{t('backupRestore')}</span>
         </h3>
 
-        {restoreMessage && (
-          <p className="text-xs font-bold text-amber-600 dark:text-amber-400 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl">
-            {restoreMessage}
-          </p>
-        )}
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          {language === 'ar'
+            ? 'يمكنك تصدير نسخة احتياطية من بيانات شركتك الآن. استعادة النسخ الاحتياطية ستتوفر في إصدار قادم بعد إضافة مراجعة آمنة للبيانات قبل الاستيراد.'
+            : 'You can export a backup of your company data now. Backup restore will be available in a future release after secure data review before import.'}
+        </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="max-w-sm">
           {/* Export JSON */}
           <button
+            type="button"
             onClick={exportBackupJson}
-            className="p-4 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-start flex flex-col justify-between cursor-pointer transition-colors"
+            className="w-full p-4 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-start flex flex-col justify-between cursor-pointer transition-colors"
           >
             <Download className="w-5 h-5 text-amber-500 mb-2" />
             <div>
@@ -335,23 +313,6 @@ export const SettingsModule: React.FC = () => {
               <span className="text-[10px] text-slate-400">Download system data as JSON</span>
             </div>
           </button>
-
-          {/* Import JSON */}
-          <label className="p-4 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-start flex flex-col justify-between cursor-pointer transition-colors">
-            <Upload className="w-5 h-5 text-blue-500 mb-2" />
-            <div>
-              <span className="font-bold text-xs text-slate-900 dark:text-white block">
-                {t('restoreData')}
-              </span>
-              <span className="text-[10px] text-slate-400">Upload JSON backup file</span>
-            </div>
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-          </label>
         </div>
       </div>
     </div>

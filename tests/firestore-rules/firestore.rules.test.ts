@@ -150,3 +150,9 @@ test('48 assigned worker may only update work-task completion status', async () 
   await assertSucceeds(updateDoc(task, { status: 'completed', completedAt: 'now', updatedAt: 'now' }));
   await assertFails(updateDoc(task, { title: 'Changed by worker' }));
 });
+
+test('49 company users cannot permanently delete orders, customers, or inventory', async () => {
+  await assertFails(deleteDoc(path('companyASuperAdmin', 'orders', 'orderA')));
+  await assertFails(deleteDoc(path('companyASuperAdmin', 'customers', 'customerA')));
+  await assertFails(deleteDoc(path('companyASuperAdmin', 'inventory', 'itemA')));
+});

@@ -34,6 +34,7 @@ const SettingsModule = lazy(() => import('./components/settings/SettingsModule')
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
 const ProfileModule = lazy(() => import('./components/profile/ProfileModule').then(({ ProfileModule }) => ({ default: ProfileModule })));
+const RecycleBinModule = lazy(() => import('./components/recycleBin/RecycleBinModule').then(({ RecycleBinModule }) => ({ default: RecycleBinModule })));
 
 function UnauthorizedPlatform() {
   return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لحسابات إدارة المنصة فقط.</p></div></div>;
@@ -49,8 +50,9 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
   settings: 'company:settings:read', members: 'company:members:read',
+  recycleBin: 'company:settings:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -70,6 +72,7 @@ const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<
   reports: ['super_admin', 'admin', 'manager'],
   activityLog: ['super_admin', 'admin', 'manager'],
   settings: ['super_admin', 'admin', 'manager'],
+  recycleBin: ['super_admin', 'admin', 'manager'],
 };
 
 function CompanyTabGuard({ tab, children }: { tab: ActiveTab; children: React.ReactNode }) {
@@ -129,6 +132,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'إدارة الموظفين';
       case 'profile':
         return 'الملف الشخصي';
+      case 'recycleBin':
+        return 'سلة المحذوفات';
       default:
         return 'لوحة التحكم';
     }
@@ -162,6 +167,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Employees';
       case 'profile':
         return 'Profile';
+      case 'recycleBin':
+        return 'Recycle Bin';
       default:
         return 'Dashboard';
     }
@@ -367,6 +374,7 @@ function AppContent() {
             {activeTab === 'inventory' && <CompanyTabGuard tab="inventory"><InventoryModule /></CompanyTabGuard>}
             {activeTab === 'expenses' && <CompanyTabGuard tab="expenses"><ExpensesModule /></CompanyTabGuard>}
             {activeTab === 'calendar' && <CompanyTabGuard tab="calendar"><CalendarModule /></CompanyTabGuard>}
+            {activeTab === 'recycleBin' && <CompanyTabGuard tab="recycleBin"><RecycleBinModule /></CompanyTabGuard>}
             {activeTab === 'reports' && <CompanyTabGuard tab="reports"><ReportsModule /></CompanyTabGuard>}
             {activeTab === 'activityLog' && <CompanyTabGuard tab="activityLog"><ActivityLogModule /></CompanyTabGuard>}
             {activeTab === 'settings' && <CompanyTabGuard tab="settings"><SettingsModule /></CompanyTabGuard>}

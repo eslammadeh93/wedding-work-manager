@@ -14,6 +14,8 @@ import {
   ContactRound,
   Wallet,
   Target,
+  CalendarDays,
+  ArchiveRestore,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -35,7 +37,8 @@ export type ActiveTab =
   | 'workerPerformance'
   | 'settings'
   | 'members'
-  | 'profile';
+  | 'profile'
+  | 'recycleBin';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -76,6 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', group: 'workspace', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
     { id: 'orders', group: 'sales', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
     { id: 'customers', group: 'sales', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
+    { id: 'calendar', group: 'sales', label: language === 'ar' ? 'تقويم التركيبات' : 'Installation Calendar', icon: CalendarDays, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:calendar:read' },
     { id: 'suppliers', group: 'sales', label: language === 'ar' ? 'جهات الاتصال والموردين' : 'Supplier Contacts', icon: ContactRound, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:suppliers:read' },
     { id: 'workers', group: 'operations', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
     { id: 'workerPerformance', group: 'operations', label: language === 'ar' ? (userRole === 'worker' ? 'متابعة أدائي' : 'متابعة أداء العمال') : (userRole === 'worker' ? 'My Performance' : 'Worker Performance'), icon: Target, roles: ['super_admin', 'admin', 'manager', 'worker'], permission: 'company:worker_performance:read' },
@@ -83,6 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'expenses', group: 'finance', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
     { id: 'reports', group: 'finance', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },
     { id: 'members', group: 'administration', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
+    { id: 'recycleBin', group: 'administration', label: language === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin', icon: ArchiveRestore, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'settings', group: 'administration', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'profile', group: 'account', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];

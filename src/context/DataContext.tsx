@@ -12,6 +12,7 @@ import { db } from '../firebase/config';
 import { useAuth } from './AuthContext';
 import { sanitizeData } from '../utils/security';
 import { localDateString } from '../utils/localDate';
+import { calculateSafeBalanceToDate } from '../utils/monthlyCash';
 import {
   Order,
   Customer,
@@ -26,7 +27,9 @@ import {
   ActivityLogRecord,
   WorkerMovement,
   WorkTask,
+  RecycleBinItem,
 } from '../types';
+import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../utils/recycleBin';
 import {
   initialCompanySettings,
   initialInventory,
@@ -70,6 +73,8 @@ export interface DataContextType {
   categories: CategoryItem[];
   activityLogs: ActivityLogRecord[];
   loading: boolean;
+  recycleBinItems: RecycleBinItem[];
+  restoreDeletedItem: (item: RecycleBinItem) => Promise<void>;
   totalCapital: number;
   totalGeneralExpenses: number;
   currentCashBalance: number;
@@ -565,16 +570,17 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteOrder = async (id: string) => {
+    const metadata = deletionMetadata();
     try {
-      await deleteDoc(doc(db, 'orders', id));
+      await setDoc(doc(db, 'orders', id), metadata, { merge: true });
     } catch (e) {
       console.warn('Deleting order locally:', e);
     }
 
-    const updatedOrders = orders.filter((o) => o.id !== id);
+    const updatedOrders = orders.map((order) => order.id === id ? { ...order, ...metadata } : order);
     setOrders(updatedOrders);
 
-    const updatedInventory = recalculateInventory(updatedOrders, inventory);
+    const updatedInventory = recalculateInventory(updatedOrders.filter((order) => !isSoftDeleted(order)), inventory);
     setInventory(updatedInventory);
     await syncInventoryItemsToStore(updatedInventory);
   };
@@ -669,12 +675,13 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCustomer = async (id: string) => {
+    const metadata = deletionMetadata();
     try {
-      await deleteDoc(doc(db, 'customers', id));
+      await setDoc(doc(db, 'customers', id), metadata, { merge: true });
     } catch (e) {
       console.warn('Deleting customer locally:', e);
     }
-    setCustomers((prev) => prev.filter((c) => c.id !== id));
+    setCustomers((prev) => prev.map((customer) => customer.id === id ? { ...customer, ...metadata } : customer));
   };
 
   // Supplier / external contact operations
@@ -751,12 +758,13 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteInventoryItem = async (id: string) => {
+    const metadata = deletionMetadata();
     try {
-      await deleteDoc(doc(db, 'inventory', id));
+      await setDoc(doc(db, 'inventory', id), metadata, { merge: true });
     } catch (e) {
       console.warn('Deleting inventory item locally:', e);
     }
-    setInventory((prev) => prev.filter((i) => i.id !== id));
+    setInventory((prev) => prev.map((item) => item.id === id ? { ...item, ...metadata } : item));
   };
 
   // Expenses Operations
@@ -937,6 +945,27 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  const restoreDeletedItem = async (item: RecycleBinItem) => {
+    const updates = { deletedAt: null, purgeAt: null, updatedAt: new Date().toISOString() };
+    if (item.type === 'order') {
+      await setDoc(doc(db, 'orders', item.id), updates, { merge: true });
+      const nextOrders = orders.map((order) => order.id === item.id ? { ...order, ...updates } : order);
+      setOrders(nextOrders);
+      const nextInventory = recalculateInventory(nextOrders.filter((order) => !isSoftDeleted(order)), inventory);
+      setInventory(nextInventory);
+      await syncInventoryItemsToStore(nextInventory);
+      return;
+    }
+    const collectionName = item.type === 'customer' ? 'customers' : 'inventory';
+    await setDoc(doc(db, collectionName, item.id), updates, { merge: true });
+    if (item.type === 'customer') setCustomers((current) => current.map((customer) => customer.id === item.id ? { ...customer, ...updates } : customer));
+    else setInventory((current) => current.map((inventoryItem) => inventoryItem.id === item.id ? { ...inventoryItem, ...updates } : inventoryItem));
+  };
+
+  const activeOrders = orders.filter((order) => !isSoftDeleted(order));
+  const activeCustomers = customers.filter((customer) => !isSoftDeleted(customer));
+  const activeInventory = inventory.filter((item) => !isSoftDeleted(item));
+  const deletedItems = buildRecycleBinItems(orders, customers, inventory);
   const totalCapital = expenses
     .filter((e) => e.type === 'capital')
     .reduce((sum, e) => sum + (e.amount || 0), 0);
@@ -945,16 +974,16 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     .filter((e) => e.type !== 'capital')
     .reduce((sum, e) => sum + (e.amount || 0), 0);
 
-  const currentCashBalance = totalCapital - totalGeneralExpenses;
+  const currentCashBalance = calculateSafeBalanceToDate(activeOrders, expenses);
 
   return (
     <DataContext.Provider
       value={{
-        orders,
+        orders: activeOrders,
         workTasks,
-        customers,
+        customers: activeCustomers,
         suppliers,
-        inventory,
+        inventory: activeInventory,
         expenses,
         workers,
         settings,
@@ -962,6 +991,8 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         categories,
         activityLogs,
         loading,
+        recycleBinItems: deletedItems,
+        restoreDeletedItem,
         totalCapital,
         totalGeneralExpenses,
         currentCashBalance,

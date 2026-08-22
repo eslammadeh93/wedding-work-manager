@@ -20,6 +20,8 @@ import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../util
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 import { MoneyValue } from '../ui/MoneyValue';
+import { ImportantAlertsCenter } from './ImportantAlertsCenter';
+import { getImportantAlerts } from '../../utils/importantAlerts';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
@@ -36,7 +38,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { profile } = useAuth();
-  const { orders, inventory, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
+  const { orders, inventory, activityLogs, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
 
   // Metrics Calculations
   const currentMonth = new Date().getMonth();
@@ -74,6 +76,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
     .sort((a, b) => new Date(a.weddingDate).getTime() - new Date(b.weddingDate).getTime());
 
   const lowInventoryItems = inventory.filter((i) => i.availableQuantity <= i.minStockLevel);
+  const importantAlerts = getImportantAlerts({ orders, inventory, activityLogs });
 
   // Status Breakdown
   const statusCounts = {
@@ -173,6 +176,8 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           </div>
         </div>
       </div>
+
+      <ImportantAlertsCenter alerts={importantAlerts} language={language} onNavigate={onNavigate} />
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 min-[1700px]:grid-cols-6 gap-4">

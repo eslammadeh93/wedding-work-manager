@@ -4,6 +4,7 @@ import { db } from '../../firebase/config';
 import { firestorePaths } from '../firestorePaths';
 import { calculateReservationUpdates, normalizedReservations, OrderInventoryError } from './orderInventoryMath';
 import type { DataOperationResult } from './companyDataService';
+import { deletionMetadata } from '../../utils/recycleBin';
 
 type OrderMutationResult = DataOperationResult<{ id: string }>;
 const messageFor = (code: string) => ({
@@ -63,6 +64,7 @@ export const orderInventoryTransaction = {
         const currentSnapshot = await transaction.get(orderRef);
         if (!currentSnapshot.exists()) throw new OrderInventoryError('ORDER_NOT_FOUND', messageFor('ORDER_NOT_FOUND'));
         const current = { id: currentSnapshot.id, ...currentSnapshot.data() } as Order;
+        if (current.deletedAt) throw new OrderInventoryError('ORDER_ALREADY_DELETED', messageFor('ORDER_ALREADY_DELETED'));
         if (expectedUpdatedAt && current.updatedAt !== expectedUpdatedAt) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
         const reservedItems = normalizedReservations(patch.reservedItems ?? current.reservedItems);
         const refs = inventoryRefs(companyId, [...(current.reservedItems || []), ...reservedItems]);
@@ -81,11 +83,29 @@ export const orderInventoryTransaction = {
         const currentSnapshot = await transaction.get(orderRef);
         if (!currentSnapshot.exists()) throw new OrderInventoryError('ORDER_ALREADY_DELETED', messageFor('ORDER_ALREADY_DELETED'));
         const current = { id: currentSnapshot.id, ...currentSnapshot.data() } as Order;
+        if (current.deletedAt) throw new OrderInventoryError('ORDER_ALREADY_DELETED', messageFor('ORDER_ALREADY_DELETED'));
         const refs = inventoryRefs(companyId, current.reservedItems || []);
         const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
         const updates = calculateReservationUpdates(inventoryMap(snapshots), current.reservedItems, [], companyId);
         for (const ref of refs) transaction.update(ref, { ...updates.get(ref.id), updatedAt: new Date().toISOString() });
-        transaction.delete(orderRef);
+        transaction.update(orderRef, { ...deletionMetadata(), updatedAt: new Date().toISOString() });
+      });
+      return { success: true, data: { id: orderId } };
+    } catch (error) { return failed(error); }
+  },
+  async restore(companyId: string, orderId: string): Promise<OrderMutationResult> {
+    try {
+      await runTransaction(db, async (transaction) => {
+        const orderRef = doc(db, firestorePaths.order(companyId, orderId));
+        const currentSnapshot = await transaction.get(orderRef);
+        if (!currentSnapshot.exists()) throw new OrderInventoryError('ORDER_NOT_FOUND', messageFor('ORDER_NOT_FOUND'));
+        const current = { id: currentSnapshot.id, ...currentSnapshot.data() } as Order;
+        if (!current.deletedAt) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
+        const refs = inventoryRefs(companyId, current.reservedItems || []);
+        const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+        const updates = calculateReservationUpdates(inventoryMap(snapshots), [], current.reservedItems, companyId);
+        for (const ref of refs) transaction.update(ref, { ...updates.get(ref.id), updatedAt: new Date().toISOString() });
+        transaction.update(orderRef, { deletedAt: null, purgeAt: null, updatedAt: new Date().toISOString() });
       });
       return { success: true, data: { id: orderId } };
     } catch (error) { return failed(error); }

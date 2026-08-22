@@ -59,6 +59,7 @@ export const PLATFORM_PERMISSION_MATRIX: Readonly<
     "platform:audit_logs:read",
     "platform:console:read",
     "platform:support:manage",
+    "platform:support:impersonate",
   ],
   platform_billing: [
     "platform:dashboard:read",

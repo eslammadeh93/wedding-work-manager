@@ -38,7 +38,7 @@ export const InventoryModule: React.FC = () => {
   });
 
   const handleDelete = async (id: string) => {
-    if (window.confirm(t('confirmDelete'))) {
+    if (window.confirm('سيُنقل عنصر المخزون إلى سلة المحذوفات لمدة 30 يومًا. هل تريد المتابعة؟')) {
       await deleteInventoryItem(id);
     }
   };

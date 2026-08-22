@@ -182,6 +182,8 @@ export interface Order {
   activityLogs?: OrderActivityLog[];
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  purgeAt?: string | null;
 }
 
 export interface Worker {
@@ -213,6 +215,8 @@ export interface Customer {
   notes?: string;
   createdAt: string;
   updatedAt?: string;
+  deletedAt?: string | null;
+  purgeAt?: string | null;
 }
 
 /** A supplier or external contact the company can hire for an event. */
@@ -260,6 +264,17 @@ export interface InventoryItem {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  purgeAt?: string | null;
+}
+
+export type RecycleBinItemType = 'order' | 'customer' | 'inventory';
+export interface RecycleBinItem {
+  id: string;
+  type: RecycleBinItemType;
+  title: string;
+  deletedAt: string;
+  purgeAt: string;
 }
 
 export type FinanceType = 'capital' | 'expense';

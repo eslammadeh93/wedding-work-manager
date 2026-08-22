@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2/options';
 import * as logger from 'firebase-functions/logger';
 import { CompanyProvisioningService } from './companyProvisioning.js';
@@ -89,6 +90,12 @@ export const syncWorkerOrderAccess = onDocumentWritten({ document: 'companies/{c
 
   const before = event.data.before.exists ? event.data.before.data() : undefined;
   const after = event.data.after.data() || {};
+  if (after.deletedAt) {
+    batch.delete(workerOrderRef);
+    batch.delete(contactRef);
+    await batch.commit();
+    return;
+  }
   const assignment = enforceAssignmentContactReset(before, after);
   const effectiveOrder = assignment.order;
   const assignedWorkerId = typeof after.workerId === 'string' ? after.workerId.trim() : '';
@@ -121,6 +128,68 @@ export const syncWorkerOrderAccess = onDocumentWritten({ document: 'companies/{c
       workerCanContactCustomer: effectiveOrder.workerCanContactCustomer === true,
       workerOrderContactsPath: contactRef.path, contactDocumentExists: contactSnapshot.exists,
     });
+  }
+});
+
+/** Permanently removes records that have remained in the recycle bin for 30 days. */
+export const purgeExpiredRecycleBinItems = onSchedule({ schedule: '15 2 * * *', timeZone: 'UTC', region: 'us-central1' }, async () => {
+  // Client records use ISO strings so they remain compatible with the existing
+  // operational timestamps; lexicographic comparison preserves chronological order.
+  const now = new Date().toISOString();
+  for (const collectionName of ['orders', 'customers', 'inventory']) {
+    const expired = await db.collectionGroup(collectionName).where('purgeAt', '<=', now).limit(400).get();
+    if (expired.empty) continue;
+    const batch = db.batch();
+    expired.docs.forEach((snapshot) => batch.delete(snapshot.ref));
+    await batch.commit();
+    logger.info('Purged expired recycle-bin records', { collectionName, count: expired.size });
+  }
+});
+
+type RecycleBinDeleteRequest = { type?: unknown; id?: unknown };
+type RecycleBinDeleteResponse = { success: boolean; code: 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'NOT_FOUND' | 'NOT_DELETED' | 'UNKNOWN_ERROR'; message: string };
+const recycleBinCollection = (type: unknown): 'orders' | 'customers' | 'inventory' | null => type === 'order' ? 'orders' : type === 'customer' ? 'customers' : type === 'inventory' ? 'inventory' : null;
+const validRecycleBinDocumentId = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 1_500 && !value.includes('/');
+
+/**
+ * Irreversibly removes one record already placed in the recycle bin.
+ * This deliberately runs on the server: Firestore rules never allow clients
+ * to permanently delete operational records.
+ */
+export const permanentlyDeleteRecycleBinItem = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: { auth?: { uid: string; token?: Record<string, unknown> }; data: RecycleBinDeleteRequest }): Promise<RecycleBinDeleteResponse> => {
+  const uid = request.auth?.uid;
+  const companyId = request.auth?.token?.companyId;
+  const collectionName = recycleBinCollection(request.data?.type);
+  const itemId = request.data?.id;
+  if (!uid || !validRecycleBinDocumentId(companyId)) return { success: false, code: 'UNAUTHORIZED', message: 'انتهت جلسة تسجيل الدخول. سجّل الدخول مرة أخرى.' };
+  if (!collectionName || !validRecycleBinDocumentId(itemId)) return { success: false, code: 'INVALID_INPUT', message: 'بيانات العنصر غير صالحة.' };
+
+  const companyRef = db.collection('companies').doc(companyId);
+  const member = await companyRef.collection('members').doc(uid).get();
+  if (!member.exists || member.data()?.companyId !== companyId || member.data()?.status !== 'active') return { success: false, code: 'UNAUTHORIZED', message: 'حسابك غير نشط في هذه الشركة.' };
+  if (member.data()?.role !== 'company_super_admin') return { success: false, code: 'FORBIDDEN', message: 'الحذف النهائي متاح لصاحب الشركة فقط.' };
+
+  const itemRef = companyRef.collection(collectionName).doc(itemId);
+  const auditRef = companyRef.collection('activityLogs').doc();
+  try {
+    await db.runTransaction(async transaction => {
+      const item = await transaction.get(itemRef);
+      if (!item.exists) throw new Error('NOT_FOUND');
+      if (!item.data()?.deletedAt) throw new Error('NOT_DELETED');
+      transaction.delete(itemRef);
+      if (collectionName === 'orders') {
+        transaction.delete(companyRef.collection('workerOrders').doc(itemId));
+        transaction.delete(companyRef.collection('workerOrderContacts').doc(itemId));
+      }
+      transaction.set(auditRef, { companyId, action: 'recycle_bin_item_permanently_deleted', actorUid: uid, itemId, itemType: request.data.type, createdAt: FieldValue.serverTimestamp() });
+    });
+    return { success: true, code: 'OK', message: 'تم الحذف النهائي. لا يمكن استرجاع هذا العنصر.' };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
+    if (code === 'NOT_FOUND') return { success: false, code, message: 'العنصر لم يعد موجودًا.' };
+    if (code === 'NOT_DELETED') return { success: false, code, message: 'لا يمكن الحذف النهائي إلا من سلة المحذوفات.' };
+    logger.error('Permanent recycle-bin deletion failed', { companyId, uid, collectionName, itemId, error: code });
+    return { success: false, code: 'UNKNOWN_ERROR', message: 'تعذر تنفيذ الحذف النهائي. حاول مرة أخرى.' };
   }
 });
 export const getPlatformDashboard = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, request => platformDashboardService.get(request));
