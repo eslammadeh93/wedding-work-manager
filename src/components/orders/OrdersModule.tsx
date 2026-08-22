@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   Plus,
   Search,
@@ -35,6 +36,7 @@ import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCo
 import { getOrderSource, OrderSourceBadge } from './OrderSourceBadge';
 import { WorkTaskModal } from './WorkTaskModal';
 import { WorkTasksPanel } from './WorkTasksPanel';
+import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
 type QuickFilterType =
   | 'all'
@@ -150,10 +152,69 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     catch { return null; }
   }, [authSession, isWorker]);
 
+  // Managers fetch only the requested Firestore page. The context intentionally
+  // keeps a small realtime window for dashboard widgets instead of all orders.
+  const useServerPagination = USE_MULTI_TENANT_DATA && !isWorker && Boolean(managerCompanyId);
+  const [pagedOrders, setPagedOrders] = useState<Order[]>([]);
+  const [pageCursor, setPageCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMorePages, setHasMorePages] = useState(false);
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [orderScopeCounts, setOrderScopeCounts] = useState<{ active: number; finished: number } | null>(null);
+  const pageRequest = useMemo(() => ({
+    scope: orderListScope,
+    pageSize: 50,
+    status: selectedStatus === 'all' ? undefined : selectedStatus,
+    paymentStatus: selectedPayment === 'all' ? undefined : selectedPayment,
+    dateField: dateFilterType === 'booking' ? 'bookingDate' as const : 'eventDate' as const,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+  }), [dateFilterType, dateFrom, dateTo, orderListScope, selectedPayment, selectedStatus]);
+
+  useEffect(() => {
+    if (!useServerPagination || !managerCompanyId) return;
+    let cancelled = false;
+    setIsLoadingPage(true); setPageError(null);
+    void companyDataService.getOrderPage<Order>(managerCompanyId, pageRequest).then((result) => {
+      if (cancelled) return;
+      if (!result.success || !result.data) {
+        setPagedOrders([]); setPageCursor(null); setHasMorePages(false);
+        setPageError(result.message || 'تعذر تحميل الطلبات.');
+      } else {
+        setPagedOrders(result.data.records); setPageCursor(result.data.cursor); setHasMorePages(result.data.hasMore);
+      }
+      setIsLoadingPage(false);
+    });
+    return () => { cancelled = true; };
+  }, [managerCompanyId, pageRequest, useServerPagination]);
+
+  useEffect(() => {
+    if (!useServerPagination || !managerCompanyId) return;
+    let cancelled = false;
+    void companyDataService.getOrderScopeCounts(managerCompanyId).then((result) => {
+      if (!cancelled && result.success && result.data) setOrderScopeCounts(result.data);
+    });
+    return () => { cancelled = true; };
+  }, [managerCompanyId, pagedOrders, useServerPagination]);
+
+  const loadMoreOrders = async () => {
+    if (!useServerPagination || !managerCompanyId || !pageCursor || isLoadingPage) return;
+    setIsLoadingPage(true); setPageError(null);
+    const result = await companyDataService.getOrderPage<Order>(managerCompanyId, { ...pageRequest, cursor: pageCursor });
+    if (!result.success || !result.data) setPageError(result.message || 'تعذر تحميل مزيد من الطلبات.');
+    else {
+      setPagedOrders((current) => [...current, ...result.data!.records.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setPageCursor(result.data.cursor); setHasMorePages(result.data.hasMore);
+    }
+    setIsLoadingPage(false);
+  };
+
+  const sourceOrders = useServerPagination ? pagedOrders : orders;
+
   // Keep an already-open worker modal synchronized with realtime redaction/grant updates.
   useEffect(() => {
-    setViewingOrder(current => current ? orders.find(order => order.id === current.id) || null : null);
-  }, [orders]);
+    setViewingOrder(current => current ? sourceOrders.find(order => order.id === current.id) || current : null);
+  }, [sourceOrders]);
 
   useEffect(() => {
     if (!isWorker && createOrderRequest > 0) setIsCreateOpen(true);
@@ -170,9 +231,9 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
 
   useEffect(() => {
     if (!openOrderId) return;
-    const target = orders.find(order => order.id === openOrderId);
+    const target = sourceOrders.find(order => order.id === openOrderId);
     if (target) { setViewingOrder(target); onOrderOpened?.(); }
-  }, [onOrderOpened, openOrderId, orders]);
+  }, [onOrderOpened, openOrderId, sourceOrders]);
 
   // Helper date parsing
   const getBookingDate = (ord: Order) => ord.bookingDate || ord.createdAt.split('T')[0];
@@ -211,18 +272,18 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   };
 
   const scopedOrders = useMemo(
-    () => orders.filter(matchesWorkerAccess),
-    [orders, isWorker, workerId, profile?.displayName],
+    () => sourceOrders.filter(matchesWorkerAccess),
+    [sourceOrders, isWorker, workerId, profile?.displayName],
   );
 
   const activeOrdersCount = useMemo(
-    () => scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
-    [scopedOrders],
+    () => useServerPagination && orderScopeCounts ? orderScopeCounts.active : scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
+    [orderScopeCounts, scopedOrders, useServerPagination],
   );
 
   const finishedOrdersCount = useMemo(
-    () => scopedOrders.filter(order => finishedOrderStatuses.has(order.orderStatus)).length,
-    [scopedOrders],
+    () => useServerPagination && orderScopeCounts ? orderScopeCounts.finished : scopedOrders.filter(order => finishedOrderStatuses.has(order.orderStatus)).length,
+    [orderScopeCounts, scopedOrders, useServerPagination],
   );
 
   // Filter & Sort Logic
@@ -243,6 +304,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     return scopedOrders
       .filter((ord) => {
         // 0. Keep terminal orders in the dedicated completed section.
+        if (ord.archivedAt) return false;
         const isFinished = finishedOrderStatuses.has(ord.orderStatus);
         if (orderListScope === 'finished' ? !isFinished : isFinished) return false;
 
@@ -831,7 +893,9 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       {/* Orders Output Count & Sorting summary */}
       <div className="flex items-center justify-between px-1 text-xs text-slate-500">
         <span>
-          Showing <strong>{filteredOrders.length}</strong> of {orderListScope === 'active' ? activeOrdersCount : finishedOrdersCount} orders
+          {useServerPagination
+            ? <>{language === 'ar' ? 'تم تحميل' : 'Loaded'} <strong>{scopedOrders.length}</strong> {language === 'ar' ? 'أوردر من نتائج الخادم' : 'orders from server results'}</>
+            : <>Showing <strong>{filteredOrders.length}</strong> of {orderListScope === 'active' ? activeOrdersCount : finishedOrdersCount} orders</>}
         </span>
 
         <div className="flex items-center gap-2">
@@ -1194,6 +1258,22 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
               </div>
             );
           })}
+        </div>
+      )}
+
+      {useServerPagination && (
+        <div className="flex flex-col items-center gap-2 pt-1">
+          {pageError && <p role="alert" className="text-xs font-bold text-rose-600 dark:text-rose-400">{pageError}</p>}
+          {hasMorePages && (
+            <button
+              type="button"
+              onClick={() => void loadMoreOrders()}
+              disabled={isLoadingPage}
+              className="px-5 py-2.5 rounded-xl border border-amber-400/40 text-amber-700 dark:text-amber-300 text-xs font-black hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-60 transition-colors cursor-pointer"
+            >
+              {isLoadingPage ? (language === 'ar' ? 'جارٍ التحميل...' : 'Loading...') : (language === 'ar' ? 'تحميل المزيد من الأوردرات' : 'Load more orders')}
+            </button>
+          )}
         </div>
       )}
 

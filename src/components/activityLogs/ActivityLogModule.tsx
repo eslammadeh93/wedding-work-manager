@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   Eye,
   Car,
@@ -26,13 +27,16 @@ import { useAuth } from '../../context/AuthContext';
 import { ActivityLogRecord, Order } from '../../types';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
 import { localDateString } from '../../utils/localDate';
+import { companyDataService } from '../../multiTenant/data/companyDataService';
+import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
 type DateFilterType = 'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all';
 
 export const ActivityLogModule: React.FC = () => {
   const { t, language } = useLanguage();
   const { activityLogs, orders } = useData();
-  const { profile } = useAuth();
+  const { profile, authSession } = useAuth();
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
 
@@ -55,11 +59,65 @@ export const ActivityLogModule: React.FC = () => {
     return localDateString(d);
   }, []);
 
+  const companyId = useMemo(() => {
+    if (!authSession || profile?.role === 'worker') return null;
+    try { return trustedCompanyIdFromSession(authSession); } catch { return null; }
+  }, [authSession, profile?.role]);
+  const useServerPagination = USE_MULTI_TENANT_DATA && Boolean(companyId);
+  const [pagedLogs, setPagedLogs] = useState<ActivityLogRecord[]>([]);
+  const [pageCursor, setPageCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMorePages, setHasMorePages] = useState(false);
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  const serverRequest = useMemo(() => {
+    const today = localDateString();
+    const dayBefore = new Date(); dayBefore.setDate(dayBefore.getDate() - 1);
+    const daysAgo = (days: number) => { const value = new Date(); value.setDate(value.getDate() - days); return localDateString(value); };
+    const range = dateFilter === 'today' ? { from: today, to: today }
+      : dateFilter === 'yesterday' ? { from: localDateString(dayBefore), to: localDateString(dayBefore) }
+        : dateFilter === 'week' ? { from: daysAgo(7), to: undefined }
+          : dateFilter === 'month' ? { from: daysAgo(30), to: undefined }
+            : dateFilter === 'custom' ? { from: startDate || undefined, to: endDate || undefined }
+              : { from: undefined, to: undefined };
+    return { pageSize: 100, action: actionFilter === 'all' ? undefined : actionFilter, ...range };
+  }, [actionFilter, dateFilter, endDate, startDate]);
+
+  useEffect(() => {
+    if (!useServerPagination || !companyId) return;
+    let cancelled = false;
+    setIsLoadingPage(true); setPageError(null);
+    void companyDataService.getActivityLogPage<ActivityLogRecord>(companyId, serverRequest).then((result) => {
+      if (cancelled) return;
+      if (!result.success || !result.data) {
+        setPagedLogs([]); setPageCursor(null); setHasMorePages(false); setPageError(result.message || 'تعذر تحميل سجل النشاط.');
+      } else {
+        setPagedLogs(result.data.records); setPageCursor(result.data.cursor); setHasMorePages(result.data.hasMore);
+      }
+      setIsLoadingPage(false);
+    });
+    return () => { cancelled = true; };
+  }, [companyId, serverRequest, useServerPagination]);
+
+  const loadMoreLogs = async () => {
+    if (!useServerPagination || !companyId || !pageCursor || isLoadingPage) return;
+    setIsLoadingPage(true); setPageError(null);
+    const result = await companyDataService.getActivityLogPage<ActivityLogRecord>(companyId, { ...serverRequest, cursor: pageCursor });
+    if (!result.success || !result.data) setPageError(result.message || 'تعذر تحميل مزيد من السجل.');
+    else {
+      setPagedLogs((current) => [...current, ...result.data!.records.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setPageCursor(result.data.cursor); setHasMorePages(result.data.hasMore);
+    }
+    setIsLoadingPage(false);
+  };
+
+  const sourceLogs = useServerPagination ? pagedLogs : activityLogs;
+
   // Filtered Activity Logs
   const filteredLogs = useMemo(() => {
     const now = new Date();
 
-    return activityLogs.filter((log) => {
+    return sourceLogs.filter((log) => {
       // 1. Action filter
       if (actionFilter !== 'all' && log.action !== actionFilter) {
         return false;
@@ -97,11 +155,11 @@ export const ActivityLogModule: React.FC = () => {
 
       return true;
     });
-  }, [activityLogs, actionFilter, searchTerm, dateFilter, todayStr, yesterdayStr, startDate, endDate]);
+  }, [sourceLogs, actionFilter, searchTerm, dateFilter, todayStr, yesterdayStr, startDate, endDate]);
 
   // Statistics Summary Metrics (calculated from all activityLogs for today)
   const stats = useMemo(() => {
-    const todaysLogs = activityLogs.filter((log) => {
+    const todaysLogs = sourceLogs.filter((log) => {
       const logDateStr = log.timestamp ? log.timestamp.split('T')[0] : '';
       return logDateStr === todayStr;
     });
@@ -112,13 +170,17 @@ export const ActivityLogModule: React.FC = () => {
       arrivedToday: todaysLogs.filter((l) => l.action === 'arrived').length,
       finishedToday: todaysLogs.filter((l) => l.action === 'finished').length,
     };
-  }, [activityLogs, todayStr]);
+  }, [sourceLogs, todayStr]);
 
   // Handle clicking an order to open its modal
-  const handleOpenOrder = (orderId: string) => {
+  const handleOpenOrder = async (orderId: string) => {
     const foundOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
     if (foundOrder) {
       setSelectedOrder(foundOrder);
+    } else if (companyId) {
+      const result = await companyDataService.get<Order>(companyId, 'orders', orderId);
+      if (result.success && result.data) setSelectedOrder(result.data);
+      else alert(language === 'ar' ? 'عذراً، لم يتم العثور على الأوردر!' : 'Order details not found');
     } else {
       alert(language === 'ar' ? 'عذراً، لم يتم العثور على الأوردر!' : 'Order details not found');
     }
@@ -541,7 +603,7 @@ export const ActivityLogModule: React.FC = () => {
                       {/* رقم الأوردر */}
                       <td className="px-4 py-3.5">
                         <button
-                          onClick={() => handleOpenOrder(log.orderId || log.orderNumber)}
+                          onClick={() => void handleOpenOrder(log.orderId || log.orderNumber)}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-extrabold font-mono rounded-lg border border-amber-200 dark:border-amber-800 transition-colors cursor-pointer"
                           title={language === 'ar' ? 'عرض تفاصيل الأوردر' : 'View Order Details'}
                         >
@@ -592,6 +654,22 @@ export const ActivityLogModule: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {useServerPagination && (
+        <div className="flex flex-col items-center gap-2">
+          {pageError && <p role="alert" className="text-xs font-bold text-rose-600 dark:text-rose-400">{pageError}</p>}
+          {hasMorePages && (
+            <button
+              type="button"
+              onClick={() => void loadMoreLogs()}
+              disabled={isLoadingPage}
+              className="px-5 py-2.5 rounded-xl border border-amber-400/40 text-amber-700 dark:text-amber-300 text-xs font-black hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-60 transition-colors cursor-pointer"
+            >
+              {isLoadingPage ? (language === 'ar' ? 'جارٍ التحميل...' : 'Loading...') : (language === 'ar' ? 'تحميل المزيد من السجل' : 'Load more activity')}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Order Details Modal Integration */}
       {selectedOrder && (

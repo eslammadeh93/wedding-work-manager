@@ -16,6 +16,18 @@ const defaultCategories: CategoryItem[] = [];
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 const failure = (result: DataOperationResult<unknown>) => { throw new Error(result.message || 'تعذر تنفيذ العملية.'); };
 const sortCreated = <T extends { createdAt?: string }>(items: T[]) => [...items].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+const archiveEligibleAt = (eventDate?: string) => {
+  const value = String(eventDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const date = new Date(`${value}T12:00:00`);
+  date.setMonth(date.getMonth() + 6);
+  return date.toISOString();
+};
+const operationalWindowStart = () => {
+  const date = new Date();
+  date.setDate(date.getDate() - 30);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 /** Isolated company-only provider. It is mounted only while the feature flag is enabled. */
 export function MultiTenantDataProvider({ children }: { children: React.ReactNode }) {
@@ -38,6 +50,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const onError = (result: DataOperationResult<never>) => { failed = true; setLoading(false); setLoadError(result.message || 'تعذر تحميل البيانات.'); };
     const allowed = (permission: Permission) => Boolean(authSession?.userType === 'company' && authSession.permissions.includes(permission));
     const listen = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void, equalTo?: { field: string; value: string }) => { remaining += 1; return companyDataService.subscribe<T>(companyId, name, (items) => { set(items); ready(); }, onError, equalTo); };
+    const listenLatest = <T extends { id: string }>(name: CompanyCollection, set: (items: T[]) => void, options: { orderByField: string; direction?: 'asc' | 'desc'; pageSize: number; equalTo?: { field: string; value: string }; from?: { field: string; value: string } }) => { remaining += 1; return companyDataService.subscribeLatest<T>(companyId, name, (items) => { set(items); ready(); }, onError, options); };
     const orderListener = workerOnly
       ? (() => {
           let cancelled = false; let unsubscribeRealtime: (() => void) | undefined;
@@ -69,7 +82,9 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
           });
           return () => { cancelled = true; unsubscribeRealtime?.(); };
         })()
-      : allowed('company:orders:read') ? listen<Order>('orders', (items) => setOrders(sortCreated(items))) : () => undefined;
+      : allowed('company:orders:read')
+        ? listenLatest<Order>('orders', setOrders, { orderByField: 'eventDate', direction: 'asc', pageSize: 75, from: { field: 'eventDate', value: operationalWindowStart() } })
+        : () => undefined;
     const unsubs = [orderListener];
     if (workerOnly && workerId) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items)), { field: 'workerId', value: workerId }));
     else if (allowed('company:orders:read')) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items))));
@@ -80,9 +95,9 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     if (allowed('company:expenses:read')) unsubs.push(listen<Expense>('expenses', (items) => setExpenses(sortCreated(items))));
     if (allowed('company:categories:read')) unsubs.push(listen<CategoryItem>('categories', setCategories));
     if (allowed('company:activity_logs:read')) {
-      unsubs.push(listen<ActivityLogRecord>('activityLogs', (items) => {
+      unsubs.push(listenLatest<ActivityLogRecord>('activityLogs', (items) => {
         setActivityLogs([...items].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || ''))));
-      }));
+      }, { orderByField: 'timestamp', direction: 'desc', pageSize: 100 }));
     }
     // Notifications are private to their recipient, including company owners.
     // Order managers must receive worker arrival/completion reports even when
@@ -100,20 +115,26 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const id = newId('ord'); const customerId = data.customerId || (newCustomer ? newId('cus') : '');
     if (!customerId) throw new Error('يرجى اختيار عميل أو إدخال بيانات عميل جديد.');
     const now = new Date().toISOString(); const companyId = company(); const history = data.paymentHistory || []; const totalPaid = Math.max(data.deposit || 0, history.reduce((sum, entry) => sum + (entry.amount || 0), 0)); const totalPrice = data.totalPrice || 0;
-    const order: Order = { ...sanitizeData(data), id, companyId, customerId, orderSource: data.orderSource || 'other', workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: now, updatedAt: now };
+    const eventDate = data.eventDate || data.weddingDate;
+    const order: Order = { ...sanitizeData(data), id, companyId, customerId, eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), archivedAt: null, orderSource: data.orderSource || 'other', workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: now, updatedAt: now };
     const customer: Customer | undefined = newCustomer ? { ...sanitizeData(newCustomer), id: customerId, companyId, orderIds: [id], createdAt: now, updatedAt: now } : undefined;
     const result = await orderInventoryTransaction.create(companyId, order, customer);
     if (!result.success) failure(result);
     return id;
   }, [company]);
   const updateOrder = useCallback(async (id: string, data: Partial<Order>) => {
-    const old = orders.find((item) => item.id === id);
+    let old = orders.find((item) => item.id === id);
+    if (!old) {
+      const fetched = await companyDataService.get<Order>(company(), 'orders', id);
+      if (fetched.success) old = fetched.data;
+    }
     if (!old) throw new Error('لم يتم العثور على الطلب.');
     if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بتعديل الطلب أو حالته.');
     const paymentHistory = data.paymentHistory || old.paymentHistory || [];
     const totalPrice = data.totalPrice ?? old.totalPrice;
     const totalPaid = Math.max(data.deposit ?? old.deposit, paymentHistory.reduce((sum, entry) => sum + (entry.amount || 0), 0));
-    const result = await orderInventoryTransaction.update(company(), id, { ...sanitizeData(data), paymentHistory, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', updatedAt: new Date().toISOString() }, old.updatedAt);
+    const eventDate = data.eventDate || data.weddingDate || old.eventDate || old.weddingDate;
+    const result = await orderInventoryTransaction.update(company(), id, { ...sanitizeData(data), eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), paymentHistory, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', updatedAt: new Date().toISOString() }, old.updatedAt);
     if (!result.success) failure(result);
   }, [authSession?.role, company, orders]);
   const deleteOrder = useCallback(async (id: string) => { const result = await orderInventoryTransaction.remove(company(), id); if (!result.success) failure(result); }, [company]);
@@ -131,7 +152,15 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     await write('workTasks', id, { ...changes, updatedAt: new Date().toISOString() }, true);
   }, [authSession?.role, profile?.workerId, workTasks, write]);
   const deleteWorkTask = useCallback(async (id: string) => { if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بحذف المهمة.'); await remove('workTasks', id); }, [authSession?.role, remove]);
-  const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'>) => { const order = orders.find((item) => item.id === id); if (!order) throw new Error('لم يتم العثور على الطلب.'); await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: newId('pay') }] }); }, [orders, updateOrder]);
+  const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'>) => {
+    let order = orders.find((item) => item.id === id);
+    if (!order) {
+      const fetched = await companyDataService.get<Order>(company(), 'orders', id);
+      if (fetched.success) order = fetched.data;
+    }
+    if (!order) throw new Error('لم يتم العثور على الطلب.');
+    await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: newId('pay') }] });
+  }, [company, orders, updateOrder]);
   const addRecord = useCallback(async <T extends object>(name: CompanyCollection, prefix: string, data: T) => { const id = newId(prefix); await write(name, id, { ...sanitizeData(data), id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); return id; }, [write]);
   const updateRecord = useCallback(async <T extends object>(name: CompanyCollection, id: string, data: T) => write(name, id, { ...sanitizeData(data), updatedAt: new Date().toISOString() }, true), [write]);
   const updateSettings = useCallback(async (data: Partial<CompanySettings>) => { const next = { ...settings, ...sanitizeData(data) }; const result = await companyDataService.setSettings(company(), next); if (!result.success) failure(result); }, [company, settings]);

@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "npm run test:unit && npm run test:functions && npm run test:firestore-rules",
-    "test:unit": "tsx --test tests/dashboardNormalization.test.ts tests/globalSearch.test.ts tests/importantAlerts.test.ts tests/monthlyCash.test.ts tests/orderInventoryMath.test.ts tests/orderPayments.test.ts tests/platformPermissions.test.ts tests/workerContactAccess.test.ts",
+    "test:unit": "tsx --test tests/dashboardNormalization.test.ts tests/globalSearch.test.ts tests/importantAlerts.test.ts tests/monthlyCash.test.ts tests/orderInventoryMath.test.ts tests/orderPayments.test.ts tests/platformPermissions.test.ts tests/reportInsights.test.ts tests/workerContactAccess.test.ts",
     "test:functions": "npm --prefix functions test",
     "test:dashboard": "tsx --test tests/dashboardNormalization.test.ts",
     "test:global-search": "tsx --test tests/globalSearch.test.ts",

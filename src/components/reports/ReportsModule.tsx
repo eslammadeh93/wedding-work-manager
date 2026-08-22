@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   BarChart3,
   Download,
@@ -18,22 +19,78 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 import { calculateMonthlyCash } from '../../utils/monthlyCash';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
 import { formatMoney, MoneyValue } from '../ui/MoneyValue';
+import { buildCustomerSourceBreakdown, buildMonthlyComparison, buildServiceProfitability } from '../../utils/reportInsights';
+import { companyDataService } from '../../multiTenant/data/companyDataService';
+import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
   const { orders, expenses, inventory, settings } = useData();
+  const { authSession, profile } = useAuth();
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const reportDateBasis: 'event' = 'event';
+  const [reportDataOrders, setReportDataOrders] = useState<typeof orders>([]);
+  const [isLoadingReportData, setIsLoadingReportData] = useState(false);
+  const [reportDataError, setReportDataError] = useState<string | null>(null);
+
+  const companyId = useMemo(() => {
+    if (!authSession || profile?.role === 'worker') return null;
+    try { return trustedCompanyIdFromSession(authSession); } catch { return null; }
+  }, [authSession, profile?.role]);
+  const usesReportQuery = USE_MULTI_TENANT_DATA && Boolean(companyId);
+
+  useEffect(() => {
+    if (!usesReportQuery || !companyId) return;
+    let cancelled = false;
+    setIsLoadingReportData(true); setReportDataError(null);
+    const from = `${selectedYear}-01-01`;
+    const to = `${selectedYear}-12-31`;
+    void (async () => {
+      const collected: typeof orders = [];
+      let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+      // Reports are loaded on demand for the selected year, not with the app's
+      // initial data. The cap protects the browser if a year is unusually busy.
+      for (let page = 0; page < 20; page += 1) {
+        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, { scope: 'all', pageSize: 100, dateField: 'eventDate', dateFrom: from, dateTo: to, cursor });
+        if (!result.success || !result.data) {
+          if (!cancelled) setReportDataError(result.message || 'تعذر تحميل بيانات التقرير.');
+          break;
+        }
+        collected.push(...result.data.records);
+        if (!result.data.hasMore || !result.data.cursor) break;
+        cursor = result.data.cursor;
+      }
+      if (!cancelled) { setReportDataOrders(collected); setIsLoadingReportData(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, selectedYear, usesReportQuery]);
+
+  const sourceOrders = usesReportQuery ? reportDataOrders : orders;
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>([new Date().getFullYear()]);
+    sourceOrders.forEach((order) => {
+      const year = new Date(order.eventDate || order.weddingDate).getFullYear();
+      if (Number.isFinite(year)) years.add(year);
+    });
+    expenses.forEach((expense) => {
+      const year = new Date(expense.date).getFullYear();
+      if (Number.isFinite(year)) years.add(year);
+    });
+    return [...years].sort((a, b) => b - a);
+  }, [expenses, sourceOrders]);
 
   // Filtered orders & company finances by month/year & date basis
-  const reportOrders = orders.filter((o) => {
+  const reportOrders = sourceOrders.filter((o) => {
     const targetDateStr = o.eventDate || o.weddingDate;
     const d = new Date(targetDateStr);
     return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth;
@@ -49,7 +106,7 @@ export const ReportsModule: React.FC = () => {
 
   const monthCapital = monthCapitalList.reduce((sum, e) => sum + e.amount, 0);
   const monthGeneralExpenses = monthGeneralExpensesList.reduce((sum, e) => sum + e.amount, 0);
-  const cashSummary = calculateMonthlyCash(orders, expenses, selectedYear, selectedMonth);
+  const cashSummary = calculateMonthlyCash(sourceOrders, expenses, selectedYear, selectedMonth);
   const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' });
 
   // Category breakdown of General Expenses
@@ -68,10 +125,14 @@ export const ReportsModule: React.FC = () => {
   // Keep order profitability completely separate from company capital and
   // operating expenses. The latter are shown in their own financial ledger.
   const netProfit = totalRevenue - totalOrderExpenses;
+  const monthlyComparison = useMemo(() => buildMonthlyComparison(sourceOrders, expenses, selectedYear), [expenses, sourceOrders, selectedYear]);
+  const serviceProfitability = useMemo(() => buildServiceProfitability(reportOrders, language), [language, reportOrders]);
+  const customerSourceBreakdown = useMemo(() => buildCustomerSourceBreakdown(reportOrders), [reportOrders]);
+  const comparisonMax = Math.max(...monthlyComparison.map((item) => Math.max(item.revenue, item.directCosts, Math.abs(item.netProfit))), 1);
 
   // Top Rented Inventory Items count
   const itemUsageMap: Record<string, number> = {};
-  orders.forEach((ord) => {
+  sourceOrders.forEach((ord) => {
     if (ord.reservedItems) {
       ord.reservedItems.forEach((res) => {
         itemUsageMap[res.inventoryItemName] = (itemUsageMap[res.inventoryItemName] || 0) + res.quantity;
@@ -184,15 +245,27 @@ export const ReportsModule: React.FC = () => {
       Amount: e.amount,
       AddedBy: e.addedBy || '',
     }));
+    const comparisonExportData = monthlyComparison.map((item) => ({
+      Month: new Date(selectedYear, item.month, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long' }),
+      Orders: item.orderCount, Revenue: item.revenue, 'Direct costs': item.directCosts, 'Order net profit': item.netProfit, 'Operating expenses': item.operatingExpenses,
+    }));
+    const servicesExportData = serviceProfitability.map((item) => ({ Service: item.service, Orders: item.orderCount, Revenue: item.revenue, 'Direct costs': item.directCosts, 'Estimated net profit': item.netProfit }));
+    const sourcesExportData = customerSourceBreakdown.map((item) => ({ Source: getOrderSourceLabel(item.source, language), Orders: item.orderCount, Revenue: item.revenue, Collected: item.collected, 'Estimated net profit': item.netProfit }));
 
     const wb = XLSX.utils.book_new();
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     const wsOrders = XLSX.utils.json_to_sheet(ordersExportData);
     const wsExpenses = XLSX.utils.json_to_sheet(expensesExportData);
+    const wsComparison = XLSX.utils.json_to_sheet(comparisonExportData);
+    const wsServices = XLSX.utils.json_to_sheet(servicesExportData);
+    const wsSources = XLSX.utils.json_to_sheet(sourcesExportData);
 
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Financial Summary');
     XLSX.utils.book_append_sheet(wb, wsOrders, 'Orders');
     XLSX.utils.book_append_sheet(wb, wsExpenses, 'Expenses');
+    XLSX.utils.book_append_sheet(wb, wsComparison, 'Monthly comparison');
+    XLSX.utils.book_append_sheet(wb, wsServices, 'Service profitability');
+    XLSX.utils.book_append_sheet(wb, wsSources, 'Customer sources');
 
     XLSX.writeFile(wb, `Wedding_ERP_Data_${selectedYear}_${selectedMonth + 1}.xlsx`);
   };
@@ -251,7 +324,7 @@ export const ReportsModule: React.FC = () => {
             onChange={(e) => setSelectedYear(Number(e.target.value))}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
           >
-            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+            {availableYears.map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>
@@ -261,9 +334,50 @@ export const ReportsModule: React.FC = () => {
 
         <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-900/50">
           <ReceiptText className="w-4 h-4" />
-          <span>{language === 'ar' ? 'الحساب حسب تاريخ التحصيل أو الصرف الفعلي' : 'Calculated from actual collection and spending dates'}</span>
+          <span>{isLoadingReportData ? (language === 'ar' ? 'جارٍ تحميل بيانات السنة...' : 'Loading year data...') : (language === 'ar' ? 'الحساب حسب تاريخ التحصيل أو الصرف الفعلي' : 'Calculated from actual collection and spending dates')}</span>
         </div>
+        {reportDataError && <p role="alert" className="w-full text-xs font-bold text-rose-600 dark:text-rose-400">{reportDataError}</p>}
       </div>
+
+      {/* Growth and profitability insights for the selected year/month. */}
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-5">
+            <div>
+              <h3 className="font-black text-slate-900 dark:text-white flex items-center gap-2"><TrendingUp className="w-5 h-5 text-emerald-500" />{language === 'ar' ? 'مقارنة الأشهر' : 'Monthly comparison'}</h3>
+              <p className="text-xs text-slate-500 mt-1">{language === 'ar' ? `الإيراد والتكلفة وصافي ربح الأوردرات خلال ${selectedYear}` : `Order revenue, cost, and net profit in ${selectedYear}`}</p>
+            </div>
+            <span className="text-[10px] font-black px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800">{selectedYear}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {monthlyComparison.map((item) => {
+              const label = new Date(selectedYear, item.month, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'short' });
+              const revenueWidth = Math.max(item.revenue ? 5 : 0, Math.round((item.revenue / comparisonMax) * 100));
+              const costWidth = Math.max(item.directCosts ? 5 : 0, Math.round((item.directCosts / comparisonMax) * 100));
+              return <div key={item.month} className="p-3 rounded-2xl border border-slate-100 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-800/40">
+                <div className="flex items-center justify-between text-[11px] font-black text-slate-700 dark:text-slate-200"><span>{label}</span><span>{item.orderCount}</span></div>
+                <div className="mt-3 space-y-1.5">
+                  <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${revenueWidth}%` }} /></div>
+                  <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-rose-500 rounded-full" style={{ width: `${costWidth}%` }} /></div>
+                </div>
+                <MoneyValue amount={item.netProfit} className={`mt-2 block text-xs font-black ${item.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`} />
+              </div>;
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3 text-[10px] font-bold text-slate-500"><span className="inline-flex items-center gap-1"><i className="w-2 h-2 bg-emerald-500 rounded-full" />{language === 'ar' ? 'الإيراد' : 'Revenue'}</span><span className="inline-flex items-center gap-1"><i className="w-2 h-2 bg-rose-500 rounded-full" />{language === 'ar' ? 'التكاليف المباشرة' : 'Direct costs'}</span><span>{language === 'ar' ? 'الرقم أسفل كل شهر = صافي ربح الأوردرات.' : 'The number under each month is order net profit.'}</span></div>
+        </div>
+
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="mb-5"><h3 className="font-black text-slate-900 dark:text-white flex items-center gap-2"><ClipboardList className="w-5 h-5 text-violet-500" />{language === 'ar' ? 'ربحية أنواع الخدمات' : 'Service profitability'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'حسب خدمات الموردين المسجلة في أوردرات الشهر.' : 'Based on supplier service lines recorded on this month’s orders.'}</p></div>
+          {serviceProfitability.length === 0 ? <p className="py-8 text-center text-sm text-slate-400">{t('noData')}</p> : <div className="space-y-2.5">{serviceProfitability.map((item) => <div key={item.service} className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-800/40 flex items-center justify-between gap-3"><div className="min-w-0"><p className="font-black text-sm text-slate-800 dark:text-white truncate">{item.service}</p><p className="mt-1 text-[11px] text-slate-500">{item.orderCount} {language === 'ar' ? 'أوردر' : 'orders'} · {language === 'ar' ? 'إيراد' : 'Revenue'} {formatMoney(item.revenue)}</p></div><MoneyValue amount={item.netProfit} className={`shrink-0 text-sm font-black ${item.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`} /></div>)}</div>}
+          <p className="mt-4 text-[10px] leading-5 text-violet-700 dark:text-violet-300">{language === 'ar' ? 'في الأوردر الذي يحتوي أكثر من نوع خدمة، يتم توزيع الإيراد والتكاليف المباشرة بالتساوي كتقدير حتى تتوفر أسعار منفصلة لكل خدمة.' : 'For orders with multiple service types, revenue and direct costs are allocated equally until per-service prices are available.'}</p>
+        </div>
+      </section>
+
+      <section className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="mb-5"><h3 className="font-black text-slate-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-5 h-5 text-amber-500" />{language === 'ar' ? 'مصادر العملاء' : 'Customer sources'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'أداء كل مصدر في الشهر المحدد.' : 'Performance by lead source in the selected month.'}</p></div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{customerSourceBreakdown.map((item) => <div key={item.source} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/40"><div className="flex items-center justify-between gap-2"><span className="font-black text-sm text-slate-900 dark:text-white">{getOrderSourceLabel(item.source, language)}</span><span className="text-xs font-black px-2 py-1 rounded-lg bg-white dark:bg-slate-900">{item.orderCount}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><div><p className="text-slate-500">{language === 'ar' ? 'الإيراد' : 'Revenue'}</p><MoneyValue amount={item.revenue} className="mt-1 text-sm font-black text-slate-800 dark:text-white" /></div><div><p className="text-slate-500">{language === 'ar' ? 'المحصّل' : 'Collected'}</p><MoneyValue amount={item.collected} className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400" /></div></div><div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between text-xs"><span className="text-slate-500">{language === 'ar' ? 'صافي الربح' : 'Net profit'}</span><MoneyValue amount={item.netProfit} className={`font-black ${item.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`} /></div></div>)}</div>
+      </section>
 
       {/* Desktop-first monthly safe snapshot. */}
       <section className="p-5 md:p-6 bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100 rounded-[28px] border border-slate-200 dark:border-[#39272e] shadow-xl space-y-5" dir={language === 'ar' ? 'rtl' : 'ltr'}>

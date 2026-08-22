@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -90,7 +90,7 @@ export const syncWorkerOrderAccess = onDocumentWritten({ document: 'companies/{c
 
   const before = event.data.before.exists ? event.data.before.data() : undefined;
   const after = event.data.after.data() || {};
-  if (after.deletedAt) {
+  if (after.deletedAt || after.archivedAt) {
     batch.delete(workerOrderRef);
     batch.delete(contactRef);
     await batch.commit();
@@ -144,6 +144,80 @@ export const purgeExpiredRecycleBinItems = onSchedule({ schedule: '15 2 * * *', 
     await batch.commit();
     logger.info('Purged expired recycle-bin records', { collectionName, count: expired.size });
   }
+});
+
+/**
+ * Keeps the operational orders query small. New/updated orders carry an
+ * archiveEligibleAt value, so this job uses indexed filters rather than
+ * scanning every company order. Archived records stay recoverable in
+ * Firestore and are simply excluded from day-to-day pages.
+ */
+export const archiveOldFinishedOrders = onSchedule({ schedule: '35 2 * * *', timeZone: 'UTC', region: 'us-central1' }, async () => {
+  const now = new Date().toISOString();
+  const terminalStatuses = ['completed', 'returned', 'cancelled', 'cancelled_deposit_retained'];
+  const eligible = await db.collectionGroup('orders')
+    .where('archiveEligibleAt', '<=', now)
+    .where('archivedAt', '==', null)
+    .where('orderStatus', 'in', terminalStatuses)
+    .limit(400)
+    .get();
+  if (eligible.empty) return;
+
+  const batch = db.batch();
+  eligible.docs.forEach((snapshot) => {
+    batch.update(snapshot.ref, { archivedAt: now, updatedAt: now });
+    const companyRef = snapshot.ref.parent.parent;
+    if (companyRef) {
+      batch.delete(companyRef.collection('workerOrders').doc(snapshot.id));
+      batch.delete(companyRef.collection('workerOrderContacts').doc(snapshot.id));
+    }
+  });
+  await batch.commit();
+  logger.info('Archived old finished orders', { count: eligible.size });
+});
+
+/**
+ * One-time, resumable migration for records created before archiveEligibleAt
+ * was introduced. It processes 350 finished orders a night and saves a
+ * cursor, so an established company is never forced through a full client
+ * download or a single expensive backend scan.
+ */
+export const backfillLegacyOrderArchiveFields = onSchedule({ schedule: '50 2 * * *', timeZone: 'UTC', region: 'us-central1' }, async () => {
+  const maintenanceRef = db.collection('systemMaintenance').doc('orderArchiveBackfill');
+  const maintenance = await maintenanceRef.get();
+  if (maintenance.data()?.complete === true) return;
+
+  const cursorDate = typeof maintenance.data()?.lastEventDate === 'string' ? maintenance.data()?.lastEventDate : '';
+  const cursorPath = typeof maintenance.data()?.lastOrderPath === 'string' ? maintenance.data()?.lastOrderPath : '';
+  const terminalStatuses = ['completed', 'returned', 'cancelled', 'cancelled_deposit_retained'];
+  let source = db.collectionGroup('orders')
+    .where('orderStatus', 'in', terminalStatuses)
+    .orderBy('eventDate', 'asc')
+    .orderBy(FieldPath.documentId(), 'asc')
+    .limit(350);
+  if (cursorDate && cursorPath) source = source.startAfter(cursorDate, db.doc(cursorPath));
+  const records = await source.get();
+  if (records.empty) {
+    await maintenanceRef.set({ complete: true, completedAt: new Date().toISOString() }, { merge: true });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const batch = db.batch();
+  records.docs.forEach((snapshot) => {
+    const data = snapshot.data();
+    const eventDate = String(data.eventDate || data.weddingDate || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return;
+    const eligibleAt = new Date(`${eventDate}T12:00:00Z`);
+    eligibleAt.setUTCMonth(eligibleAt.getUTCMonth() + 6);
+    const updates: Record<string, string> = { archiveEligibleAt: eligibleAt.toISOString() };
+    if (eligibleAt.toISOString() <= now && !data.archivedAt) updates.archivedAt = now;
+    batch.update(snapshot.ref, updates);
+  });
+  const last = records.docs[records.docs.length - 1];
+  batch.set(maintenanceRef, { lastEventDate: String(last.data().eventDate || last.data().weddingDate || ''), lastOrderPath: last.ref.path, updatedAt: now, complete: false }, { merge: true });
+  await batch.commit();
+  logger.info('Backfilled legacy order archive fields', { count: records.size });
 });
 
 type RecycleBinDeleteRequest = { type?: unknown; id?: unknown };

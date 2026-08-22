@@ -182,6 +182,10 @@ export interface Order {
   activityLogs?: OrderActivityLog[];
   createdAt: string;
   updatedAt: string;
+  /** Set by the archive job after a finished order has been inactive for six months. */
+  archivedAt?: string | null;
+  /** Precomputed at write time so the archive job can query without scanning all orders. */
+  archiveEligibleAt?: string;
   deletedAt?: string | null;
   purgeAt?: string | null;
 }
