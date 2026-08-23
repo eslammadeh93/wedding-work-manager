@@ -10,12 +10,17 @@ firebase.initializeApp({
   appId: '1:1072232660356:web:318b463f2167c6e5b831d1',
 });
 const messaging = firebase.messaging();
-const CACHE_NAME = 'wwm-app-shell-v2';
+const CACHE_NAME = 'wwm-app-shell-v3';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
+});
+
+// The page asks for activation after it is sent to the background, preventing
+// an update from interrupting a user in the middle of an order form.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

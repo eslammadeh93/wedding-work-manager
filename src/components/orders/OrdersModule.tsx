@@ -175,17 +175,22 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     if (!useServerPagination || !managerCompanyId) return;
     let cancelled = false;
     setIsLoadingPage(true); setPageError(null);
-    void companyDataService.getOrderPage<Order>(managerCompanyId, pageRequest).then((result) => {
+    const applyPage = (page: { records: Order[]; cursor: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean }) => {
       if (cancelled) return;
-      if (!result.success || !result.data) {
-        setPagedOrders([]); setPageCursor(null); setHasMorePages(false);
-        setPageError(result.message || 'تعذر تحميل الطلبات.');
-      } else {
-        setPagedOrders(result.data.records); setPageCursor(result.data.cursor); setHasMorePages(result.data.hasMore);
-      }
+      setPagedOrders(page.records); setPageCursor(page.cursor); setHasMorePages(page.hasMore);
       setIsLoadingPage(false);
+    };
+    const unsubscribe = companyDataService.subscribeOrderPage<Order>(managerCompanyId, pageRequest, applyPage, (error) => {
+      if (cancelled) return;
+      // Keep the indexed realtime path as the normal case, but retain the
+      // bounded fallback for a Firestore index that is still being created.
+      void companyDataService.getOrderPage<Order>(managerCompanyId, pageRequest).then((result) => {
+        if (cancelled) return;
+        if (result.success && result.data) applyPage(result.data);
+        else { setPagedOrders([]); setPageCursor(null); setHasMorePages(false); setPageError(error.message || result.message || 'تعذر تحميل الطلبات.'); setIsLoadingPage(false); }
+      });
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; unsubscribe(); };
   }, [managerCompanyId, pageRequest, useServerPagination]);
 
   useEffect(() => {
@@ -272,9 +277,24 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   };
 
   const scopedOrders = useMemo(
-    () => sourceOrders.filter(matchesWorkerAccess),
+    () => sourceOrders.filter((order) => !order.deletedAt && matchesWorkerAccess(order)),
     [sourceOrders, isWorker, workerId, profile?.displayName],
   );
+
+  const deleteVisibleOrder = async (order: Order) => {
+    await deleteOrder(order.id);
+    // A transaction can take a short moment to reach the page listener.
+    // Remove it optimistically so a second delete is never offered meanwhile.
+    if (useServerPagination) {
+      setPagedOrders((current) => current.filter((item) => item.id !== order.id));
+      setOrderScopeCounts((current) => !current ? current : finishedOrderStatuses.has(order.orderStatus)
+        ? { ...current, finished: Math.max(0, current.finished - 1) }
+        : { ...current, active: Math.max(0, current.active - 1) });
+    }
+    setViewingOrder((current) => current?.id === order.id ? null : current);
+    setEditingOrder((current) => current?.id === order.id ? null : current);
+    setPrintingOrder((current) => current?.id === order.id ? null : current);
+  };
 
   const activeOrdersCount = useMemo(
     () => useServerPagination && orderScopeCounts ? orderScopeCounts.active : scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
@@ -1087,7 +1107,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                               <button
                                 onClick={async () => {
                                   if (window.confirm('سيُنقل الأوردر إلى سلة المحذوفات لمدة 30 يومًا وسيتم تحرير مخزونه المحجوز. هل تريد المتابعة؟')) {
-                                    await deleteOrder(ord.id);
+                                    await deleteVisibleOrder(ord);
                                   }
                                 }}
                                 className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors"
@@ -1308,6 +1328,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             setViewingOrder(null);
             setPrintingOrder(ord);
           }}
+          onDelete={deleteVisibleOrder}
         />
       )}
 

@@ -112,11 +112,42 @@ function pageResult<T extends { id: string }>(snapshots: QueryDocumentSnapshot<D
 
 function matchesOrderPageRequest(data: DocumentData, request: OrderPageRequest): boolean {
   const status = String(data.orderStatus || '');
+  if (data.deletedAt) return false;
   if (request.scope === 'archived') return Boolean(data.archivedAt);
   if (data.archivedAt) return false;
   if (request.status ? status !== request.status : request.scope === 'active' ? !activeOrderStatuses.includes(status) : request.scope === 'finished' ? !finishedOrderStatuses.includes(status) : false) return false;
   return !request.paymentStatus || data.paymentStatus === request.paymentStatus;
 }
+
+const orderPageResult = <T extends { id: string }>(snapshots: QueryDocumentSnapshot<DocumentData>[], request: OrderPageRequest, pageSize: number): PageResult<T> => {
+  const records = snapshots.filter((item) => matchesOrderPageRequest(item.data(), request)).slice(0, pageSize)
+    .map((item) => ({ id: item.id, ...item.data() } as T));
+  return {
+    records,
+    cursor: snapshots.length ? snapshots[snapshots.length - 1] : null,
+    hasMore: snapshots.length > pageSize,
+  };
+};
+
+const orderPageConstraints = (request: OrderPageRequest, pageSize: number): QueryConstraint[] => {
+  const constraints: QueryConstraint[] = [];
+  const dateField = request.dateField || 'eventDate';
+  if (request.scope === 'archived') {
+    constraints.push(where('archivedAt', '>', ''), orderBy('archivedAt', 'desc'));
+  } else {
+    if (request.status) constraints.push(where('orderStatus', '==', request.status));
+    else if (request.scope !== 'all') constraints.push(where('orderStatus', 'in', request.scope === 'active' ? activeOrderStatuses : finishedOrderStatuses));
+    if (request.paymentStatus) constraints.push(where('paymentStatus', '==', request.paymentStatus));
+    if (request.dateFrom) constraints.push(where(dateField, '>=', request.dateFrom));
+    if (request.dateTo) constraints.push(where(dateField, '<=', request.dateTo));
+    constraints.push(orderBy(dateField, request.scope === 'active' ? 'asc' : 'desc'));
+  }
+  if (request.cursor) constraints.push(startAfter(request.cursor));
+  // Scan a bounded extra window so soft-deleted legacy documents never leave
+  // visible holes in a page before the scheduled purge removes them.
+  constraints.push(limit(Math.min(100, pageSize * 2)));
+  return constraints;
+};
 
 /**
  * A short-lived safety net while Firestore builds a newly deployed composite
@@ -175,26 +206,8 @@ export const companyDataService = {
   async getOrderPage<T extends { id: string }>(companyId: string, request: OrderPageRequest): Promise<DataOperationResult<PageResult<T>>> {
     try {
       const pageSize = safePageSize(request.pageSize);
-      const constraints: QueryConstraint[] = [];
-      const dateField = request.dateField || 'eventDate';
-
-      if (request.scope === 'archived') {
-        constraints.push(where('archivedAt', '>', ''), orderBy('archivedAt', 'desc'));
-      } else {
-        if (request.status) constraints.push(where('orderStatus', '==', request.status));
-        else if (request.scope !== 'all') {
-          const statuses = request.scope === 'active' ? activeOrderStatuses : finishedOrderStatuses;
-          constraints.push(where('orderStatus', 'in', statuses));
-        }
-        if (request.paymentStatus) constraints.push(where('paymentStatus', '==', request.paymentStatus));
-        if (request.dateFrom) constraints.push(where(dateField, '>=', request.dateFrom));
-        if (request.dateTo) constraints.push(where(dateField, '<=', request.dateTo));
-        constraints.push(orderBy(dateField, request.scope === 'active' ? 'asc' : 'desc'));
-      }
-      if (request.cursor) constraints.push(startAfter(request.cursor));
-      constraints.push(limit(pageSize + 1));
-      const snapshot = await getDocs(query(collection(db, firestorePaths.orders(companyId)), ...constraints));
-      return { success: true, data: pageResult<T>(snapshot.docs, pageSize) };
+      const snapshot = await getDocs(query(collection(db, firestorePaths.orders(companyId)), ...orderPageConstraints(request, pageSize)));
+      return { success: true, data: orderPageResult<T>(snapshot.docs, request, pageSize) };
     } catch (error) {
       if (isIndexUnavailable(error)) {
         try {
@@ -209,6 +222,21 @@ export const companyDataService = {
       }
       return { success: false, ...messageFor(error, 'تعذر تحميل صفحة الطلبات.') };
     }
+  },
+  /** The visible first page stays live, while older pages remain on-demand. */
+  subscribeOrderPage<T extends { id: string }>(companyId: string, request: OrderPageRequest, next: (page: PageResult<T>) => void, fail: (result: DataOperationResult<never>) => void): Unsubscribe {
+    const pageSize = safePageSize(request.pageSize);
+    return onSnapshot(query(collection(db, firestorePaths.orders(companyId)), ...orderPageConstraints(request, pageSize)), snapshot => {
+      next(orderPageResult<T>(snapshot.docs, request, pageSize));
+    }, error => fail({ success: false, ...messageFor(error, 'تعذر تحديث قائمة الطلبات.') }));
+  },
+  /** Deleted orders have their own live feed so the recycle bin is complete even when the order is outside the operational window. */
+  subscribeDeletedOrders<T extends { id: string }>(companyId: string, next: (records: T[]) => void, fail: (result: DataOperationResult<never>) => void): Unsubscribe {
+    const path = firestorePaths.orders(companyId); warnOnTenantRootCollection(path);
+    const source = query(collection(db, path), where('deletedAt', '>', ''), orderBy('deletedAt', 'desc'), limit(100));
+    return onSnapshot(source, snapshot => {
+      next(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as T)));
+    }, error => fail({ success: false, ...messageFor(error, 'تعذر تحديث سلة المحذوفات.') }));
   },
   /** The activity log always starts newest-first and can be extended on demand. */
   async getActivityLogPage<T extends { id: string }>(companyId: string, request: ActivityLogPageRequest = {}): Promise<DataOperationResult<PageResult<T>>> {

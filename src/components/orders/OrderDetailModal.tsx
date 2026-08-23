@@ -37,6 +37,7 @@ interface OrderDetailModalProps {
   onClose: () => void;
   onEdit: (order: Order) => void;
   onPrint: (order: Order) => void;
+  onDelete: (order: Order) => Promise<void>;
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
@@ -44,9 +45,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onClose,
   onEdit,
   onPrint,
+  onDelete,
 }) => {
   const { t, language } = useLanguage();
-  const { updateOrder, deleteOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
+  const { updateOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
   const { profile, authSession } = useAuth();
 
   const isWorker = profile?.role === 'worker';
@@ -154,7 +156,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     if (!window.confirm('سيُنقل الأوردر إلى سلة المحذوفات لمدة 30 يومًا وسيتم تحرير مخزونه المحجوز. هل تريد المتابعة؟') || isDeleting) return;
     try {
       setIsDeleting(true);
-      await deleteOrder(order.id);
+      await onDelete(order);
       onClose();
     } catch (error) {
       setLogToast(error instanceof Error ? error.message : 'تعذر حذف الطلب.');

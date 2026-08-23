@@ -33,6 +33,7 @@ const operationalWindowStart = () => {
 export function MultiTenantDataProvider({ children }: { children: React.ReactNode }) {
   const { authSession, profile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]); const [customers, setCustomers] = useState<Customer[]>([]); const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [deletedOrders, setDeletedOrders] = useState<Order[]>([]);
   const [workTasks, setWorkTasks] = useState<WorkTask[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]); const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]); const [categories, setCategories] = useState<CategoryItem[]>(defaultCategories);
@@ -40,7 +41,43 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   const [settings, setSettings] = useState<CompanySettings>(initialCompanySettings);
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState<string | null>(null); const [retryVersion, setRetryVersion] = useState(0);
 
-  const clear = useCallback(() => { setOrders([]); setWorkTasks([]); setCustomers([]); setSuppliers([]); setWorkers([]); setInventory([]); setExpenses([]); setCategories(defaultCategories); setActivityLogs([]); setNotifications([]); setSettings(initialCompanySettings); }, []);
+  // Firestore listeners confirm every write for all connected devices. These
+  // local patches cover the small gap before that acknowledgement arrives,
+  // so add/edit/delete actions never leave a stale card on screen.
+  const mergeLocal = <T extends { id: string }>(set: React.Dispatch<React.SetStateAction<T[]>>, id: string, data: object, merge: boolean) => {
+    set(current => {
+      const index = current.findIndex(item => item.id === id);
+      const next = { ...(merge && index >= 0 ? current[index] : {}), ...data, id } as T;
+      return index < 0 ? [next, ...current] : current.map(item => item.id === id ? next : item);
+    });
+  };
+  const removeLocal = <T extends { id: string }>(set: React.Dispatch<React.SetStateAction<T[]>>, id: string) => set(current => current.filter(item => item.id !== id));
+  const applyLocalWrite = useCallback((name: CompanyCollection, id: string, data: object, merge: boolean) => {
+    if (name === 'orders') mergeLocal(setOrders, id, data, merge);
+    else if (name === 'workTasks') mergeLocal(setWorkTasks, id, data, merge);
+    else if (name === 'customers') mergeLocal(setCustomers, id, data, merge);
+    else if (name === 'suppliers') mergeLocal(setSuppliers, id, data, merge);
+    else if (name === 'workers') mergeLocal(setWorkers, id, data, merge);
+    else if (name === 'inventory') mergeLocal(setInventory, id, data, merge);
+    else if (name === 'expenses') mergeLocal(setExpenses, id, data, merge);
+    else if (name === 'categories') mergeLocal(setCategories, id, data, merge);
+    else if (name === 'activityLogs') mergeLocal(setActivityLogs, id, data, merge);
+    else if (name === 'notifications') mergeLocal(setNotifications, id, data, merge);
+  }, []);
+  const applyLocalRemove = useCallback((name: CompanyCollection, id: string) => {
+    if (name === 'orders') removeLocal(setOrders, id);
+    else if (name === 'workTasks') removeLocal(setWorkTasks, id);
+    else if (name === 'customers') removeLocal(setCustomers, id);
+    else if (name === 'suppliers') removeLocal(setSuppliers, id);
+    else if (name === 'workers') removeLocal(setWorkers, id);
+    else if (name === 'inventory') removeLocal(setInventory, id);
+    else if (name === 'expenses') removeLocal(setExpenses, id);
+    else if (name === 'categories') removeLocal(setCategories, id);
+    else if (name === 'activityLogs') removeLocal(setActivityLogs, id);
+    else if (name === 'notifications') removeLocal(setNotifications, id);
+  }, []);
+
+  const clear = useCallback(() => { setOrders([]); setDeletedOrders([]); setWorkTasks([]); setCustomers([]); setSuppliers([]); setWorkers([]); setInventory([]); setExpenses([]); setCategories(defaultCategories); setActivityLogs([]); setNotifications([]); setSettings(initialCompanySettings); }, []);
   useEffect(() => {
     clear(); setLoadError(null);
     let companyId: string;
@@ -86,6 +123,13 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
         ? listenLatest<Order>('orders', setOrders, { orderByField: 'eventDate', direction: 'asc', pageSize: 75, from: { field: 'eventDate', value: operationalWindowStart() } })
         : () => undefined;
     const unsubs = [orderListener];
+    // The operational listener intentionally loads only current orders. Keep a
+    // separate realtime query for the recycle bin so deleting an old order is
+    // immediately visible there too.
+    if (!workerOnly && allowed('company:orders:read')) {
+      remaining += 1;
+      unsubs.push(companyDataService.subscribeDeletedOrders<Order>(companyId, (items) => { setDeletedOrders(items); ready(); }, onError));
+    }
     if (workerOnly && workerId) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items)), { field: 'workerId', value: workerId }));
     else if (allowed('company:orders:read')) unsubs.push(listen<WorkTask>('workTasks', (items) => setWorkTasks(sortCreated(items))));
     if (allowed('company:customers:read')) unsubs.push(listen<Customer>('customers', setCustomers));
@@ -109,8 +153,8 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   }, [authSession, clear, profile?.workerId, retryVersion]);
 
   const company = useCallback(() => trustedCompanyIdFromSession(authSession), [authSession]);
-  const write = useCallback(async <T,>(name: CompanyCollection, id: string, data: T, merge = false) => { const result = await companyDataService.set(company(), name, id, data, merge); if (!result.success) failure(result); return id; }, [company]);
-  const remove = useCallback(async (name: CompanyCollection, id: string) => { const result = await companyDataService.remove(company(), name, id); if (!result.success) failure(result); }, [company]);
+  const write = useCallback(async <T extends object,>(name: CompanyCollection, id: string, data: T, merge = false) => { const result = await companyDataService.set(company(), name, id, data, merge); if (!result.success) failure(result); applyLocalWrite(name, id, data, merge); return id; }, [applyLocalWrite, company]);
+  const remove = useCallback(async (name: CompanyCollection, id: string) => { const result = await companyDataService.remove(company(), name, id); if (!result.success) failure(result); applyLocalRemove(name, id); }, [applyLocalRemove, company]);
   const addOrder = useCallback(async (data: NewOrderData, newCustomer?: NewOrderCustomer) => {
     const id = newId('ord'); const customerId = data.customerId || (newCustomer ? newId('cus') : '');
     if (!customerId) throw new Error('يرجى اختيار عميل أو إدخال بيانات عميل جديد.');
@@ -120,8 +164,10 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const customer: Customer | undefined = newCustomer ? { ...sanitizeData(newCustomer), id: customerId, companyId, orderIds: [id], createdAt: now, updatedAt: now } : undefined;
     const result = await orderInventoryTransaction.create(companyId, order, customer);
     if (!result.success) failure(result);
+    applyLocalWrite('orders', id, order, false);
+    if (customer) applyLocalWrite('customers', customer.id, customer, false);
     return id;
-  }, [company]);
+  }, [applyLocalWrite, company]);
   const updateOrder = useCallback(async (id: string, data: Partial<Order>) => {
     let old = orders.find((item) => item.id === id);
     if (!old) {
@@ -134,10 +180,20 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const totalPrice = data.totalPrice ?? old.totalPrice;
     const totalPaid = Math.max(data.deposit ?? old.deposit, paymentHistory.reduce((sum, entry) => sum + (entry.amount || 0), 0));
     const eventDate = data.eventDate || data.weddingDate || old.eventDate || old.weddingDate;
-    const result = await orderInventoryTransaction.update(company(), id, { ...sanitizeData(data), eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), paymentHistory, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', updatedAt: new Date().toISOString() }, old.updatedAt);
+    const patch: Partial<Order> = { ...(sanitizeData(data) as Partial<Order>), eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), paymentHistory, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: (totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid') as Order['paymentStatus'], updatedAt: new Date().toISOString() };
+    const result = await orderInventoryTransaction.update(company(), id, patch, old.updatedAt);
     if (!result.success) failure(result);
-  }, [authSession?.role, company, orders]);
-  const deleteOrder = useCallback(async (id: string) => { const result = await orderInventoryTransaction.remove(company(), id); if (!result.success) failure(result); }, [company]);
+    applyLocalWrite('orders', id, patch, true);
+  }, [applyLocalWrite, authSession?.role, company, orders]);
+  const deleteOrder = useCallback(async (id: string) => {
+    const result = await orderInventoryTransaction.remove(company(), id);
+    if (!result.success) failure(result);
+    // Do not manufacture a partial order record when this historical order is
+    // not in the short operational window. The dedicated recycle-bin listener
+    // will provide the complete record; visible page cards are removed by the
+    // orders screen immediately after this succeeds.
+    if (orders.some((order) => order.id === id)) applyLocalWrite('orders', id, { ...deletionMetadata(), updatedAt: new Date().toISOString() }, true);
+  }, [applyLocalWrite, company, orders]);
   const addWorkTask = useCallback(async (data: NewWorkTaskData) => {
     const id = newId('task'); const now = new Date().toISOString();
     const task: WorkTask = { ...sanitizeData(data), id, companyId: company(), status: 'pending', createdAt: now, updatedAt: now };
@@ -180,6 +236,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     if (item.type === 'order') {
       const result = await orderInventoryTransaction.restore(company(), item.id);
       if (!result.success) failure(result);
+      setDeletedOrders((items) => items.filter((order) => order.id !== item.id));
       return;
     }
     const collection = item.type === 'customer' ? 'customers' : 'inventory';
@@ -188,7 +245,13 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   const activeOrders = useMemo(() => orders.filter((order) => !isSoftDeleted(order)), [orders]);
   const activeCustomers = useMemo(() => customers.filter((customer) => !isSoftDeleted(customer)), [customers]);
   const activeInventory = useMemo(() => inventory.filter((item) => !isSoftDeleted(item)), [inventory]);
-  const deletedItems = useMemo(() => buildRecycleBinItems(orders, customers, inventory), [orders, customers, inventory]);
+  const recycleBinOrders = useMemo(() => {
+    const itemsById = new Map<string, Order>();
+    for (const order of orders) itemsById.set(order.id, order);
+    for (const order of deletedOrders) itemsById.set(order.id, order);
+    return [...itemsById.values()];
+  }, [deletedOrders, orders]);
+  const deletedItems = useMemo(() => buildRecycleBinItems(recycleBinOrders, customers, inventory), [recycleBinOrders, customers, inventory]);
   const checkStockAvailability = useCallback((items: { inventoryItemId: string; quantity: number }[]) => { const warnings = items.flatMap(({ inventoryItemId, quantity }) => { const item = activeInventory.find((candidate) => candidate.id === inventoryItemId); return item && quantity > item.availableQuantity ? [`الكمية المطلوبة من ${item.nameAr} غير متاحة.`] : []; }); return { available: warnings.length === 0, warnings }; }, [activeInventory]);
   const financialTotals = useMemo(() => {
     const totalCapital = expenses.filter((item) => item.type === 'capital').reduce((sum, item) => sum + (item.amount || 0), 0);
