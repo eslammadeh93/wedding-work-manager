@@ -13,6 +13,7 @@ import {
   ContactRound,
   Wallet,
   Target,
+  BellRing,
   CalendarDays,
   ArchiveRestore,
 } from 'lucide-react';
@@ -35,6 +36,7 @@ export type ActiveTab =
   | 'reports'
   | 'activityLog'
   | 'workerPerformance'
+  | 'workerMovements'
   | 'settings'
   | 'members'
   | 'profile'
@@ -83,6 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'suppliers', group: 'sales', label: language === 'ar' ? 'جهات الاتصال والموردين' : 'Supplier Contacts', icon: ContactRound, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:suppliers:read' },
     { id: 'workers', group: 'operations', labelKey: 'workers', icon: HardHat, roles: ['super_admin', 'admin', 'manager'], permission: 'company:workers:read' },
     { id: 'workerPerformance', group: 'operations', label: language === 'ar' ? (userRole === 'worker' ? 'متابعة أدائي' : 'متابعة أداء العمال') : (userRole === 'worker' ? 'My Performance' : 'Worker Performance'), icon: Target, roles: ['super_admin', 'admin', 'manager', 'worker'], permission: 'company:worker_performance:read' },
+    { id: 'workerMovements', group: 'operations', label: language === 'ar' ? 'تحركات العامل' : 'Worker Movements', icon: BellRing, roles: ['super_admin', 'admin', 'manager'], permission: 'company:worker_performance:read' },
     { id: 'inventory', group: 'operations', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
     { id: 'expenses', group: 'finance', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
     { id: 'reports', group: 'finance', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },

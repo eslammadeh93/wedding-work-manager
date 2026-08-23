@@ -27,14 +27,14 @@ interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
   onCreateOrder: () => void;
   onOpenTodaysOrders: () => void;
-  onOpenWorkerMovementNotifications: () => void;
+  onOpenWorkerMovements: () => void;
 }
 
 export const DashboardModule: React.FC<DashboardModuleProps> = ({
   onNavigate,
   onCreateOrder,
   onOpenTodaysOrders,
-  onOpenWorkerMovementNotifications,
+  onOpenWorkerMovements,
 }) => {
   const { t, language } = useLanguage();
   const { profile } = useAuth();
@@ -126,7 +126,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           variant="desktop"
           onCreateOrder={onCreateOrder}
           onOpenTodaysOrders={onOpenTodaysOrders}
-          onOpenWorkerMovementNotifications={onOpenWorkerMovementNotifications}
+          onOpenWorkerMovements={onOpenWorkerMovements}
         />
       </div>
 

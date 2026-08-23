@@ -16,7 +16,7 @@ import { PlatformDashboardService } from './platformDashboard.js';
 import { PlatformRebuildService } from './platformRebuild.js';
 import { createPlatformAggregationTriggers } from './platformAggregation.js';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
-import { cairoDate, notifyMemberDevices, notifyWorkerAboutOrder } from './pushNotifications.js';
+import { cairoDate, notifyMemberDevices, notifyWorkerAboutOrder, notifyWorkerAboutTask } from './pushNotifications.js';
 
 initializeApp();
 // This back-office application has many small functions and modest traffic.
@@ -152,6 +152,66 @@ export const notifyWorkerOnOrderAssignment = onDocumentWritten({ document: 'comp
   });
 });
 
+/** Sends one push and one in-app notification when a standalone work request is assigned or reassigned. */
+export const notifyWorkerOnWorkTaskAssignment = onDocumentWritten({ document: 'companies/{companyId}/workTasks/{taskId}', region: 'us-central1' }, async event => {
+  if (!event.data?.after.exists) return;
+  const before = event.data.before.exists ? event.data.before.data() || {} : {};
+  const after = event.data.after.data() || {};
+  const previousWorkerId = typeof before.workerId === 'string' ? before.workerId.trim() : '';
+  const workerId = typeof after.workerId === 'string' ? after.workerId.trim() : '';
+  if (!workerId || workerId === previousWorkerId) return;
+  await notifyWorkerAboutTask(db, {
+    companyId: event.params.companyId,
+    workerId,
+    taskId: event.params.taskId,
+    title: String(after.title || 'طلب عمل'),
+    executionDate: String(after.executionDate || ''),
+  });
+});
+
+/** Worker order opens are logged by the client; convert the log into a private manager alert. */
+export const notifyManagersWhenWorkerOpensOrder = onDocumentCreated({ document: 'companies/{companyId}/activityLogs/{logId}', region: 'us-central1' }, async event => {
+  const log = event.data?.data() || {};
+  const workerId = typeof log.workerId === 'string' ? log.workerId.trim() : '';
+  const orderId = typeof log.orderId === 'string' ? log.orderId.trim() : '';
+  if (log.action !== 'opened' || !workerId || !orderId) return;
+
+  const companyRef = db.collection('companies').doc(event.params.companyId);
+  const recipients = await companyRef.collection('members').where('status', '==', 'active').get();
+  const workerName = String(log.workerName || 'العامل');
+  const orderNumber = String(log.orderNumber || orderId);
+  const title = 'العامل فتح الأوردر';
+  const body = `${workerName} فتح الأوردر ${orderNumber}.`;
+  const batch = db.batch();
+  recipients.docs.filter(recipient => {
+    const member = recipient.data() as { role?: string; permissions?: unknown };
+    const permissions = Array.isArray(member.permissions) ? member.permissions : [];
+    return member.role === 'company_super_admin' || member.role === 'manager' || permissions.includes('company:orders:read');
+  }).forEach(recipient => {
+    const notificationRef = companyRef.collection('notifications').doc(`worker_opened_${event.params.logId}_${recipient.id}`);
+    batch.create(notificationRef, {
+      id: notificationRef.id,
+      type: 'worker_opened',
+      title,
+      body,
+      titleAr: title,
+      titleEn: 'Worker opened order',
+      messageAr: body,
+      messageEn: 'The assigned worker opened this order.',
+      companyId: event.params.companyId,
+      orderId,
+      workerId,
+      targetUid: recipient.id,
+      read: false,
+      linkModule: 'orders',
+      referenceId: orderId,
+      navigation: { module: 'orders', referenceId: orderId },
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+  await batch.commit();
+});
+
 /** Sends browser pushes for the existing private notification stream. Worker-order
  * notifications are sent by their dedicated trigger above, so they are skipped
  * here to avoid a duplicate alert. */
@@ -161,7 +221,7 @@ export const notifyCompanyMemberAboutNotification = onDocumentCreated({ document
   const targetUid = typeof notification.targetUid === 'string' ? notification.targetUid.trim() : '';
   const title = String(notification.title || notification.titleAr || '').trim();
   const body = String(notification.body || notification.messageAr || '').trim();
-  if (!targetUid || !title || type.startsWith('worker_order_')) return;
+  if (!targetUid || !title || type.startsWith('worker_order_') || type.startsWith('worker_task_')) return;
   const memberRef = db.collection('companies').doc(event.params.companyId).collection('members').doc(targetUid);
   const member = await memberRef.get();
   if (!member.exists || member.data()?.status !== 'active') return;

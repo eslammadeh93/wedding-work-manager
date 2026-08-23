@@ -23,7 +23,7 @@ const startForegroundListener = () => {
   onMessage(messaging, (payload) => {
     const title = payload.data?.title || 'مدير أعمال الويدينج';
     const body = payload.data?.body || '';
-    if (Notification.permission === 'granted') new Notification(title, { body, icon: '/wwm-logo.png' });
+    if (Notification.permission === 'granted') new Notification(title, { body, icon: '/wwm-logo.png', badge: '/wwm-notification-crown.png' });
   });
 };
 

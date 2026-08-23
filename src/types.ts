@@ -310,7 +310,7 @@ export interface CategoryItem {
 
 export interface AppNotification {
   id: string;
-  type: 'upcoming_wedding' | 'pending_payment' | 'low_inventory' | 'worker_arrived' | 'worker_completed';
+  type: 'upcoming_wedding' | 'pending_payment' | 'low_inventory' | 'worker_opened' | 'worker_arrived' | 'worker_completed' | 'worker_order_assignment' | 'worker_order_today' | 'worker_order_tomorrow' | 'worker_task_assignment';
   titleEn?: string;
   titleAr?: string;
   messageEn?: string;
@@ -325,6 +325,7 @@ export interface AppNotification {
   orderId?: string;
   workerId?: string;
   movementId?: string;
+  taskId?: string;
   targetUid?: string;
 }
 

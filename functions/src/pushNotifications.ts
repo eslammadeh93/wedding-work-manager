@@ -13,6 +13,14 @@ type WorkerOrderPush = {
   kind: 'assignment' | 'today' | 'tomorrow';
 };
 
+type WorkerTaskPush = {
+  companyId: string;
+  workerId: string;
+  taskId: string;
+  title: string;
+  executionDate: string;
+};
+
 const titleFor = (kind: WorkerOrderPush['kind']) => kind === 'assignment' ? 'أوردر جديد تم إسناده إليك' : kind === 'today' ? 'لديك أوردر اليوم' : 'لديك أوردر غدًا';
 const bodyFor = (push: WorkerOrderPush) => {
   const orderName = push.orderNumber || push.orderId;
@@ -61,6 +69,47 @@ export async function notifyWorkerAboutOrder(db: Firestore, push: WorkerOrderPus
   const response = await notifyMemberDevices(member.ref, { title, body, orderId: push.orderId, companyId: push.companyId, url: '/?module=orders' });
   if (!response) return;
   logger.info('Worker order notification processed', { companyId: push.companyId, orderId: push.orderId, kind: push.kind, sent: response.successCount, stale: response.stale });
+}
+
+/** Notifies a worker when a standalone task is assigned to them. */
+export async function notifyWorkerAboutTask(db: Firestore, push: WorkerTaskPush): Promise<void> {
+  const companyRef = db.collection('companies').doc(push.companyId);
+  const memberMatches = await companyRef.collection('members').where('workerId', '==', push.workerId).limit(2).get();
+  const member = memberMatches.docs.find((candidate) => candidate.data().role === 'worker' && candidate.data().status === 'active');
+  if (!member) return;
+
+  const key = crypto.createHash('sha256').update(`task-assignment:${push.taskId}:${push.workerId}:${push.executionDate}`).digest('hex');
+  const deliveryRef = companyRef.collection('notificationDeliveries').doc(key);
+  try {
+    await deliveryRef.create({ ...push, kind: 'task_assignment', workerUid: member.id, createdAt: new Date().toISOString() });
+  } catch (error) {
+    if ((error as { code?: number }).code === 6) return; // ALREADY_EXISTS on trigger retry.
+    throw error;
+  }
+
+  const title = 'طلب عمل جديد تم إسناده إليك';
+  const body = `${push.title || 'طلب عمل'} — موعد التنفيذ ${push.executionDate || 'غير محدد'}.`;
+  const notificationRef = companyRef.collection('notifications').doc(`worker_task_${key}`);
+  await notificationRef.set({
+    id: notificationRef.id,
+    type: 'worker_task_assignment',
+    title,
+    body,
+    titleAr: title,
+    messageAr: body,
+    companyId: push.companyId,
+    taskId: push.taskId,
+    workerId: push.workerId,
+    targetUid: member.id,
+    read: false,
+    linkModule: 'orders',
+    referenceId: push.taskId,
+    navigation: { module: 'orders', referenceId: push.taskId },
+    createdAt: new Date().toISOString(),
+  }, { merge: true });
+
+  const response = await notifyMemberDevices(member.ref, { title, body, taskId: push.taskId, companyId: push.companyId, url: '/?module=orders' });
+  if (response) logger.info('Worker task notification processed', { companyId: push.companyId, taskId: push.taskId, sent: response.successCount, stale: response.stale });
 }
 
 /** Delivers a data-only web push to every browser registered by one company member. */

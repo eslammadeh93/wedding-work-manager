@@ -33,6 +33,7 @@ const CalendarModule = lazy(() => import('./components/calendar/CalendarModule')
 const ReportsModule = lazy(() => import('./components/reports/ReportsModule').then(({ ReportsModule }) => ({ default: ReportsModule })));
 const ActivityLogModule = lazy(() => import('./components/activityLogs/ActivityLogModule').then(({ ActivityLogModule }) => ({ default: ActivityLogModule })));
 const WorkerPerformanceModule = lazy(() => import('./components/workerPerformance/WorkerPerformanceModule').then(({ WorkerPerformanceModule }) => ({ default: WorkerPerformanceModule })));
+const WorkerMovementsModule = lazy(() => import('./components/workerPerformance/WorkerMovementsModule').then(({ WorkerMovementsModule }) => ({ default: WorkerMovementsModule })));
 const SettingsModule = lazy(() => import('./components/settings/SettingsModule').then(({ SettingsModule }) => ({ default: SettingsModule })));
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
@@ -52,10 +53,11 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
+  workerMovements: 'company:worker_performance:read',
   settings: 'company:settings:read', members: 'company:members:read',
   recycleBin: 'company:settings:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -67,6 +69,7 @@ const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<
   orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
   workers: ['super_admin', 'admin', 'manager'],
   workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
+  workerMovements: ['super_admin', 'admin', 'manager'],
   customers: ['super_admin', 'admin', 'manager', 'employee'],
   suppliers: ['super_admin', 'admin', 'manager', 'employee'],
   inventory: ['super_admin', 'admin', 'manager'],
@@ -115,6 +118,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'العمال';
       case 'workerPerformance':
         return 'متابعة الأداء';
+      case 'workerMovements':
+        return 'تحركات العامل';
       case 'customers':
         return 'العملاء';
       case 'suppliers':
@@ -150,6 +155,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Workers';
       case 'workerPerformance':
         return 'Worker Performance';
+      case 'workerMovements':
+        return 'Worker Movements';
       case 'customers':
         return 'Customers';
       case 'suppliers':
@@ -188,7 +195,6 @@ function AppContent() {
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
   const [todaysOrdersRequest, setTodaysOrdersRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
-  const [workerMovementNotificationsOnly, setWorkerMovementNotificationsOnly] = useState(false);
   const [restoredTabForUid, setRestoredTabForUid] = useState<string | null>(null);
 
   // The browser history cannot be erased, but once a session ends every
@@ -301,9 +307,8 @@ function AppContent() {
     setTodaysOrdersRequest((request) => request + 1);
   };
 
-  const handleOpenWorkerMovementNotifications = () => {
-    setWorkerMovementNotificationsOnly(true);
-    setIsNotifDrawerOpen(true);
+  const handleOpenWorkerMovements = () => {
+    setActiveTab('workerMovements');
   };
 
   // 1. App Startup Loading State
@@ -329,7 +334,6 @@ function AppContent() {
       <Navbar
         onOpenSearch={() => setIsSearchOpen(true)}
         onToggleNotificationDrawer={() => {
-          setWorkerMovementNotificationsOnly(false);
           setIsNotifDrawerOpen(!isNotifDrawerOpen);
         }}
         onNavigateDashboard={() => setActiveTab('dashboard')}
@@ -366,10 +370,11 @@ function AppContent() {
               </div>
             }
           >
-            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovementNotifications={handleOpenWorkerMovementNotifications} /></CompanyTabGuard>}
+            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovements={handleOpenWorkerMovements} /></CompanyTabGuard>}
             {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} todaysOrdersRequest={todaysOrdersRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
             {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}
+            {activeTab === 'workerMovements' && <CompanyTabGuard tab="workerMovements"><WorkerMovementsModule /></CompanyTabGuard>}
             {activeTab === 'customers' && <CompanyTabGuard tab="customers"><CustomersModule /></CompanyTabGuard>}
             {activeTab === 'suppliers' && <CompanyTabGuard tab="suppliers"><SuppliersModule /></CompanyTabGuard>}
             {activeTab === 'inventory' && <CompanyTabGuard tab="inventory"><InventoryModule /></CompanyTabGuard>}
@@ -401,16 +406,14 @@ function AppContent() {
         isOpen={isNotifDrawerOpen}
         onClose={() => {
           setIsNotifDrawerOpen(false);
-          setWorkerMovementNotificationsOnly(false);
         }}
         onNavigate={handleNavigate}
-        workerMovementsOnly={workerMovementNotificationsOnly}
       />
 
       <MobileManagerNav
         onCreateOrder={handleCreateOrder}
         onOpenTodaysOrders={handleOpenTodaysOrders}
-        onOpenWorkerMovementNotifications={handleOpenWorkerMovementNotifications}
+        onOpenWorkerMovements={handleOpenWorkerMovements}
       />
 
     </div>

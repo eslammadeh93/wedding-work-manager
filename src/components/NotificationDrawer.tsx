@@ -23,7 +23,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   if (!isOpen) return null;
 
   const visibleNotifications = workerMovementsOnly
-    ? notifications.filter((notification) => ['worker_arrived', 'worker_completed'].includes(notification.type))
+    ? notifications.filter((notification) => ['worker_opened', 'worker_arrived', 'worker_completed'].includes(notification.type))
     : notifications;
   const unreadCount = visibleNotifications.filter((n) => !n.read).length;
   const markVisibleAsRead = () => {

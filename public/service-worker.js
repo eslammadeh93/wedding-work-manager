@@ -10,8 +10,9 @@ firebase.initializeApp({
   appId: '1:1072232660356:web:318b463f2167c6e5b831d1',
 });
 const messaging = firebase.messaging();
-const CACHE_NAME = 'wwm-app-shell-v3';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png'];
+// v5 refreshes the notification image cache on already-installed PWAs.
+const CACHE_NAME = 'wwm-app-shell-v5';
+const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png', '/wwm-notification-crown.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -66,7 +67,10 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(data.title || 'مدير أعمال الويدينج', {
     body: data.body || '',
     icon: '/wwm-logo.png',
-    badge: '/wwm-logo.png',
+    // Android renders the small notification badge as a monochrome alpha mask.
+    // The full logo would become an empty white square there, so use the
+    // transparent crown-only badge while retaining the branded full icon.
+    badge: '/wwm-notification-crown.png',
     data: { url: data.url || '/' },
   });
 });

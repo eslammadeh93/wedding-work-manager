@@ -8,7 +8,7 @@ import { disablePushNotifications, enablePushNotifications } from '../pushNotifi
 interface MobileManagerNavProps {
   onCreateOrder: () => void;
   onOpenTodaysOrders: () => void;
-  onOpenWorkerMovementNotifications: () => void;
+  onOpenWorkerMovements: () => void;
   variant?: 'mobile' | 'desktop';
 }
 
@@ -16,7 +16,7 @@ interface MobileManagerNavProps {
 export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   onCreateOrder,
   onOpenTodaysOrders,
-  onOpenWorkerMovementNotifications,
+  onOpenWorkerMovements,
   variant = 'mobile',
 }) => {
   const { profile, authSession } = useAuth();
@@ -39,7 +39,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
   const canViewNotifications = !USE_MULTI_TENANT_DATA || permissions.includes('company:notifications:read');
   const unreadMovements = notifications.filter(
-    (notification) => !notification.read && ['worker_arrived', 'worker_completed'].includes(notification.type),
+    (notification) => !notification.read && ['worker_opened', 'worker_arrived', 'worker_completed'].includes(notification.type),
   ).length;
 
   useEffect(() => {
@@ -109,7 +109,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
         {canViewNotifications && (
           <button
             type="button"
-            onClick={onOpenWorkerMovementNotifications}
+            onClick={onOpenWorkerMovements}
             className={`relative flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 active:scale-95 ${secondaryButtonClass}`}
           >
             <BellRing className="h-5 w-5 text-amber-500" />
