@@ -1,4 +1,16 @@
-const CACHE_NAME = 'wwm-app-shell-v1';
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.16.0/firebase-messaging-compat.js');
+
+firebase.initializeApp({
+  apiKey: 'AIzaSyCnSXwErj2fO3QmqHr_dWfVtnTu_Vc9h4k',
+  authDomain: 'wedding-work-manager-d6628.firebaseapp.com',
+  projectId: 'wedding-work-manager-d6628',
+  storageBucket: 'wedding-work-manager-d6628.firebasestorage.app',
+  messagingSenderId: '1072232660356',
+  appId: '1:1072232660356:web:318b463f2167c6e5b831d1',
+});
+const messaging = firebase.messaging();
+const CACHE_NAME = 'wwm-app-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png'];
 
 self.addEventListener('install', (event) => {
@@ -42,4 +54,19 @@ self.addEventListener('fetch', (event) => {
       return cached || network;
     }),
   );
+});
+
+messaging.onBackgroundMessage((payload) => {
+  const data = payload.data || {};
+  self.registration.showNotification(data.title || 'مدير أعمال الويدينج', {
+    body: data.body || '',
+    icon: '/wwm-logo.png',
+    badge: '/wwm-logo.png',
+    data: { url: data.url || '/' },
+  });
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data?.url || '/'));
 });

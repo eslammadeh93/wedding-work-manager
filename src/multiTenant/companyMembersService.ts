@@ -52,4 +52,6 @@ export const companyMembersService = {
   recordOrderActivity: (request: { orderId: string; action: 'opened' | 'arrived' | 'finished' }) => invoke<typeof request, CompanyMemberOperationResponse>('recordOrderActivity', request),
   recordWorkerMovement: (request: { companyId: string; orderId: string; action: 'arrived' | 'completed' }) => invoke<typeof request, CompanyMemberOperationResponse<{ movementId: string }>>('recordWorkerMovement', request),
   markNotificationsRead: (request: { notificationIds: string[] }) => invoke<typeof request, CompanyMemberOperationResponse>('markCompanyNotificationsRead', request),
+  registerWorkerPushDevice: (request: { companyId: string; workerId: string; deviceId: string; token: string }) => invoke<typeof request, CompanyMemberOperationResponse>('registerWorkerPushDevice', request),
+  setPushDevice: (request: { companyId: string; deviceId: string; token?: string; enabled: boolean }) => invoke<typeof request, CompanyMemberOperationResponse>('setPushDevice', request),
 };

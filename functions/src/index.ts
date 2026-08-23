@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
-import { onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2/options';
 import * as logger from 'firebase-functions/logger';
@@ -16,6 +16,7 @@ import { PlatformDashboardService } from './platformDashboard.js';
 import { PlatformRebuildService } from './platformRebuild.js';
 import { createPlatformAggregationTriggers } from './platformAggregation.js';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
+import { cairoDate, notifyMemberDevices, notifyWorkerAboutOrder } from './pushNotifications.js';
 
 initializeApp();
 // This back-office application has many small functions and modest traffic.
@@ -131,6 +132,51 @@ export const syncWorkerOrderAccess = onDocumentWritten({ document: 'companies/{c
   }
 });
 
+/** Sends a single, idempotent push when an order is assigned or reassigned to a worker. */
+export const notifyWorkerOnOrderAssignment = onDocumentWritten({ document: 'companies/{companyId}/orders/{orderId}', region: 'us-central1' }, async event => {
+  if (!event.data?.after.exists) return;
+  const before = event.data.before.exists ? event.data.before.data() || {} : {};
+  const after = event.data.after.data() || {};
+  if (after.deletedAt || after.archivedAt) return;
+  const previousWorkerId = typeof before.workerId === 'string' ? before.workerId.trim() : '';
+  const workerId = typeof after.workerId === 'string' ? after.workerId.trim() : '';
+  if (!workerId || workerId === previousWorkerId) return;
+  await notifyWorkerAboutOrder(db, {
+    companyId: event.params.companyId,
+    workerId,
+    orderId: event.params.orderId,
+    orderNumber: String(after.orderNumber || event.params.orderId),
+    customerName: String(after.customerName || ''),
+    eventDate: String(after.eventDate || after.weddingDate || ''),
+    kind: 'assignment',
+  });
+});
+
+/** Sends browser pushes for the existing private notification stream. Worker-order
+ * notifications are sent by their dedicated trigger above, so they are skipped
+ * here to avoid a duplicate alert. */
+export const notifyCompanyMemberAboutNotification = onDocumentCreated({ document: 'companies/{companyId}/notifications/{notificationId}', region: 'us-central1' }, async event => {
+  const notification = event.data?.data() || {};
+  const type = String(notification.type || '');
+  const targetUid = typeof notification.targetUid === 'string' ? notification.targetUid.trim() : '';
+  const title = String(notification.title || notification.titleAr || '').trim();
+  const body = String(notification.body || notification.messageAr || '').trim();
+  if (!targetUid || !title || type.startsWith('worker_order_')) return;
+  const memberRef = db.collection('companies').doc(event.params.companyId).collection('members').doc(targetUid);
+  const member = await memberRef.get();
+  if (!member.exists || member.data()?.status !== 'active') return;
+  const module = typeof notification.linkModule === 'string' ? notification.linkModule : 'dashboard';
+  const referenceId = typeof notification.referenceId === 'string' ? notification.referenceId : '';
+  const result = await notifyMemberDevices(memberRef, {
+    title,
+    body,
+    companyId: event.params.companyId,
+    notificationId: event.params.notificationId,
+    url: `/?module=${encodeURIComponent(module)}${referenceId ? `&referenceId=${encodeURIComponent(referenceId)}` : ''}`,
+  });
+  if (result) logger.info('Company notification push processed', { companyId: event.params.companyId, notificationId: event.params.notificationId, sent: result.successCount, stale: result.stale });
+});
+
 /** Permanently removes records that have remained in the recycle bin for 30 days. */
 export const purgeExpiredRecycleBinItems = onSchedule({ schedule: '15 2 * * *', timeZone: 'UTC', region: 'us-central1' }, async () => {
   // Client records use ISO strings so they remain compatible with the existing
@@ -218,6 +264,30 @@ export const backfillLegacyOrderArchiveFields = onSchedule({ schedule: '50 2 * *
   batch.set(maintenanceRef, { lastEventDate: String(last.data().eventDate || last.data().weddingDate || ''), lastOrderPath: last.ref.path, updatedAt: now, complete: false }, { merge: true });
   await batch.commit();
   logger.info('Backfilled legacy order archive fields', { count: records.size });
+});
+
+/** Reminds each assigned worker every morning about today's and tomorrow's active orders. */
+export const sendWorkerOrderReminders = onSchedule({ schedule: '0 8 * * *', timeZone: 'Africa/Cairo', region: 'us-central1' }, async () => {
+  const targets = [{ kind: 'today' as const, date: cairoDate() }, { kind: 'tomorrow' as const, date: cairoDate(1) }];
+  const terminalStatuses = new Set(['completed', 'returned', 'cancelled', 'cancelled_deposit_retained']);
+  for (const target of targets) {
+    const orders = await db.collectionGroup('orders').where('eventDate', '==', target.date).limit(400).get();
+    for (const order of orders.docs) {
+      const data = order.data();
+      const workerId = typeof data.workerId === 'string' ? data.workerId.trim() : '';
+      const companyRef = order.ref.parent.parent;
+      if (!workerId || !companyRef || data.deletedAt || data.archivedAt || terminalStatuses.has(String(data.orderStatus || ''))) continue;
+      await notifyWorkerAboutOrder(db, {
+        companyId: companyRef.id,
+        workerId,
+        orderId: order.id,
+        orderNumber: String(data.orderNumber || order.id),
+        customerName: String(data.customerName || ''),
+        eventDate: target.date,
+        kind: target.kind,
+      });
+    }
+  }
 });
 
 type RecycleBinDeleteRequest = { type?: unknown; id?: unknown };
@@ -890,3 +960,43 @@ export const recordOrderActivity = onCall(memberFunctionOptions, (request: Membe
 export const recordWorkerMovement = onCall(memberFunctionOptions, (request: MemberRequest): Promise<RecordWorkerMovementResponse> => memberService.recordWorkerMovement(request.data as RecordWorkerMovementRequest, request.auth));
 export const updateWorkerOrderStatus = onCall(memberFunctionOptions, (request: MemberRequest): Promise<UpdateWorkerOrderStatusResponse> => memberService.updateWorkerOrderStatus(request.data as UpdateWorkerOrderStatusRequest, request.auth));
 export const markCompanyNotificationsRead = onCall(memberFunctionOptions, (request: MemberRequest): Promise<MarkCompanyNotificationsReadResponse> => memberService.markNotificationsRead(request.data as MarkCompanyNotificationsReadRequest, request.auth));
+
+/** Stores a browser's FCM registration token privately under its authenticated worker account. */
+export const registerWorkerPushDevice = onCall(memberFunctionOptions, async (request: MemberRequest) => {
+  const input = (request.data || {}) as { companyId?: unknown; workerId?: unknown; deviceId?: unknown; token?: unknown };
+  const companyId = typeof input.companyId === 'string' ? input.companyId.trim() : '';
+  const workerId = typeof input.workerId === 'string' ? input.workerId.trim() : '';
+  const deviceId = typeof input.deviceId === 'string' ? input.deviceId.trim() : '';
+  const token = typeof input.token === 'string' ? input.token.trim() : '';
+  if (!request.auth) return { success: false, code: 'UNAUTHORIZED', message: 'سجّل الدخول أولًا.' };
+  if (!companyId || !workerId || !/^[A-Za-z0-9_-]{8,128}$/.test(deviceId) || token.length < 20 || token.length > 4096) return { success: false, code: 'INVALID_INPUT', message: 'بيانات جهاز الإشعارات غير صالحة.' };
+  const memberRef = db.collection('companies').doc(companyId).collection('members').doc(request.auth.uid);
+  const member = await memberRef.get();
+  if (!member.exists || member.data()?.status !== 'active') return { success: false, code: 'MEMBER_DISABLED', message: 'الحساب غير نشط.' };
+  if (member.data()?.role !== 'worker' || member.data()?.workerId !== workerId) return { success: false, code: 'FORBIDDEN', message: 'لا يمكن تسجيل إشعارات هذا الجهاز لحساب آخر.' };
+  await memberRef.collection('pushDevices').doc(deviceId).set({ token, workerId, companyId, updatedAt: new Date().toISOString() }, { merge: true });
+  return { success: true, code: 'OK', message: 'تم تفعيل إشعارات الجهاز.' };
+});
+
+/** Registers or removes the current member's browser only. This is shared by
+ * owners, managers, employees, and workers; no account can change another
+ * person's notification setting. */
+export const setPushDevice = onCall(memberFunctionOptions, async (request: MemberRequest) => {
+  const input = (request.data || {}) as { companyId?: unknown; deviceId?: unknown; token?: unknown; enabled?: unknown };
+  const companyId = typeof input.companyId === 'string' ? input.companyId.trim() : '';
+  const deviceId = typeof input.deviceId === 'string' ? input.deviceId.trim() : '';
+  const enabled = input.enabled === true;
+  const token = typeof input.token === 'string' ? input.token.trim() : '';
+  if (!request.auth) return { success: false, code: 'UNAUTHORIZED', message: 'سجّل الدخول أولًا.' };
+  if (!companyId || !/^[A-Za-z0-9_-]{8,128}$/.test(deviceId) || (enabled && (token.length < 20 || token.length > 4096))) return { success: false, code: 'INVALID_INPUT', message: 'بيانات جهاز الإشعارات غير صالحة.' };
+  const memberRef = db.collection('companies').doc(companyId).collection('members').doc(request.auth.uid);
+  const member = await memberRef.get();
+  if (!member.exists || member.data()?.status !== 'active') return { success: false, code: 'MEMBER_DISABLED', message: 'الحساب غير نشط.' };
+  const deviceRef = memberRef.collection('pushDevices').doc(deviceId);
+  if (!enabled) {
+    await deviceRef.delete();
+    return { success: true, code: 'OK', message: 'تم إيقاف إشعارات هذا الجهاز.' };
+  }
+  await deviceRef.set({ token, companyId, uid: request.auth.uid, updatedAt: new Date().toISOString() }, { merge: true });
+  return { success: true, code: 'OK', message: 'تم تفعيل إشعارات الجهاز.' };
+});

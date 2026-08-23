@@ -687,9 +687,9 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       {/* ADVANCED DUAL-DATE SEARCH & FILTERING BAR */}
       <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         {/* Row 1: Free Search & Status Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className={isWorker ? 'max-w-xl' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3'}>
           {/* Search Input */}
-          <div className="sm:col-span-2 lg:col-span-1 relative">
+          <div className={isWorker ? 'relative' : 'sm:col-span-2 lg:col-span-1 relative'}>
             <Search className="w-4 h-4 text-slate-400 absolute ltr:left-3.5 rtl:right-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -700,6 +700,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             />
           </div>
 
+          {!isWorker && <>
           {/* Status Select */}
           <select
             value={selectedStatus}
@@ -759,23 +760,22 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             <option value="PayPal">PayPal</option>
           </select>
 
-          {!isWorker && (
-            <select
-              value={selectedOrderSource}
-              onChange={(e) => setSelectedOrderSource(e.target.value)}
-              aria-label={language === 'ar' ? 'مصدر الأوردر' : 'Order source'}
-              className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
-            >
-              <option value="all">{language === 'ar' ? 'كل المصادر' : 'All sources'}</option>
-              <option value="organic">{language === 'ar' ? 'أورجانيك' : 'Organic'}</option>
-              <option value="campaign">{language === 'ar' ? 'كامبين' : 'Campaign'}</option>
-              <option value="other">{language === 'ar' ? 'أخرى' : 'Other'}</option>
-            </select>
-          )}
+          <select
+            value={selectedOrderSource}
+            onChange={(e) => setSelectedOrderSource(e.target.value)}
+            aria-label={language === 'ar' ? 'مصدر الأوردر' : 'Order source'}
+            className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+          >
+            <option value="all">{language === 'ar' ? 'كل المصادر' : 'All sources'}</option>
+            <option value="organic">{language === 'ar' ? 'أورجانيك' : 'Organic'}</option>
+            <option value="campaign">{language === 'ar' ? 'كامبين' : 'Campaign'}</option>
+            <option value="other">{language === 'ar' ? 'أخرى' : 'Other'}</option>
+          </select>
+          </>}
         </div>
 
         {/* Row 2: Dual-Date System Filters (Month/Year & Date Range) */}
-        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+        {!isWorker && <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           {/* Booking Month */}
           <div>
             <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
@@ -887,7 +887,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500"
             />
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Orders Output Count & Sorting summary */}

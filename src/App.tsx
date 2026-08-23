@@ -15,6 +15,7 @@ import { NotificationDrawer } from './components/NotificationDrawer';
 import { MobileManagerNav } from './components/MobileManagerNav';
 import { LoginPage } from './components/auth/LoginPage';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
+import { WorkerPushNotificationsPrompt } from './components/WorkerPushNotificationsPrompt';
 
 import { Menu, Crown, Loader2 } from 'lucide-react';
 import wwmLogo from './assets/wwm-logo.png';
@@ -424,6 +425,7 @@ export default function App() {
           <DataProvider>
             <AppContent />
             <PwaInstallPrompt />
+            <WorkerPushNotificationsPrompt />
           </DataProvider>
         </AuthProvider>
       </LanguageProvider>
