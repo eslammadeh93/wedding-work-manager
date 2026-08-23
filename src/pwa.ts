@@ -1,7 +1,6 @@
 /**
- * Keeps installed copies current without asking people to refresh manually.
- * A waiting worker is activated only after the app goes to the background, so
- * an open order form is never interrupted while someone is typing in it.
+ * Detects installed PWA updates for every signed-in account. The waiting
+ * worker is activated only when the user explicitly chooses "Update now".
  */
 export function registerPwa() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
@@ -12,16 +11,20 @@ export function registerPwa() {
       let updatePending = Boolean(registration.waiting);
       let reloadRequested = false;
       const announceUpdate = () => window.dispatchEvent(new Event('wwm-pwa-update-ready'));
-      const applyUpdateWhenSafe = () => {
-        if (!updatePending || document.visibilityState === 'visible' || !registration.waiting) return;
+      const applyUpdateNow = () => {
+        if (!updatePending || !registration.waiting) return;
         reloadRequested = true;
         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        // A controllerchange is expected. The fallback still gives the user a
+        // fresh complete application start if a browser delays that event.
+        window.setTimeout(() => {
+          if (reloadRequested) window.location.reload();
+        }, 4000);
       };
       const markUpdateReady = () => {
         if (!registration.waiting || !navigator.serviceWorker.controller) return;
         updatePending = true;
         announceUpdate();
-        applyUpdateWhenSafe();
       };
 
       registration.addEventListener('updatefound', () => {
@@ -32,7 +35,7 @@ export function registerPwa() {
         });
       });
       markUpdateReady();
-      document.addEventListener('visibilitychange', applyUpdateWhenSafe);
+      window.addEventListener('wwm-pwa-apply-update', applyUpdateNow);
       window.addEventListener('online', () => { void registration.update(); });
       window.setInterval(() => { void registration.update(); }, 60 * 60 * 1000);
       navigator.serviceWorker.addEventListener('controllerchange', () => {
