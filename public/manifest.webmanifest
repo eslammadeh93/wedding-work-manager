@@ -1,0 +1,20 @@
+{
+  "name": "Wedding Work Manager",
+  "short_name": "WWM",
+  "description": "إدارة أوردرات وتجهيزات حفلات الزفاف.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f2748",
+  "icons": [
+    {
+      "src": "/wwm-logo.png",
+      "sizes": "892x892",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

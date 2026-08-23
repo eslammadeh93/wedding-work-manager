@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { sanitizeText } from './utils/security';
+import { registerPwa } from './pwa';
 
 // Clean script-like content while it is being typed in regular text fields.
 // Passwords are intentionally excluded so users can choose any valid password.
@@ -19,3 +20,5 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+registerPwa();
