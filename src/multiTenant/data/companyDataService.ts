@@ -153,8 +153,7 @@ const orderPageConstraints = (request: OrderPageRequest, pageSize: number): Quer
  * A short-lived safety net while Firestore builds a newly deployed composite
  * index. Normal requests always use the fully server-filtered path below.
  */
-async function getOrderPageWhileIndexBuilds<T extends { id: string }>(companyId: string, request: OrderPageRequest): Promise<PageResult<T>> {
-  const pageSize = safePageSize(request.pageSize);
+const orderPageFallbackConstraints = (request: OrderPageRequest, pageSize: number): QueryConstraint[] => {
   const dateField = request.dateField || 'eventDate';
   const constraints: QueryConstraint[] = [];
   if (request.scope === 'archived') constraints.push(orderBy('archivedAt', 'desc'));
@@ -168,12 +167,18 @@ async function getOrderPageWhileIndexBuilds<T extends { id: string }>(companyId:
   // payment are temporarily filtered locally until the composite index is ready.
   const scanSize = Math.min(100, pageSize * 2);
   constraints.push(limit(scanSize));
+  return constraints;
+};
+
+async function getOrderPageWhileIndexBuilds<T extends { id: string }>(companyId: string, request: OrderPageRequest): Promise<PageResult<T>> {
+  const pageSize = safePageSize(request.pageSize);
+  const constraints = orderPageFallbackConstraints(request, pageSize);
   const snapshot = await getDocs(query(collection(db, firestorePaths.orders(companyId)), ...constraints));
   const matched = snapshot.docs.filter((item) => matchesOrderPageRequest(item.data(), request));
   return {
     records: matched.slice(0, pageSize).map((item) => ({ id: item.id, ...item.data() } as T)),
     cursor: snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : null,
-    hasMore: snapshot.docs.length === scanSize,
+    hasMore: snapshot.docs.length === Math.min(100, pageSize * 2),
   };
 }
 
@@ -226,9 +231,24 @@ export const companyDataService = {
   /** The visible first page stays live, while older pages remain on-demand. */
   subscribeOrderPage<T extends { id: string }>(companyId: string, request: OrderPageRequest, next: (page: PageResult<T>) => void, fail: (result: DataOperationResult<never>) => void): Unsubscribe {
     const pageSize = safePageSize(request.pageSize);
-    return onSnapshot(query(collection(db, firestorePaths.orders(companyId)), ...orderPageConstraints(request, pageSize)), snapshot => {
+    const orders = collection(db, firestorePaths.orders(companyId));
+    let fallbackUnsubscribe: Unsubscribe | undefined;
+    const unsubscribe = onSnapshot(query(orders, ...orderPageConstraints(request, pageSize)), snapshot => {
       next(orderPageResult<T>(snapshot.docs, request, pageSize));
-    }, error => fail({ success: false, ...messageFor(error, 'تعذر تحديث قائمة الطلبات.') }));
+    }, error => {
+      if (!isIndexUnavailable(error)) {
+        fail({ success: false, ...messageFor(error, 'تعذر تحديث قائمة الطلبات.') });
+        return;
+      }
+      // An index can take a short time to become available after deployment.
+      // Keep this bounded fallback live instead of degrading to a one-time
+      // fetch, so adding, editing, or deleting an order never needs refresh.
+      fallbackUnsubscribe?.();
+      fallbackUnsubscribe = onSnapshot(query(orders, ...orderPageFallbackConstraints(request, pageSize)), fallbackSnapshot => {
+        next(orderPageResult<T>(fallbackSnapshot.docs, request, pageSize));
+      }, fallbackError => fail({ success: false, ...messageFor(fallbackError, 'تعذر تحديث قائمة الطلبات.') }));
+    });
+    return () => { unsubscribe(); fallbackUnsubscribe?.(); };
   },
   /** Deleted orders have their own live feed so the recycle bin is complete even when the order is outside the operational window. */
   subscribeDeletedOrders<T extends { id: string }>(companyId: string, next: (records: T[]) => void, fail: (result: DataOperationResult<never>) => void): Unsubscribe {

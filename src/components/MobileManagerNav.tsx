@@ -1,8 +1,9 @@
-import React from 'react';
-import { BellRing, CalendarDays, Plus } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { BellOff, BellRing, CalendarDays, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
+import { disablePushNotifications, enablePushNotifications } from '../pushNotifications';
 
 interface MobileManagerNavProps {
   onCreateOrder: () => void;
@@ -11,7 +12,7 @@ interface MobileManagerNavProps {
   variant?: 'mobile' | 'desktop';
 }
 
-/** Fast, thumb-friendly actions reserved for manager accounts on small screens. */
+/** Fast actions for managers plus the notification switch for office accounts. */
 export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   onCreateOrder,
   onOpenTodaysOrders,
@@ -20,8 +21,19 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
 }) => {
   const { profile, authSession } = useAuth();
   const { notifications } = useData();
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
 
   const isManager = ['super_admin', 'admin', 'manager'].includes(profile?.role || '');
+  const isWorker = profile?.role === 'worker';
+  const isCompanyMember = Boolean(authSession?.companyId && authSession?.uid);
+  const canControlPush = isCompanyMember && !isWorker;
+  const isDesktop = variant === 'desktop';
+  // Notification permission is deliberately a handheld-only action. Desktop
+  // users should not be interrupted or offered this setting in the dashboard.
+  const showPushControl = canControlPush && !isDesktop;
+  const pushPreferenceKey = authSession?.companyId && authSession?.uid ? `wwm-push-enabled:${authSession.companyId}:${authSession.uid}` : '';
   const permissions = authSession?.permissions || [];
   const canCreateOrder = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
@@ -30,17 +42,41 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
     (notification) => !notification.read && ['worker_arrived', 'worker_completed'].includes(notification.type),
   ).length;
 
-  if (!isManager) return null;
+  useEffect(() => {
+    setPushEnabled(pushPreferenceKey ? localStorage.getItem(pushPreferenceKey) === 'true' : false);
+    setPushMessage(null);
+  }, [pushPreferenceKey]);
 
-  const isDesktop = variant === 'desktop';
+  const togglePushNotifications = async () => {
+    if (!authSession?.companyId || !authSession.uid) return;
+    setPushBusy(true); setPushMessage(null);
+    try {
+      const result = pushEnabled
+        ? await disablePushNotifications({ companyId: authSession.companyId, uid: authSession.uid })
+        : await enablePushNotifications({ companyId: authSession.companyId, uid: authSession.uid });
+      if (!result.success) {
+        setPushMessage(result.message || 'تعذر تحديث الإشعارات.');
+        return;
+      }
+      setPushEnabled((enabled) => !enabled);
+      if (pushEnabled) localStorage.removeItem(pushPreferenceKey);
+      else localStorage.setItem(pushPreferenceKey, 'true');
+    } catch {
+      setPushMessage('تعذر تحديث الإشعارات. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.');
+    } finally { setPushBusy(false); }
+  };
+
+  if (!isManager && !showPushControl) return null;
+
   const containerClass = isDesktop
-    ? 'hidden min-[1700px]:grid grid-cols-3 gap-1.5 w-full min-[1700px]:w-auto min-[1700px]:min-w-[345px]'
-    : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg min-[1700px]:hidden';
+    ? 'hidden lg:grid w-full lg:w-auto lg:min-w-[450px]'
+    : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 bg-white/95 backdrop-blur-lg dark:border-slate-700 dark:bg-slate-900/95 lg:hidden';
   const contentClass = isDesktop
     ? 'grid grid-cols-3 gap-1.5'
-    : 'mx-auto grid max-w-lg grid-cols-3 gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]';
+    : `mx-auto grid max-w-lg gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${isManager ? 'grid-cols-4' : 'grid-cols-1 max-w-[150px]'}`;
   const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 dark:border-slate-700' : 'min-h-[58px]';
   const secondaryButtonClass = isDesktop ? `${buttonClass} bg-slate-50 dark:bg-slate-800/70` : buttonClass;
+  const pushBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
 
   return (
     <nav
@@ -85,7 +121,21 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
             <span className="text-[10px] font-bold">تحرك العمال</span>
           </button>
         )}
+
+        {showPushControl && (
+          <button
+            type="button"
+            onClick={() => void togglePushNotifications()}
+            disabled={pushBusy || pushBlocked}
+            title={pushBlocked ? 'الإذن مرفوض من المتصفح؛ فعّله من إعدادات الموقع.' : pushEnabled ? 'إيقاف إشعارات هذا الجهاز' : 'تفعيل إشعارات هذا الجهاز'}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl transition-colors active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${buttonClass} ${pushEnabled ? 'bg-indigo-600 text-white hover:bg-indigo-700' : `text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 ${isDesktop ? 'bg-slate-50 dark:bg-slate-800/70' : ''}`}`}
+          >
+            {pushEnabled ? <BellOff className="h-5 w-5" /> : <BellRing className="h-5 w-5 text-amber-500" />}
+            <span className="text-[10px] font-bold">{pushBusy ? 'جارٍ الحفظ' : pushBlocked ? 'الإذن مرفوض' : pushEnabled ? 'إيقاف الإشعارات' : 'تفعيل الإشعارات'}</span>
+          </button>
+        )}
       </div>
+      {pushMessage && !isDesktop && <p role="alert" className="mx-auto max-w-lg px-3 pb-2 text-center text-[11px] font-bold text-rose-600">{pushMessage}</p>}
     </nav>
   );
 };

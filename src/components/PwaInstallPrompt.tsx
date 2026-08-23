@@ -10,11 +10,14 @@ export const PwaInstallPrompt: React.FC = () => {
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null);
   const [showIosHint, setShowIosHint] = useState(false);
   const [updateReady, setUpdateReady] = useState(false);
+  const [deferred, setDeferred] = useState(false);
+  const deferredKey = 'wwm-install-prompt-deferred-until';
 
   useEffect(() => {
+    setDeferred(Number(localStorage.getItem(deferredKey) || '0') > Date.now());
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
     const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if (!standalone && isIos) setShowIosHint(true);
+    if (!standalone && isIos && Number(localStorage.getItem(deferredKey) || '0') <= Date.now()) setShowIosHint(true);
     const handleBeforeInstall = (event: Event) => {
       event.preventDefault();
       setInstallEvent(event as InstallPromptEvent);
@@ -35,14 +38,21 @@ export const PwaInstallPrompt: React.FC = () => {
     setInstallEvent(null);
   };
 
-  if (!installEvent && !showIosHint && !updateReady) return null;
+  const deferInstall = () => {
+    // Do not keep interrupting work. Ask again after a week, or earlier if the
+    // browser emits a fresh install prompt.
+    localStorage.setItem(deferredKey, String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    setDeferred(true); setInstallEvent(null); setShowIosHint(false);
+  };
+
+  if ((!installEvent && !showIosHint && !updateReady) || (deferred && !updateReady)) return null;
   return (
     <div className="fixed bottom-4 left-4 right-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95" dir="rtl">
       <div className="min-w-0 text-right">
         <p className="text-xs font-black text-slate-900 dark:text-white">{updateReady ? 'تم تنزيل تحديث البرنامج' : 'ثبّت مدير أعمال الويدينج'}</p>
         <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{updateReady ? 'سيتم تطبيقه تلقائيًا عند الانتقال من التطبيق ثم الرجوع إليه.' : showIosHint ? 'من مشاركة Safari اختر «إضافة إلى الشاشة الرئيسية».' : 'افتحه من شاشة جهازك كتطبيق مستقل.'}</p>
       </div>
-      {updateReady ? <span className="shrink-0 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">جاهز</span> : installEvent ? <button type="button" onClick={() => void install()} className="flex shrink-0 items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-black text-white hover:bg-indigo-700"><Download className="h-4 w-4" />تثبيت</button> : <button type="button" onClick={() => setShowIosHint(false)} className="flex shrink-0 items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"><Share className="h-4 w-4" />فهمت</button>}
+      {updateReady ? <span className="shrink-0 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">جاهز</span> : <div className="flex shrink-0 items-center gap-1.5">{installEvent ? <button type="button" onClick={() => void install()} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-black text-white hover:bg-indigo-700"><Download className="h-4 w-4" />تثبيت</button> : <button type="button" onClick={() => setShowIosHint(false)} className="flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"><Share className="h-4 w-4" />فهمت</button>}<button type="button" onClick={deferInstall} className="rounded-xl px-2 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200">لاحقًا</button></div>}
     </div>
   );
 };
