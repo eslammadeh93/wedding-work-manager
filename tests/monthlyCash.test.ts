@@ -24,6 +24,7 @@ test('separates completed collections, future-order advances, and monthly outflo
   assert.equal(result.advancesFromUpcomingOrders, 400);
   assert.equal(result.completedOrderCosts, 275);
   assert.equal(result.upcomingOrderOtherExpenses, 75);
+  assert.equal(result.completedOrdersNetProfit, 725);
   assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 725);
   assert.equal(result.upcomingOrderAdvancesNet, 325);
   assert.equal(result.orderCashNet, 1050);
@@ -68,6 +69,7 @@ test('separates monthly deposits and settlements while deducting booking and com
   assert.equal(result.totalMonthlyOrderExpenses, 100);
   assert.equal(result.netMonthlyCash, 1450);
   assert.equal(result.netMonthlyOrderProfit, 3950);
+  assert.equal(result.completedOrdersNetProfit, 750);
   assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 1050);
   assert.equal(result.upcomingOrderDepositsPaid, 500);
   assert.equal(result.upcomingOrderDepositsNet, 400);
@@ -80,11 +82,47 @@ test('keeps a retained cancelled deposit in finance, separate from upcoming orde
   ], [], 2026, 7);
 
   assert.equal(result.retainedCancelledDeposits, 500);
+  assert.equal(result.completedOrdersNetProfit, 0);
   assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 500);
   assert.equal(result.advancesFromUpcomingOrders, 0);
   assert.equal(result.orderCashNet, 500);
   assert.equal(result.orderCashBalanceToDate, 500);
   assert.equal(result.collections[0]?.isRetainedDeposit, true);
+});
+
+test('headline net uses completed profit and subtracts only uncompleted-order other expenses', () => {
+  const result = calculateMonthlyCash([
+    order({
+      id: 'completed-prior-booking', bookingDate: '2026-07-22', eventDate: '2026-08-20', weddingDate: '2026-08-20',
+      orderStatus: 'completed', totalPaid: 1_000, workerCost: 200, otherExpenses: 100,
+      paymentHistory: [{ id: 'completed-paid', amount: 1_000, date: '2026-08-20', method: 'cash' }],
+    }),
+    order({ id: 'upcoming', totalPaid: 300, otherExpenses: 50, paymentHistory: [{ id: 'upcoming-deposit', amount: 300, date: '2026-08-10', method: 'cash' }] }),
+    order({ id: 'retained', bookingDate: '2026-08-04', orderStatus: 'cancelled_deposit_retained', totalPaid: 200, paymentHistory: [{ id: 'retained-deposit', amount: 200, date: '2026-08-04', method: 'cash' }] }),
+  ], [], 2026, 7);
+
+  assert.equal(result.completedOrdersNetProfit, 700);
+  assert.equal(result.netMonthlyCash, 1_150); // 700 + 300 + 200 - 50
+});
+
+test('expected monthly profit includes deposits for bookings executing in a later month', () => {
+  const result = calculateMonthlyCash([
+    order({
+      id: 'this-month', totalPrice: 1_000, workerCost: 100,
+      eventDate: '2026-08-20', weddingDate: '2026-08-20',
+    }),
+    order({
+      id: 'future-booking', bookingDate: '2026-08-10', createdAt: '2026-08-10',
+      eventDate: '2026-09-20', weddingDate: '2026-09-20', totalPaid: 500,
+      paymentHistory: [{ id: 'future-deposit', amount: 500, date: '2026-08-10', method: 'cash', type: 'deposit' }],
+    }),
+    order({
+      id: 'retained', orderStatus: 'cancelled_deposit_retained', totalPaid: 200,
+      paymentHistory: [{ id: 'retained-deposit', amount: 200, date: '2026-08-12', method: 'cash', type: 'deposit' }],
+    }),
+  ], [], 2026, 7);
+
+  assert.equal(result.netMonthlyOrderProfit, 1_600); // 900 + 500 + 200
 });
 
 test('calculates the current safe balance from collections, capital, and recognised costs only', () => {

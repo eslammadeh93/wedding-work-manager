@@ -161,6 +161,7 @@ export const ReportsModule: React.FC = () => {
       head: [['Metric', 'Amount ($)']],
       body: [
         ['Cash collected from completed orders', `$${cashSummary.collectedFromCompletedOrders.toLocaleString()}`],
+        ['Completed order net profit', `$${cashSummary.completedOrdersNetProfit.toLocaleString()}`],
         ['Advance collections from upcoming orders', `$${cashSummary.advancesFromUpcomingOrders.toLocaleString()}`],
         ['Retained deposits from cancelled orders', `$${cashSummary.retainedCancelledDeposits.toLocaleString()}`],
         ['Capital added', `$${cashSummary.capitalAdded.toLocaleString()}`],
@@ -392,11 +393,11 @@ export const ReportsModule: React.FC = () => {
           <span className="text-xs text-slate-500 dark:text-slate-400">{language === 'ar' ? 'كل الأرقام تعتمد على التحصيل والصرف المسجّل فعلياً.' : 'All figures use recorded collections and spending.'}</span>
         </div>
 
-        {/* Monthly net: every collection in this period less its recognized order costs. */}
+        {/* The headline mirrors the operational cash formula shown to the user. */}
         <div className={`p-6 md:p-7 rounded-2xl border ${cashSummary.netMonthlyCash >= 0 ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-rose-500/10 border-rose-400/30'} flex flex-col items-center text-center md:flex-row md:items-center md:text-right justify-between gap-4`}>
           <div className="w-full md:w-auto">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white"><WalletCards className="w-5 h-5 text-amber-600 dark:text-amber-300" />{language === 'ar' ? `صافي فلوس الأوردرات لشهر ${selectedMonthName}` : `Net order cash for ${selectedMonthName}`}</div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{language === 'ar' ? 'العربونات + دفعات السداد + العربونات المحتفظ بها − المصاريف الأخرى للحجوزات − أجور العمال والنقل للأوردرات المكتملة.' : 'Deposits + settlements + retained deposits − booking other expenses − worker and transport costs for completed orders.'}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{language === 'ar' ? 'صافي ربح الأوردرات المكتملة + عربونات الأوردرات غير المكتملة + العربونات المحتفظ بها − المصاريف الأخرى للأوردرات غير المكتملة فقط.' : 'Completed-order net profit + uncompleted-order advances + retained deposits − other expenses for uncompleted orders only.'}</p>
           </div>
           <MoneyValue amount={cashSummary.netMonthlyCash} className={`self-center max-w-full text-[clamp(1.875rem,9vw,3rem)] font-black tracking-tight ${cashSummary.netMonthlyCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`} />
         </div>
@@ -404,13 +405,14 @@ export const ReportsModule: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {[ 
             { label: language === 'ar' ? 'إجمالي الدخل هذا الشهر' : 'Total income this month', value: cashSummary.grossMonthlyIncome, color: 'text-emerald-700 dark:text-emerald-400' },
-            { label: language === 'ar' ? 'صافي ربح الأوردرات المكتملة + العربونات المحتفظ بها' : 'Completed order profit + retained deposits', value: cashSummary.completedOrdersNetProfitWithRetainedDeposits, color: cashSummary.completedOrdersNetProfitWithRetainedDeposits >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
+            { label: language === 'ar' ? 'صافي ربح الأوردرات المكتملة' : 'Completed order net profit', value: cashSummary.completedOrdersNetProfit, color: cashSummary.completedOrdersNetProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
+            { label: language === 'ar' ? 'عربونات أوردرات ملغاة محتفَظ بها' : 'Retained deposits from cancelled orders', value: cashSummary.retainedCancelledDeposits, color: 'text-violet-700 dark:text-violet-300' },
             { label: language === 'ar' ? 'إجمالي مقدمات الأوردرات غير المكتملة' : 'Total deposits for uncompleted orders', value: cashSummary.upcomingOrderDepositsPaid, color: 'text-cyan-700 dark:text-cyan-400' },
             { label: language === 'ar' ? 'صافي عربونات الأوردرات غير المكتملة بعد المصاريف الأخرى' : 'Uncompleted order deposits after other expenses', value: cashSummary.upcomingOrderDepositsNet, color: cashSummary.upcomingOrderDepositsNet >= 0 ? 'text-cyan-700 dark:text-cyan-400' : 'text-rose-700 dark:text-rose-400' },
             { label: language === 'ar' ? 'إجمالي مصاريف الأوردرات غير المكتملة' : 'Total upcoming-order expenses', value: cashSummary.totalMonthlyOrderExpenses, color: 'text-rose-700 dark:text-rose-400' },
             { label: language === 'ar' ? 'إجمالي المصاريف الأخرى فقط' : 'Total other expenses only', value: cashSummary.bookedOrderOtherExpenses, color: 'text-orange-700 dark:text-orange-400' },
             { label: language === 'ar' ? 'إجمالي دفعات السداد المنتظرة' : 'Expected settlement payments', value: cashSummary.expectedSettlementPayments, color: 'text-violet-700 dark:text-violet-300' },
-            { label: language === 'ar' ? 'إجمالي الربح الصافي للشهر' : 'Total net profit for the month', value: cashSummary.netMonthlyOrderProfit, color: cashSummary.netMonthlyOrderProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
+            { label: language === 'ar' ? 'الربح المتوقع خلال الشهر' : 'Expected profit by month end', value: cashSummary.netMonthlyOrderProfit, color: cashSummary.netMonthlyOrderProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
           ].map((card) => (
             <div key={card.label} className="min-h-36 min-w-0 p-4 rounded-2xl bg-slate-50 border border-slate-200 dark:bg-white/[0.03] dark:border-white/[0.09] flex flex-col items-center justify-center gap-3 text-center sm:min-h-44 sm:p-5 sm:gap-5">
               <span className="w-full text-sm font-black leading-6 text-slate-800 dark:text-slate-200">{card.label}</span>
