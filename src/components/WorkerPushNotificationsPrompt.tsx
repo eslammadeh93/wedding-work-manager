@@ -1,18 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BellOff, BellRing } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { disablePushNotifications, enablePushNotifications, hasPushHistory, listenForForegroundPushNotifications, markPushShown, showPushNotification, wasPushShown } from '../pushNotifications';
-import { useData } from '../context/DataContext';
+import { disablePushNotifications, enablePushNotifications, listenForForegroundPushNotifications } from '../pushNotifications';
 
 /** Workers activate this once; office accounts use the navigation switch. */
 export const WorkerPushNotificationsPrompt: React.FC = () => {
   const { profile, authSession } = useAuth();
-  const { notifications, loading } = useData();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const preferenceKey = authSession?.companyId && authSession?.uid ? `wwm-push-enabled:${authSession.companyId}:${authSession.uid}` : '';
   const [enabled, setEnabled] = useState(false);
-  const initialNotificationSync = useRef('');
   const isWorker = profile?.role === 'worker';
   const isCompanyMember = Boolean(authSession?.companyId && authSession?.uid);
 
@@ -48,7 +45,6 @@ export const WorkerPushNotificationsPrompt: React.FC = () => {
 
   useEffect(() => {
     setEnabled(preferenceKey ? localStorage.getItem(preferenceKey) === 'true' : false);
-    initialNotificationSync.current = '';
   }, [preferenceKey]);
 
   useEffect(() => {
@@ -70,36 +66,6 @@ export const WorkerPushNotificationsPrompt: React.FC = () => {
     });
     return () => { active = false; unsubscribe?.(); };
   }, [enabled, authSession?.companyId, authSession?.uid]);
-
-  // FCM retains data messages for offline devices (up to its delivery TTL),
-  // and this Firestore pass is a second safety net. It shows every unread
-  // notification not already shown on this device when the app reconnects.
-  useEffect(() => {
-    if (!enabled || loading || !authSession?.companyId || !authSession.uid || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    const account = `${authSession.companyId}:${authSession.uid}`;
-    if (initialNotificationSync.current !== account) {
-      initialNotificationSync.current = account;
-      // A newly enabled device should not replay the whole historical inbox.
-      // Existing devices retain their delivery history, so notifications that
-      // occurred while they were offline are still surfaced on reconnect.
-      if (!hasPushHistory({ companyId: authSession.companyId, uid: authSession.uid })) {
-        notifications.forEach(notification => markPushShown({ companyId: authSession.companyId, uid: authSession.uid, notificationId: notification.id }));
-        return;
-      }
-    }
-    notifications.filter(notification => !notification.read && !wasPushShown({ companyId: authSession.companyId!, uid: authSession.uid!, notificationId: notification.id })).forEach(notification => {
-      void showPushNotification({
-        companyId: authSession.companyId!,
-        uid: authSession.uid!,
-        data: {
-          notificationId: notification.id,
-          title: notification.titleAr || notification.title || notification.titleEn || 'مدير أعمال الويدينج',
-          body: notification.messageAr || notification.body || notification.messageEn || '',
-          url: `/?module=${encodeURIComponent(notification.linkModule || 'dashboard')}${notification.referenceId || notification.orderId ? `&referenceId=${encodeURIComponent(notification.referenceId || notification.orderId || '')}` : ''}`,
-        },
-      });
-    });
-  }, [enabled, loading, notifications, authSession?.companyId, authSession?.uid]);
 
   if (!isCompanyMember || !isWorker || enabled) return null;
   const blocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';

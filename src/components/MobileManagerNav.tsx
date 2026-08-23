@@ -39,7 +39,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
   const canViewNotifications = !USE_MULTI_TENANT_DATA || permissions.includes('company:notifications:read');
   const unreadMovements = notifications.filter(
-    (notification) => !notification.read && ['worker_opened', 'worker_arrived', 'worker_completed'].includes(notification.type),
+    (notification) => !notification.read && ['worker_arrived', 'worker_completed'].includes(notification.type),
   ).length;
 
   useEffect(() => {

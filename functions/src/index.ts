@@ -169,47 +169,17 @@ export const notifyWorkerOnWorkTaskAssignment = onDocumentWritten({ document: 'c
   });
 });
 
-/** Worker order opens are logged by the client; convert the log into a private manager alert. */
+/**
+ * Opening an order is informational and belongs only in the Worker Movements
+ * screen. Do not create a notification document here: that would put it in
+ * the global notification slide and send it to the phone.
+ */
 export const notifyManagersWhenWorkerOpensOrder = onDocumentCreated({ document: 'companies/{companyId}/activityLogs/{logId}', region: 'us-central1' }, async event => {
   const log = event.data?.data() || {};
   const workerId = typeof log.workerId === 'string' ? log.workerId.trim() : '';
   const orderId = typeof log.orderId === 'string' ? log.orderId.trim() : '';
   if (log.action !== 'opened' || !workerId || !orderId) return;
-
-  const companyRef = db.collection('companies').doc(event.params.companyId);
-  const recipients = await companyRef.collection('members').where('status', '==', 'active').get();
-  const workerName = String(log.workerName || 'العامل');
-  const orderNumber = String(log.orderNumber || orderId);
-  const title = 'العامل فتح الأوردر';
-  const body = `${workerName} فتح الأوردر ${orderNumber}.`;
-  const batch = db.batch();
-  recipients.docs.filter(recipient => {
-    const member = recipient.data() as { role?: string; permissions?: unknown };
-    const permissions = Array.isArray(member.permissions) ? member.permissions : [];
-    return member.role === 'company_super_admin' || member.role === 'manager' || permissions.includes('company:orders:read');
-  }).forEach(recipient => {
-    const notificationRef = companyRef.collection('notifications').doc(`worker_opened_${event.params.logId}_${recipient.id}`);
-    batch.create(notificationRef, {
-      id: notificationRef.id,
-      type: 'worker_opened',
-      title,
-      body,
-      titleAr: title,
-      titleEn: 'Worker opened order',
-      messageAr: body,
-      messageEn: 'The assigned worker opened this order.',
-      companyId: event.params.companyId,
-      orderId,
-      workerId,
-      targetUid: recipient.id,
-      read: false,
-      linkModule: 'orders',
-      referenceId: orderId,
-      navigation: { module: 'orders', referenceId: orderId },
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  });
-  await batch.commit();
+  logger.info('Worker order opening retained in worker movements only', { companyId: event.params.companyId, orderId, workerId });
 });
 
 /** Sends browser pushes for the existing private notification stream. Worker-order
@@ -221,7 +191,7 @@ export const notifyCompanyMemberAboutNotification = onDocumentCreated({ document
   const targetUid = typeof notification.targetUid === 'string' ? notification.targetUid.trim() : '';
   const title = String(notification.title || notification.titleAr || '').trim();
   const body = String(notification.body || notification.messageAr || '').trim();
-  if (!targetUid || !title || type.startsWith('worker_order_') || type.startsWith('worker_task_')) return;
+  if (!targetUid || !title || type === 'worker_opened' || type.startsWith('worker_order_') || type.startsWith('worker_task_')) return;
   const companyRef = db.collection('companies').doc(event.params.companyId);
   const memberRef = companyRef.collection('members').doc(targetUid);
   const member = await memberRef.get();

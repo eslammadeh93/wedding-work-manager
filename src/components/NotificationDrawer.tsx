@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Bell, X, Calendar, DollarSign, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -19,16 +19,25 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { notifications, markNotificationAsRead, clearAllNotifications } = useData();
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
 
   if (!isOpen) return null;
 
-  const visibleNotifications = workerMovementsOnly
-    ? notifications.filter((notification) => ['worker_opened', 'worker_arrived', 'worker_completed'].includes(notification.type))
-    : notifications;
-  const unreadCount = visibleNotifications.filter((n) => !n.read).length;
+  // This drawer is an inbox for actionable alerts, not an archive. Read items
+  // remain stored in Firestore but disappear from this slide immediately after
+  // the user opens/marks them, including worker-movement alerts.
+  const visibleNotifications = notifications.filter((notification) => notification.type !== 'worker_opened' && !notification.read && !dismissedIds.has(notification.id) && (
+    !workerMovementsOnly || ['worker_arrived', 'worker_completed'].includes(notification.type)
+  ));
+  const unreadCount = visibleNotifications.length;
+  const dismissAsRead = (notificationId: string) => {
+    setDismissedIds(current => new Set(current).add(notificationId));
+    void markNotificationAsRead(notificationId);
+  };
   const markVisibleAsRead = () => {
+    setDismissedIds(current => new Set([...current, ...visibleNotifications.map(notification => notification.id)]));
     if (workerMovementsOnly) {
-      void Promise.all(visibleNotifications.filter((notification) => !notification.read).map((notification) => markNotificationAsRead(notification.id)));
+      void Promise.all(visibleNotifications.map((notification) => markNotificationAsRead(notification.id)));
       return;
     }
     void clearAllNotifications();
@@ -101,7 +110,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
                 <div
                   key={notif.id}
                   onClick={() => {
-                    markNotificationAsRead(notif.id);
+                    dismissAsRead(notif.id);
                     if (notif.linkModule) {
                       onNavigate(notif.linkModule as ActiveTab, notif.referenceId || notif.orderId);
                       onClose();
