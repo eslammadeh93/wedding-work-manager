@@ -222,9 +222,20 @@ export const notifyCompanyMemberAboutNotification = onDocumentCreated({ document
   const title = String(notification.title || notification.titleAr || '').trim();
   const body = String(notification.body || notification.messageAr || '').trim();
   if (!targetUid || !title || type.startsWith('worker_order_') || type.startsWith('worker_task_')) return;
-  const memberRef = db.collection('companies').doc(event.params.companyId).collection('members').doc(targetUid);
+  const companyRef = db.collection('companies').doc(event.params.companyId);
+  const memberRef = companyRef.collection('members').doc(targetUid);
   const member = await memberRef.get();
   if (!member.exists || member.data()?.status !== 'active') return;
+  // Firestore background events are delivered at least once. Claim the push
+  // before sending it so a retry of the same notification document cannot
+  // create a second system notification on the recipient's device.
+  const deliveryRef = companyRef.collection('notificationDeliveries').doc(`member_push_${event.params.notificationId}`);
+  try {
+    await deliveryRef.create({ notificationId: event.params.notificationId, targetUid, type, createdAt: FieldValue.serverTimestamp() });
+  } catch (error) {
+    if ((error as { code?: number }).code === 6) return; // ALREADY_EXISTS
+    throw error;
+  }
   const module = typeof notification.linkModule === 'string' ? notification.linkModule : 'dashboard';
   const referenceId = typeof notification.referenceId === 'string' ? notification.referenceId : '';
   const result = await notifyMemberDevices(memberRef, {

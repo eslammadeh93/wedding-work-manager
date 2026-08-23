@@ -8,7 +8,7 @@ import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
 
-const workerActions = new Set(['opened', 'arrived', 'finished', 'completed']);
+const workerActions = new Set(['opened', 'arrived', 'finished', 'completed', 'worker_reported_arrival', 'worker_reported_completion']);
 const asDate = (value: unknown) => {
   if (value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate: () => Date }).toDate();
   const date = new Date(String(value || ''));
@@ -17,7 +17,7 @@ const asDate = (value: unknown) => {
 
 const actionDetails = (action: string) => {
   if (action === 'opened') return { label: 'فتح الأوردر', Icon: Eye, tone: 'text-blue-700 bg-blue-50 border-blue-200 dark:text-blue-300 dark:bg-blue-950/40 dark:border-blue-900' };
-  if (action === 'arrived') return { label: 'تم الوصول للموقع', Icon: MapPin, tone: 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-900' };
+  if (action === 'arrived' || action === 'worker_reported_arrival') return { label: 'تم الوصول للموقع', Icon: MapPin, tone: 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-900' };
   return { label: 'تم تنفيذ الأوردر', Icon: CheckCircle2, tone: 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-900' };
 };
 
@@ -125,8 +125,8 @@ export function WorkerMovementsModule() {
     <div className="grid grid-cols-3 gap-3">
       {[
         ['فتح الأوردر', visibleLogs.filter((log) => log.action === 'opened').length, 'text-blue-600'],
-        ['تم الوصول', visibleLogs.filter((log) => log.action === 'arrived').length, 'text-amber-600'],
-        ['تم التنفيذ', visibleLogs.filter((log) => log.action === 'finished' || log.action === 'completed').length, 'text-emerald-600'],
+        ['تم الوصول', visibleLogs.filter((log) => log.action === 'arrived' || log.action === 'worker_reported_arrival').length, 'text-amber-600'],
+        ['تم التنفيذ', visibleLogs.filter((log) => log.action === 'finished' || log.action === 'completed' || log.action === 'worker_reported_completion').length, 'text-emerald-600'],
       ].map(([label, count, tone]) => <div key={String(label)} className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><p className="text-xs font-bold text-slate-500">{label}</p><p className={`mt-1 text-2xl font-black ${tone}`}>{count}</p></div>)}
     </div>
 
