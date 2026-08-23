@@ -66,7 +66,7 @@ export async function notifyWorkerAboutOrder(db: Firestore, push: WorkerOrderPus
     createdAt: new Date().toISOString(),
   }, { merge: true });
 
-  const response = await notifyMemberDevices(member.ref, { title, body, orderId: push.orderId, companyId: push.companyId, url: '/?module=orders' });
+  const response = await notifyMemberDevices(member.ref, { title, body, orderId: push.orderId, companyId: push.companyId, notificationId: notificationRef.id, url: '/?module=orders' });
   if (!response) return;
   logger.info('Worker order notification processed', { companyId: push.companyId, orderId: push.orderId, kind: push.kind, sent: response.successCount, stale: response.stale });
 }
@@ -108,23 +108,43 @@ export async function notifyWorkerAboutTask(db: Firestore, push: WorkerTaskPush)
     createdAt: new Date().toISOString(),
   }, { merge: true });
 
-  const response = await notifyMemberDevices(member.ref, { title, body, taskId: push.taskId, companyId: push.companyId, url: '/?module=orders' });
+  const response = await notifyMemberDevices(member.ref, { title, body, taskId: push.taskId, companyId: push.companyId, notificationId: notificationRef.id, url: '/?module=orders' });
   if (response) logger.info('Worker task notification processed', { companyId: push.companyId, taskId: push.taskId, sent: response.successCount, stale: response.stale });
 }
 
 /** Delivers a data-only web push to every browser registered by one company member. */
 export async function notifyMemberDevices(memberRef: FirebaseFirestore.DocumentReference, data: Record<string, string>): Promise<{ successCount: number; stale: number } | null> {
   const devices = await memberRef.collection('pushDevices').get();
-  const registeredDevices = devices.docs.map((device) => ({ device, token: String(device.data().token || '') })).filter((item) => Boolean(item.token)).slice(0, 500);
-  if (!registeredDevices.length) return null;
+  // A browser can rotate its local device id while retaining the same FCM
+  // token. Send once per unique token; otherwise one phone receives the exact
+  // same arrival/completion alert twice.
+  const devicesByToken = new Map<string, FirebaseFirestore.QueryDocumentSnapshot[]>();
+  devices.docs.forEach(device => {
+    const token = String(device.data().token || '').trim();
+    if (!token) return;
+    const group = devicesByToken.get(token) || [];
+    group.push(device);
+    devicesByToken.set(token, group);
+  });
+  const tokens = [...devicesByToken.keys()].slice(0, 500);
+  if (!tokens.length) return null;
 
-  const response = await getMessaging().sendEachForMulticast({ tokens: registeredDevices.map((item) => item.token), data });
-  const staleDevices = registeredDevices.filter(({ device }, index) => {
+  // Data-only messages are intentionally non-collapsible. FCM keeps each one
+  // for up to 28 days while the phone is offline, then delivers them when the
+  // PWA/device reconnects.
+  const response = await getMessaging().sendEachForMulticast({
+    tokens,
+    data,
+    webpush: { headers: { TTL: String(28 * 24 * 60 * 60) } },
+  });
+  const staleDevices = tokens.flatMap((token, index) => {
     const result = response.responses[index];
     const code = result?.error?.code || '';
-    return code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token';
+    return code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token'
+      ? devicesByToken.get(token) || []
+      : [];
   });
-  await Promise.all(staleDevices.map(({ device }) => device.ref.delete()));
+  await Promise.all(staleDevices.map(device => device.ref.delete()));
   return { successCount: response.successCount, stale: staleDevices.length };
 }
 
