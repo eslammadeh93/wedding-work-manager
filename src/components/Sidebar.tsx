@@ -184,8 +184,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Sidebar Footer info */}
         <div className="p-3.5 border-t border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/50">
-            <div className="w-7 h-7 rounded-lg premium-gold-bg font-black text-xs flex items-center justify-center">
-              W
+            <div className="w-7 h-7 shrink-0 overflow-hidden rounded-lg shadow-sm">
+              <img src={wwmLogo} alt="Wedding Work Manager" className="h-full w-full object-cover" />
             </div>
             <div className="text-[11px] min-w-0">
               <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{t('appName')}</p>
