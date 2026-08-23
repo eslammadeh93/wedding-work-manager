@@ -16,6 +16,7 @@ import { MobileManagerNav } from './components/MobileManagerNav';
 import { LoginPage } from './components/auth/LoginPage';
 
 import { Menu, Crown, Loader2 } from 'lucide-react';
+import wwmLogo from './assets/wwm-logo.png';
 
 // Load each workspace only when it is opened. This keeps PDF/Excel and other
 // heavy feature code out of the application's initial download.
@@ -307,9 +308,7 @@ function AppContent() {
   if (loading || !usersInitialized || (user && profile && authSession?.userType !== 'platform' && restoredTabForUid !== user.uid)) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 transition-colors">
-        <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 mb-4 shadow-lg shadow-amber-500/20">
-          <Crown className="w-6 h-6" />
-        </div>
+        <div className="w-12 h-12 overflow-hidden rounded-2xl mb-4 shadow-lg shadow-amber-500/20"><img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" /></div>
         <Loader2 className="w-6 h-6 text-amber-500 animate-spin mb-2" />
         <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Loading Wedding Work Manager...</p>
       </div>

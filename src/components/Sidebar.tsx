@@ -7,7 +7,6 @@ import {
   BarChart3,
   Settings as SettingsIcon,
   X,
-  Crown,
   HardHat,
   UsersRound,
   UserRound,
@@ -22,6 +21,7 @@ import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
 import type { Permission } from '../multiTenant/permissions';
+import wwmLogo from '../assets/wwm-logo.png';
 
 export type ActiveTab =
   | 'dashboard'
@@ -123,8 +123,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Mobile / Sidebar Top Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800">
           <button onClick={() => handleTabClick('dashboard')} className="flex items-center gap-3 text-start cursor-pointer">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 premium-gold-bg rounded-xl flex items-center justify-center font-extrabold text-base shadow-xs shadow-amber-500/20">
-              <Crown className="w-4 h-4 text-slate-950 fill-slate-950" />
+            <div className="w-8 h-8 sm:w-9 sm:h-9 overflow-hidden rounded-xl shadow-xs shadow-amber-500/20">
+              <img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" />
             </div>
             <div className="flex flex-col">
               <span className="text-xs font-black tracking-tight text-slate-900 dark:text-white leading-tight">

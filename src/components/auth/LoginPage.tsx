@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { AlertCircle, Crown, Eye, EyeOff, Globe, KeyRound, Lock, LogIn, Mail, Moon, Sun, User } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Globe, KeyRound, Lock, LogIn, Mail, Moon, Sun, User } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant';
+import wwmLogo from '../../assets/wwm-logo.png';
 
 export const LoginPage: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
@@ -75,7 +76,7 @@ export const LoginPage: React.FC = () => {
     </div>
     <div className="w-full max-w-md bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden z-10">
       <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-200 dark:border-slate-700/50">
-        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 premium-gold-bg rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20"><Crown className="w-7 h-7" /></button>
+        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 overflow-hidden rounded-2xl shadow-lg shadow-amber-500/20"><img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" /></button>
         <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{t('appName')}</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول الموظف' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
       </div>

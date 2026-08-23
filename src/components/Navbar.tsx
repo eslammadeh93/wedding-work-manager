@@ -5,12 +5,12 @@ import {
   Sun,
   Moon,
   LogOut,
-  Crown,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import wwmLogo from '../assets/wwm-logo.png';
 
 interface NavbarProps {
   onOpenSearch: () => void;
@@ -35,15 +35,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-4 overflow-x-hidden">
         {/* Brand Logo & Name */}
         <button onClick={onNavigateDashboard} className="flex items-center gap-2 sm:gap-3 shrink-0 cursor-pointer" title={t('dashboard')}>
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl premium-gold-bg font-black flex items-center justify-center shadow-xs shadow-amber-500/20 shrink-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 overflow-hidden rounded-xl shadow-xs shadow-amber-500/20 shrink-0">
             {settings.logoUrl ? (
               <img
                 src={settings.logoUrl}
-                alt="Logo"
-                className="w-6 h-6 sm:w-7 sm:h-7 object-contain rounded"
+                alt="Wedding Work Manager"
+                className="w-full h-full object-cover"
               />
             ) : (
-              <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950 fill-slate-950" />
+              <img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" />
             )}
           </div>
           <span className="text-xs sm:text-base md:text-lg font-black tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
