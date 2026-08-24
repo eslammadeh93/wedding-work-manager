@@ -25,7 +25,7 @@ import { calculateMonthlyCash } from '../../utils/monthlyCash';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
 import { formatMoney, MoneyValue } from '../ui/MoneyValue';
-import { buildCustomerSourceBreakdown, buildMonthlyComparison, buildServiceProfitability } from '../../utils/reportInsights';
+import { buildCustomerSourceBreakdown, buildMonthlySourceCashNet, buildMonthlyComparison, buildServiceProfitability } from '../../utils/reportInsights';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
@@ -127,7 +127,10 @@ export const ReportsModule: React.FC = () => {
   const netProfit = totalRevenue - totalOrderExpenses;
   const monthlyComparison = useMemo(() => buildMonthlyComparison(sourceOrders, expenses, selectedYear), [expenses, sourceOrders, selectedYear]);
   const serviceProfitability = useMemo(() => buildServiceProfitability(reportOrders, language), [language, reportOrders]);
-  const customerSourceBreakdown = useMemo(() => buildCustomerSourceBreakdown(reportOrders), [reportOrders]);
+  const customerSourceBreakdown = useMemo(() => {
+    const sourceCashNet = buildMonthlySourceCashNet(sourceOrders, selectedYear, selectedMonth);
+    return buildCustomerSourceBreakdown(reportOrders).map((item) => ({ ...item, netProfit: sourceCashNet[item.source] }));
+  }, [reportOrders, selectedMonth, selectedYear, sourceOrders]);
   const comparisonMax = Math.max(...monthlyComparison.map((item) => Math.max(item.revenue, item.directCosts, Math.abs(item.netProfit))), 1);
 
   // Top Rented Inventory Items count
@@ -376,8 +379,8 @@ export const ReportsModule: React.FC = () => {
       </section>
 
       <section className="p-5 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="mb-5"><h3 className="font-black text-slate-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-5 h-5 text-amber-500" />{language === 'ar' ? 'مصادر العملاء' : 'Customer sources'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'أداء كل مصدر في الشهر المحدد.' : 'Performance by lead source in the selected month.'}</p></div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{customerSourceBreakdown.map((item) => <div key={item.source} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/40"><div className="flex items-center justify-between gap-2"><span className="font-black text-sm text-slate-900 dark:text-white">{getOrderSourceLabel(item.source, language)}</span><span className="text-xs font-black px-2 py-1 rounded-lg bg-white dark:bg-slate-900">{item.orderCount}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><div><p className="text-slate-500">{language === 'ar' ? 'الإيراد' : 'Revenue'}</p><MoneyValue amount={item.revenue} className="mt-1 text-sm font-black text-slate-800 dark:text-white" /></div><div><p className="text-slate-500">{language === 'ar' ? 'المحصّل' : 'Collected'}</p><MoneyValue amount={item.collected} className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400" /></div></div><div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between text-xs"><span className="text-slate-500">{language === 'ar' ? 'صافي الربح' : 'Net profit'}</span><MoneyValue amount={item.netProfit} className={`font-black ${item.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`} /></div></div>)}</div>
+        <div className="mb-5"><h3 className="font-black text-slate-900 dark:text-white flex items-center gap-2"><ReceiptText className="w-5 h-5 text-amber-500" />{language === 'ar' ? 'مصادر العملاء' : 'Customer sources'}</h3><p className="text-xs text-slate-500 mt-1">{language === 'ar' ? 'الأوردرات حسب مصدرها، وصافي النقد محسوب بنفس قواعد الخزنة للشهر المحدد.' : 'Orders by lead source; net cash uses the same monthly rules as the safe summary.'}</p></div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{customerSourceBreakdown.map((item) => <div key={item.source} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/40"><div className="flex items-center justify-between gap-2"><span className="font-black text-sm text-slate-900 dark:text-white">{getOrderSourceLabel(item.source, language)}</span><span className="text-xs font-black px-2 py-1 rounded-lg bg-white dark:bg-slate-900">{item.orderCount}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><div><p className="text-slate-500">{language === 'ar' ? 'الإيراد' : 'Revenue'}</p><MoneyValue amount={item.revenue} className="mt-1 text-sm font-black text-slate-800 dark:text-white" /></div><div><p className="text-slate-500">{language === 'ar' ? 'المحصّل' : 'Collected'}</p><MoneyValue amount={item.collected} className="mt-1 text-sm font-black text-emerald-600 dark:text-emerald-400" /></div></div><div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between text-xs"><span className="text-slate-500">{language === 'ar' ? 'صافي النقد' : 'Net cash'}</span><MoneyValue amount={item.netProfit} className={`font-black ${item.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`} /></div></div>)}</div>
       </section>
 
       {/* Desktop-first monthly safe snapshot. */}

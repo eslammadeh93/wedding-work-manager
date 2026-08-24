@@ -1,5 +1,6 @@
 import type { Expense, Order } from '../types';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from './orderPayments';
+import { orderCashCollections } from './monthlyCash';
 
 export interface MonthlyComparisonItem {
   month: number;
@@ -90,4 +91,44 @@ export function buildCustomerSourceBreakdown(orders: Order[]): CustomerSourceIte
   });
   const sources: CustomerSourceItem['source'][] = ['organic', 'campaign', 'other'];
   return sources.map((source) => groups.get(source) || { source, orderCount: 0, revenue: 0, collected: 0, netProfit: 0 });
+}
+
+/**
+ * Net cash by acquisition source for one calendar month.  This deliberately
+ * mirrors the headline safe calculation: completed orders contribute their
+ * recorded payment less direct costs, while future orders contribute only
+ * money actually collected in the month.  A retained cancellation contributes
+ * its retained deposit, never its original contract value.
+ */
+export function buildMonthlySourceCashNet(orders: Order[], year: number, month: number): Record<CustomerSourceItem['source'], number> {
+  const result: Record<CustomerSourceItem['source'], number> = { organic: 0, campaign: 0, other: 0 };
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
+  const isInMonth = (value?: string) => Boolean(value?.startsWith(monthPrefix));
+
+  orders.forEach((order) => {
+    const source = sourceOf(order.orderSource);
+    const status = order.orderStatus;
+    const eventIsInMonth = isInMonth(eventDateOf(order));
+    const bookedThisMonth = isInMonth(order.bookingDate || order.createdAt);
+
+    if (status === 'completed' && eventIsInMonth) {
+      result[source] += recordedOrderPayment(order) - directCostsOf(order);
+    }
+
+    // A completed order is already represented by its execution-month result
+    // above, so its individual payment rows must not be counted again here.
+    if (status !== 'completed' && status !== 'cancelled') {
+      result[source] += orderCashCollections(order)
+        .filter((collection) => isInMonth(collection.date))
+        .reduce((total, collection) => total + collection.amount, 0);
+    }
+
+    // Before execution, only recorded "other expenses" are cash outflows.
+    // Retained cancellations do not have a future-order expense deduction.
+    if (status !== 'completed' && status !== 'cancelled' && status !== 'cancelled_deposit_retained' && bookedThisMonth) {
+      result[source] -= Number(order.otherExpenses || 0);
+    }
+  });
+
+  return result;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCustomerSourceBreakdown, buildMonthlyComparison, buildServiceProfitability } from '../src/utils/reportInsights';
+import { buildCustomerSourceBreakdown, buildMonthlySourceCashNet, buildMonthlyComparison, buildServiceProfitability } from '../src/utils/reportInsights';
 import type { Expense, Order } from '../src/types';
 
 const order = (overrides: Partial<Order> = {}): Order => ({
@@ -24,4 +24,22 @@ test('groups revenue and actual collections by customer source', () => {
   const sources = buildCustomerSourceBreakdown([order({ orderSource: 'campaign' }), order({ id: 'organic', orderSource: 'organic', totalPrice: 500, totalPaid: 500 })]);
   assert.equal(sources.find((item) => item.source === 'campaign')?.revenue, 1_000);
   assert.equal(sources.find((item) => item.source === 'organic')?.collected, 500);
+});
+
+test('matches the safe cash rules by source, including retained deposits and future-order advances', () => {
+  const orders = [
+    order({ id: 'completed', orderSource: 'organic', totalPaid: 1_000, workerCost: 200 }),
+    order({
+      id: 'retained', orderSource: 'campaign', orderStatus: 'cancelled_deposit_retained', totalPrice: 3_000, totalPaid: 700,
+      bookingDate: '2026-02-05', eventDate: '2026-02-10', weddingDate: '2026-02-10',
+      paymentHistory: [{ id: 'deposit', amount: 700, date: '2026-02-05', method: 'cash', type: 'deposit' }],
+    }),
+    order({
+      id: 'future', orderSource: 'other', orderStatus: 'confirmed', totalPrice: 2_000, totalPaid: 500,
+      bookingDate: '2026-02-12', eventDate: '2026-03-12', weddingDate: '2026-03-12', otherExpenses: 50,
+      paymentHistory: [{ id: 'deposit', amount: 500, date: '2026-02-12', method: 'cash', type: 'deposit' }],
+    }),
+  ];
+
+  assert.deepEqual(buildMonthlySourceCashNet(orders, 2026, 1), { organic: 800, campaign: 700, other: 450 });
 });
