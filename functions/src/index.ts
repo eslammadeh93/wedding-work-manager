@@ -815,6 +815,29 @@ export const setPlatformMemberStatus = onCall({ region: 'us-central1', enforceAp
   return { success: true, message: 'تم تحديث حالة المستخدم.' };
 });
 
+export const updatePlatformMember = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformUserFor(request, 'platform:users:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const memberUid = typeof data.memberUid === 'string' ? data.memberUid.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
+  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !memberUid || name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success: false, message: 'بيانات المستخدم غير صالحة.' };
+  const member = db.doc(`companies/${companyId}/members/${memberUid}`);
+  const current = await member.get();
+  if (!current.exists) return { success: false, message: 'المستخدم غير موجود.' };
+  try {
+    await auth.updateUser(memberUid, { displayName: name, email });
+    const timestamp = FieldValue.serverTimestamp();
+    await member.update({ name, email, updatedAt: timestamp, updatedBy: actorUid });
+    await db.doc(`users/${memberUid}`).set({ name, email, updatedAt: timestamp }, { merge: true });
+    await db.collection('platformAuditLogs').add({ action: 'platform_member_updated', companyId, targetUid: memberUid, createdBy: actorUid, timestamp, metadata: { name, email } });
+    return { success: true, message: 'تم تحديث حساب المستخدم.' };
+  } catch (error) {
+    return { success: false, message: (error as { code?: string }).code === 'auth/email-already-exists' ? 'البريد الإلكتروني مستخدم بالفعل.' : 'تعذر تحديث حساب المستخدم.' };
+  }
+});
+
 export const setPlatformMemberTemporaryPassword = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const uid = await isActivePlatformUserFor(request, 'platform:users:manage');
   const data = (request.data || {}) as Record<string, unknown>;

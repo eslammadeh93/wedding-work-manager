@@ -11,7 +11,7 @@ export type CompanyPermission =
   | 'company:settings:read' | 'company:settings:write' | 'company:members:read' | 'company:members:write' | 'company:notifications:read';
 export type CompanyMemberResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberError; message: string; data?: T };
 export interface CreateCompanyMemberRequest { name: string; role: ManagedRole; email?: string; temporaryPassword?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; username?: string; loginCode?: string; phone?: string; notes?: string; companyId?: string; }
-export interface UpdateCompanyMemberRequest { uid: string; name?: string; phone?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; displaySettings?: Record<string, boolean | string | number>; companyId?: string; }
+export interface UpdateCompanyMemberRequest { uid: string; name?: string; phone?: string; jobTitle?: string; employeeType?: string; permissions?: CompanyPermission[]; temporaryPassword?: string; displaySettings?: Record<string, boolean | string | number>; companyId?: string; }
 export interface ChangeCompanyMemberRoleRequest { uid: string; role: ManagedRole; companyId?: string; }
 export interface DisableCompanyMemberRequest { uid: string; companyId?: string; }
 export interface ReactivateCompanyMemberRequest { uid: string; companyId?: string; }

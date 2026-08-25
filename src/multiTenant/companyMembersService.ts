@@ -6,7 +6,7 @@ export type ManagedCompanyRole = 'manager' | 'employee' | 'worker';
 export type CompanyMemberOperationCode = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'COMPANY_NOT_FOUND' | 'COMPANY_INACTIVE' | 'MEMBER_NOT_FOUND' | 'MEMBER_DISABLED' | 'EMAIL_EXISTS' | 'USERNAME_EXISTS' | 'MAX_USERS_REACHED' | 'ROLE_NOT_ALLOWED' | 'SELF_ROLE_CHANGE_FORBIDDEN' | 'SELF_DISABLE_FORBIDDEN' | 'CANNOT_MANAGE_COMPANY_ADMIN' | 'LAST_COMPANY_ADMIN' | 'AUTH_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'WORKER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'RESET_NOT_SUPPORTED' | 'ROLLBACK_FAILED' | 'MOVEMENT_ALREADY_RECORDED' | 'MOVEMENT_SEQUENCE_INVALID' | 'UNKNOWN_ERROR';
 export type CompanyMemberOperationResponse<T = Record<string, never>> = { success: boolean; code: CompanyMemberOperationCode; message: string; data?: T };
 export type CreateCompanyMemberRequest = { name: string; role: ManagedCompanyRole; email?: string; temporaryPassword?: string; jobTitle?: string; employeeType?: string; permissions?: Permission[]; username?: string; loginCode?: string; phone?: string; notes?: string };
-export type UpdateCompanyMemberRequest = { uid: string; name?: string; phone?: string; jobTitle?: string; employeeType?: string; permissions?: Permission[]; displaySettings?: Record<string, boolean | string | number> };
+export type UpdateCompanyMemberRequest = { uid: string; name?: string; phone?: string; jobTitle?: string; employeeType?: string; permissions?: Permission[]; temporaryPassword?: string; displaySettings?: Record<string, boolean | string | number> };
 export type ChangeCompanyMemberRoleRequest = { uid: string; role: ManagedCompanyRole };
 export type DisableCompanyMemberRequest = { uid: string };
 export type ReactivateCompanyMemberRequest = { uid: string };

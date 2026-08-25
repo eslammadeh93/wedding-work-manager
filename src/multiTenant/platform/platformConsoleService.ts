@@ -112,6 +112,17 @@ export async function setPlatformMemberStatus(data: {
   if (!result.data.success) throw new Error(result.data.message);
 }
 
+export async function updatePlatformMember(data: {
+  companyId: string;
+  memberUid: string;
+  name: string;
+  email: string;
+}): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "updatePlatformMember");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
 export async function setPlatformMemberTemporaryPassword(data: {
   companyId: string;
   memberUid: string;

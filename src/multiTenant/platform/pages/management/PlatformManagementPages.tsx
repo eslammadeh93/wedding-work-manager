@@ -5,6 +5,8 @@ import {
   CheckCircle2,
   CircleAlert,
   CreditCard,
+  Eye,
+  EyeOff,
   Headphones,
   LineChart,
   Save,
@@ -28,6 +30,7 @@ import {
   updatePlatformSupportTicket,
   updatePlatformNotification,
   setPlatformMemberStatus,
+  updatePlatformMember,
   setPlatformMemberTemporaryPassword,
   managePlatformSubscription,
   createPlatformAdmin,
@@ -184,6 +187,8 @@ function UsersPage({ members, companies, consoleError, load, navigate }: DataPro
   const [search, setSearch] = useState(""); const [companyId, setCompanyId] = useState("");
   const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const [passwordFor, setPasswordFor] = useState<Member | null>(null); const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
+  const [editingMember, setEditingMember] = useState<Member | null>(null); const [editName, setEditName] = useState(""); const [editEmail, setEditEmail] = useState("");
   const changeStatus = async (member: Member) => {
     const next = member.status === "active" ? "disabled" : "active";
     setSaving(true); setError("");
@@ -194,8 +199,16 @@ function UsersPage({ members, companies, consoleError, load, navigate }: DataPro
   const resetPassword = async () => {
     if (!passwordFor || temporaryPassword.length < 12) return;
     setSaving(true); setError("");
-    try { await setPlatformMemberTemporaryPassword({ companyId: passwordFor.companyId, memberUid: passwordFor.uid, temporaryPassword }); setPasswordFor(null); setTemporaryPassword(""); await load(); }
+    try { await setPlatformMemberTemporaryPassword({ companyId: passwordFor.companyId, memberUid: passwordFor.uid, temporaryPassword }); setPasswordFor(null); setTemporaryPassword(""); setShowTemporaryPassword(false); await load(); }
     catch { setError("تعذر تعيين كلمة المرور المؤقتة."); }
+    finally { setSaving(false); }
+  };
+  const openEdit = (member: Member) => { setEditingMember(member); setEditName(member.name); setEditEmail(member.email); setError(""); };
+  const saveEdit = async () => {
+    if (!editingMember || editName.trim().length < 2 || !/^\S+@\S+\.\S+$/.test(editEmail)) return;
+    setSaving(true); setError("");
+    try { await updatePlatformMember({ companyId: editingMember.companyId, memberUid: editingMember.uid, name: editName.trim(), email: editEmail.trim().toLowerCase() }); setEditingMember(null); await load(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "تعذر تعديل حساب المستخدم."); }
     finally { setSaving(false); }
   };
   const rows = useMemo(() => members.filter(member => (!companyId || member.companyId === companyId) && `${member.name} ${member.email} ${member.companyName}`.toLowerCase().includes(search.toLowerCase())), [members, companyId, search]);
@@ -205,14 +218,15 @@ function UsersPage({ members, companies, consoleError, load, navigate }: DataPro
     { key: "role", header: "الدور", render: row => roleLabel[row.role] || row.role },
     { key: "status", header: "الحالة", render: row => status(row.status) },
     { key: "date", header: "تاريخ الإنشاء", render: row => formatPlatformDate(row.createdAt) },
-    { key: "actions", header: "إجراء", render: row => canManageUsers ? <div className="flex gap-2"><PlatformButton variant="secondary" disabled={saving} onClick={() => setPasswordFor(row)}>كلمة مرور</PlatformButton><PlatformButton variant={row.status === "active" ? "danger" : "secondary"} disabled={saving} onClick={() => void changeStatus(row)}>{row.status === "active" ? "تعطيل" : "تفعيل"}</PlatformButton></div> : <span className="text-xs text-slate-500">عرض فقط</span> },
+    { key: "actions", header: "إجراء", render: row => canManageUsers ? <div className="flex flex-wrap gap-2"><PlatformButton variant="secondary" disabled={saving} onClick={() => openEdit(row)}>تعديل الحساب</PlatformButton><PlatformButton variant="secondary" disabled={saving} onClick={() => { setPasswordFor(row); setTemporaryPassword(""); setShowTemporaryPassword(false); }}>كلمة مرور</PlatformButton><PlatformButton variant={row.status === "active" ? "danger" : "secondary"} disabled={saving} onClick={() => void changeStatus(row)}>{row.status === "active" ? "تعطيل" : "تفعيل"}</PlatformButton></div> : <span className="text-xs text-slate-500">عرض فقط</span> },
   ];
   return <section><PlatformPageHeader title="المستخدمون" description="عرض موحّد لجميع حسابات الشركات مع بياناتها وصلاحياتها." />
     <div className="mb-5 grid gap-3 sm:grid-cols-3"><StatCard label="إجمالي الحسابات" value={members.length} icon={<Users size={18} />} /><StatCard label="الحسابات النشطة" value={members.filter(x => x.status === "active").length} icon={<CheckCircle2 size={18} />} /><StatCard label="أصحاب الشركات" value={members.filter(x => x.role === "company_super_admin").length} icon={<UserRound size={18} />} /></div>
     {consoleError && <p className="mb-4 rounded-xl bg-amber-100 p-3 text-sm font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-100">{consoleError}</p>}{error && <p className="mb-4 rounded-xl bg-rose-100 p-3 text-sm font-bold text-rose-800 dark:bg-rose-950 dark:text-rose-100">{error}</p>}
     <FilterBar><div className="relative flex-1"><Search className="absolute right-3 top-2.5 text-slate-400" size={17} /><input className={`${fieldClass} pr-9`} placeholder="ابحث بالاسم أو البريد أو الشركة" value={search} onChange={e => setSearch(e.target.value)} /></div><select className={fieldClass} value={companyId} onChange={e => setCompanyId(e.target.value)}><option value="">كل الشركات</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></FilterBar>
     {rows.length ? <DataTable rows={rows} columns={columns} rowKey={row => row.uid} minWidthClass="min-w-[980px]" /> : <EmptyState text="لا توجد حسابات مطابقة للبحث." />}
-    {passwordFor && <div className="fixed inset-0 z-50 bg-slate-950/50 p-4"><div className="mx-auto mt-24 max-w-lg rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><h2 className="font-black">تعيين كلمة مرور مؤقتة</h2><p className="mt-1 text-sm text-slate-500">{passwordFor.name} — يجب تسليم كلمة المرور عبر قناة آمنة.</p><input type="password" className={`${fieldClass} mt-4`} value={temporaryPassword} onChange={e => setTemporaryPassword(e.target.value)} placeholder="12 حرفًا على الأقل" /><div className="mt-4 flex gap-2"><PlatformButton disabled={saving || temporaryPassword.length < 12} onClick={() => void resetPassword()}>{saving ? "جارٍ الحفظ…" : "تعيين كلمة المرور"}</PlatformButton><PlatformButton variant="secondary" onClick={() => setPasswordFor(null)}>إلغاء</PlatformButton></div></div></div>}</section>;
+    {editingMember && <div className="fixed inset-0 z-50 bg-slate-950/50 p-4"><div className="mx-auto mt-24 max-w-lg rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><h2 className="font-black">تعديل الحساب</h2><p className="mt-1 text-sm text-slate-500">حدّث اسم المستخدم أو بريده الإلكتروني.</p><div className="mt-4 space-y-3"><label className="block text-sm font-bold">الاسم<input className={`${fieldClass} mt-1`} value={editName} onChange={e => setEditName(e.target.value)} /></label><label className="block text-sm font-bold">البريد الإلكتروني<input type="email" dir="ltr" className={`${fieldClass} mt-1`} value={editEmail} onChange={e => setEditEmail(e.target.value)} /></label></div><div className="mt-4 flex gap-2"><PlatformButton disabled={saving || editName.trim().length < 2 || !/^\S+@\S+\.\S+$/.test(editEmail)} onClick={() => void saveEdit()}>{saving ? "جارٍ الحفظ…" : "حفظ التعديل"}</PlatformButton><PlatformButton variant="secondary" disabled={saving} onClick={() => setEditingMember(null)}>إلغاء</PlatformButton></div></div></div>}
+    {passwordFor && <div className="fixed inset-0 z-50 bg-slate-950/50 p-4"><div className="mx-auto mt-24 max-w-lg rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><h2 className="font-black">تعيين كلمة مرور</h2><p className="mt-1 text-sm text-slate-500">{passwordFor.name} — كلمة المرور الحالية محفوظة بأمان ولا يمكن عرضها. اكتب كلمة جديدة عند الحاجة.</p><div className="relative mt-4"><input type={showTemporaryPassword ? "text" : "password"} className={`${fieldClass} pl-10`} value={temporaryPassword} onChange={e => setTemporaryPassword(e.target.value)} placeholder="كلمة مرور جديدة — 12 حرفًا على الأقل" /><button type="button" onClick={() => setShowTemporaryPassword(visible => !visible)} className="absolute inset-y-0 left-0 flex w-10 items-center justify-center text-slate-400 hover:text-amber-600" aria-label={showTemporaryPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} title={showTemporaryPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}>{showTemporaryPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></div><div className="mt-4 flex gap-2"><PlatformButton disabled={saving || temporaryPassword.length < 12} onClick={() => void resetPassword()}>{saving ? "جارٍ الحفظ…" : "تعيين كلمة المرور"}</PlatformButton><PlatformButton variant="secondary" onClick={() => { setPasswordFor(null); setTemporaryPassword(""); setShowTemporaryPassword(false); }}>إلغاء</PlatformButton></div></div></div>}</section>;
 }
 
 function SubscriptionsPage({ companies, load, navigate }: DataProps) {

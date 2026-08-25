@@ -15,6 +15,8 @@ import {
   FileText,
   X,
   User,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
@@ -37,6 +39,7 @@ export const WorkersModule: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [loginCode, setLoginCode] = useState('');
+  const [showLoginCode, setShowLoginCode] = useState(false);
   const [jobTitle, setJobTitle] = useState('');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
@@ -64,6 +67,7 @@ export const WorkersModule: React.FC = () => {
     setFullName('');
     setUsername('');
     setLoginCode('');
+    setShowLoginCode(false);
     setJobTitle('');
     setPhone('');
     setNotes('');
@@ -77,6 +81,7 @@ export const WorkersModule: React.FC = () => {
     setFullName(worker.fullName);
     setUsername(worker.username);
     setLoginCode('');
+    setShowLoginCode(false);
     setJobTitle(worker.jobTitle || '');
     setPhone(sanitizePhoneInput(worker.phone || ''));
     setNotes(worker.notes || '');
@@ -390,16 +395,32 @@ export const WorkersModule: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    كود الدخول <span className="text-rose-500">*</span>
+                    كود الدخول {!editingWorker && <span className="text-rose-500">*</span>}
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={loginCode}
-                    onChange={(e) => setLoginCode(e.target.value)}
-                    placeholder={editingWorker ? 'اتركه فارغًا للإبقاء على الكود الحالي' : '6 أرقام على الأقل'}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showLoginCode ? 'text' : 'password'}
+                      required={!editingWorker}
+                      value={loginCode}
+                      onChange={(e) => setLoginCode(e.target.value)}
+                      placeholder={editingWorker ? 'الكود الحالي محفوظ — اكتب هنا لتغييره' : '6 أرقام على الأقل'}
+                      className="w-full ltr:pr-10 rtl:pl-10 ltr:pl-3.5 rtl:pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginCode((visible) => !visible)}
+                      className="absolute inset-y-0 ltr:right-0 rtl:left-0 flex w-10 items-center justify-center text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                      aria-label={showLoginCode ? 'إخفاء كود الدخول' : 'إظهار كود الدخول'}
+                      title={showLoginCode ? 'إخفاء كود الدخول' : 'إظهار كود الدخول'}
+                    >
+                      {showLoginCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {editingWorker && (
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                      اترك الحقل كما هو وسيبقى كود الدخول الحالي دون تغيير.
+                    </p>
+                  )}
                 </div>
               </div>
 

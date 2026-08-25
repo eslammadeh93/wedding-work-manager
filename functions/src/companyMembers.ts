@@ -98,16 +98,19 @@ export class CompanyMemberService {
     if (typeof data.phone === 'string') fields.phone = normalize(data.phone) || null;
     if (typeof data.jobTitle === 'string') fields.jobTitle = normalize(data.jobTitle) || null;
     if (typeof data.employeeType === 'string') fields.employeeType = normalize(data.employeeType) || 'موظف';
+    const temporaryPassword = typeof data.temporaryPassword === 'string' ? data.temporaryPassword : '';
+    if (temporaryPassword && temporaryPassword.length < 12) return fail('INVALID_INPUT', 'كلمة المرور الجديدة يجب أن تكون 12 حرفًا على الأقل.');
     if (data.permissions !== undefined) { const permissions = validPermissions(data.permissions); if (!permissions) return fail('INVALID_INPUT', 'الصلاحيات المختارة غير صالحة.'); const actorPermissions = memberPermissions(context.member.data() as MemberDoc); if (context.member.data()?.role !== 'company_super_admin' && permissions.some(permission => !actorPermissions.includes(permission))) return fail('FORBIDDEN', 'لا يمكنك منح صلاحيات لا تملكها.'); fields.permissions = permissions; }
     if (data.displaySettings && typeof data.displaySettings === 'object' && !Array.isArray(data.displaySettings)) fields.displaySettings = data.displaySettings;
-    if (!uid || !Object.keys(fields).length) return fail('INVALID_INPUT', 'لا توجد بيانات مسموح بتعديلها.');
+    if (!uid || (!Object.keys(fields).length && !temporaryPassword)) return fail('INVALID_INPUT', 'لا توجد بيانات مسموح بتعديلها.');
     const target = context.company.ref.collection('members').doc(uid); const snapshot = await target.get();
     if (!snapshot.exists) return fail('MEMBER_NOT_FOUND', 'الموظف غير موجود.');
     if (snapshot.data()?.role === 'company_super_admin') return fail('CANNOT_MANAGE_COMPANY_ADMIN', 'لا يمكن تعديل صاحب الشركة.');
     if (snapshot.data()?.role === 'worker') return fail('ROLE_NOT_ALLOWED', 'تتم إدارة العمال من قسم العمال.');
     await target.update({ ...fields, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-    if (fields.name) await this.deps.auth.updateUser(uid, { displayName: String(fields.name) });
-    await this.audit(context.company.id, 'company_employee_updated', auth!.uid, uid, String(snapshot.data()?.role), { fields: Object.keys(fields) });
+    if (fields.name || temporaryPassword) await this.deps.auth.updateUser(uid, { ...(fields.name ? { displayName: String(fields.name) } : {}), ...(temporaryPassword ? { password: temporaryPassword } : {}) });
+    if (temporaryPassword) await this.deps.auth.revokeRefreshTokens(uid);
+    await this.audit(context.company.id, 'company_employee_updated', auth!.uid, uid, String(snapshot.data()?.role), { fields: Object.keys(fields), passwordChanged: Boolean(temporaryPassword) });
     return ok('تم تحديث بيانات الموظف وصلاحياته.');
   }
   async changeRole(input: unknown, auth: AuthContext): Promise<ChangeCompanyMemberRoleResponse> { const context = await this.authorize(auth); if ('success' in context) return context; const data = (input || {}) as ChangeCompanyMemberRoleRequest; const uid = normalize(data.uid); if (!uid || data.role !== 'manager') return fail('ROLE_NOT_ALLOWED', 'دور المدير ثابت من شاشة إدارة المديرين.'); if (uid === auth!.uid) return fail('SELF_ROLE_CHANGE_FORBIDDEN', 'لا يمكنك تغيير دورك بنفسك.'); const target = context.company.ref.collection('members').doc(uid); const snapshot = await target.get(); if (!snapshot.exists) return fail('MEMBER_NOT_FOUND', 'العضو غير موجود.'); const oldRole = snapshot.data()?.role; if (oldRole === 'company_super_admin') return fail('CANNOT_MANAGE_COMPANY_ADMIN', 'لا يمكن إدارة صاحب الشركة.'); if (oldRole !== 'manager') return fail('ROLE_NOT_ALLOWED', 'لا يمكن تحويل حساب آخر إلى مدير من هذا المسار.'); return ok('الدور مضبوط بالفعل كمدير.'); }
