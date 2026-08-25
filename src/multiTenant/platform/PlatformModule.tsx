@@ -28,7 +28,6 @@ import type {
 import { PlatformLayout } from "./PlatformLayout";
 import { platformRouteForPath } from "./routes";
 import { PlatformPermissionGuard } from "./permissions/PlatformPermissionGuard";
-import { isPlatformRole, platformRoleHasPermission } from "./permissions/platformPermissions";
 import { PlatformPageHeader } from "./shared/PlatformPageHeader";
 import { LoadingState } from "./shared/LoadingState";
 import { EmptyState } from "./shared/EmptyState";
@@ -285,8 +284,7 @@ function CreateCompanyForm({ close }: { close: () => void }) {
 export function PlatformModule() {
   const { authSession, logout } = useAuth();
   const platformRole = authSession?.role;
-  const hasPlatformPermission = (permission: Parameters<typeof platformRoleHasPermission>[1]) =>
-    authSession?.userType === "platform" && isPlatformRole(platformRole) && platformRoleHasPermission(platformRole, permission);
+  const hasPlatformPermission = (permission: string) => authSession?.userType === "platform" && authSession.permissions.includes(permission);
   const canCreateCompanies = hasPlatformPermission("platform:companies:create");
   const canUpdateCompanies = hasPlatformPermission("platform:companies:update");
   const canAddCompanyOwners = platformRole === "platform_owner";
@@ -328,6 +326,7 @@ export function PlatformModule() {
       currentPath={path}
       displayName={authSession?.displayName || "صاحب المنصة"}
       role={String(authSession?.role || "platform_owner")}
+      permissions={authSession?.permissions || []}
       menuOpen={menu}
       onMenuOpen={() => setMenu(true)}
       onMenuClose={() => setMenu(false)}

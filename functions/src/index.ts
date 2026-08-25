@@ -624,6 +624,22 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
 type PlatformOwnerRequest = { auth?: { uid: string; token?: Record<string, unknown> }; data: unknown };
 const defaultPlatformConsoleSettings = { expiryDays: 30, compactMode: false, dailyDigest: true };
 type PlatformCapability = 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:settings:manage' | 'platform:admins:manage';
+const platformPermissionValues = ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:create', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:developer_tools:manage', 'platform:support:impersonate', 'platform:admins:manage', 'platform:dangerous_delete'] as const;
+type ManagedPlatformPermission = typeof platformPermissionValues[number];
+const platformRolePermissionDefaults: Record<string, readonly ManagedPlatformPermission[]> = {
+  platform_owner: platformPermissionValues,
+  platform_admin: ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
+  platform_support: ['platform:dashboard:read', 'platform:companies:read', 'platform:users:read', 'platform:audit_logs:read', 'platform:console:read', 'platform:support:manage', 'platform:support:impersonate'],
+  platform_billing: ['platform:dashboard:read', 'platform:companies:read', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:audit_logs:read'],
+  platform_read_only: ['platform:dashboard:read', 'platform:companies:read', 'platform:users:read', 'platform:subscriptions:read', 'platform:audit_logs:read'],
+};
+const validPlatformPermissions = (value: unknown): ManagedPlatformPermission[] | null => Array.isArray(value) && value.every(permission => typeof permission === 'string' && (platformPermissionValues as readonly string[]).includes(permission)) ? [...new Set(value)] as ManagedPlatformPermission[] : null;
+const rolePermissionRef = (role: string) => db.doc(`platformPermissionProfiles/${role}`);
+const rolePermissions = async (role: string): Promise<ManagedPlatformPermission[]> => {
+  const saved = await rolePermissionRef(role).get();
+  const permissions = saved.exists ? validPlatformPermissions(saved.data()?.permissions) : null;
+  return permissions || [...(platformRolePermissionDefaults[role] || [])];
+};
 const platformRoleCapabilities: Record<string, readonly PlatformCapability[]> = {
   platform_owner: ['platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
   platform_admin: ['platform:companies:update', 'platform:users:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
@@ -638,7 +654,9 @@ const isActivePlatformUserFor = async (request: PlatformOwnerRequest, capability
   const role = String(profile.data()?.role || '');
   const matchingRoleClaim = request.auth?.token?.platformRole === role;
   const legacyOwnerClaim = role === 'platform_owner' && request.auth?.token?.platform_owner === true;
-  return profile.exists && profile.data()?.status === 'active' && (matchingRoleClaim || legacyOwnerClaim) && platformRoleCapabilities[role]?.includes(capability) ? uid : null;
+  const savedPermissions = profile.exists && profile.data()?.permissionsCustomized === true ? validPlatformPermissions(profile.data()?.permissions) : null;
+  const allowedPermissions = savedPermissions || await rolePermissions(role);
+  return profile.exists && profile.data()?.status === 'active' && (matchingRoleClaim || legacyOwnerClaim) && allowedPermissions.includes(capability) ? uid : null;
 };
 const isActivePlatformOwner = async (request: PlatformOwnerRequest): Promise<string | null> => {
   const uid = request.auth?.uid;
@@ -789,6 +807,20 @@ export const updatePlatformNotification = onCall({ region: 'us-central1', enforc
   return { success: true, message: 'تم تحديث الإشعار.' };
 });
 
+export const deletePlatformNotification = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:notifications:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const notificationId = typeof data.notificationId === 'string' ? data.notificationId.trim() : '';
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(notificationId)) return { success: false, message: 'بيانات الإشعار غير صالحة.' };
+  const notification = db.doc(`platformNotifications/${notificationId}`);
+  const current = await notification.get();
+  if (!current.exists) return { success: false, message: 'الإشعار غير موجود.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await notification.delete();
+  await db.collection('platformAuditLogs').add({ action: 'platform_notification_deleted', companyId: current.data()?.companyId || null, notificationId, createdBy: uid, timestamp });
+  return { success: true, message: 'تم حذف الإشعار.' };
+});
+
 export const setPlatformMemberStatus = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const uid = await isActivePlatformUserFor(request, 'platform:users:manage');
   const data = (request.data || {}) as Record<string, unknown>;
@@ -878,6 +910,31 @@ const claimsForPlatformRole = (role: ManagedPlatformRole) => ({ platformRole: ro
 const protectedPlatformAdminEmail = 'eslam.madeh93@gmail.com';
 const isProtectedPlatformAdmin = (data: { email?: unknown } | undefined) => String(data?.email || '').trim().toLowerCase() === protectedPlatformAdminEmail;
 
+export const getPlatformPermissionConfiguration = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  if (!actorUid) return { success: false, message: 'غير مصرح بعرض إعدادات الصلاحيات.' };
+  const roles = Object.keys(platformRolePermissionDefaults);
+  const entries = await Promise.all(roles.map(async role => [role, await rolePermissions(role)] as const));
+  return { success: true, message: 'تم تحميل إعدادات الصلاحيات.', rolePermissions: Object.fromEntries(entries) };
+});
+
+export const updatePlatformRolePermissions = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  const data = (request.data || {}) as Record<string, unknown>;
+  const role = typeof data.role === 'string' ? data.role : '';
+  const permissions = validPlatformPermissions(data.permissions);
+  if (!actorUid || !validPlatformRole(role) || !permissions) return { success: false, message: 'بيانات صلاحيات المنصب غير صالحة.' };
+  if (role === 'platform_owner' && (!permissions.includes('platform:dashboard:read') || !permissions.includes('platform:admins:manage'))) return { success: false, message: 'يجب أن يحتفظ صاحب المنصة بصلاحية لوحة التحكم وإدارة المشرفين لتفادي فقدان الوصول.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await rolePermissionRef(role).set({ role, permissions, updatedAt: timestamp, updatedBy: actorUid }, { merge: true });
+  const accounts = await db.collection('platformUsers').where('role', '==', role).get();
+  const batch = db.batch();
+  accounts.docs.filter(account => account.data()?.permissionsCustomized !== true).forEach(account => batch.set(account.ref, { permissions, permissionsCustomized: false, updatedAt: timestamp, updatedBy: actorUid }, { merge: true }));
+  await batch.commit();
+  await db.collection('platformAuditLogs').add({ action: 'platform_role_permissions_updated', targetRole: role, createdBy: actorUid, timestamp, metadata: { permissions } });
+  return { success: true, message: 'تم تحديث صلاحيات المنصب.' };
+});
+
 export const createPlatformAdmin = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const actorUid = await isActivePlatformUserFor(request, 'platform:admins:manage');
   const data = (request.data || {}) as Record<string, unknown>;
@@ -891,7 +948,7 @@ export const createPlatformAdmin = onCall({ region: 'us-central1', enforceAppChe
     try {
       await auth.setCustomUserClaims(user.uid, claimsForPlatformRole(role));
       const timestamp = FieldValue.serverTimestamp();
-      await db.doc(`platformUsers/${user.uid}`).create({ uid: user.uid, name, email, role, status: 'active', createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
+      await db.doc(`platformUsers/${user.uid}`).create({ uid: user.uid, name, email, role, status: 'active', permissions: await rolePermissions(role), permissionsCustomized: false, createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
       await db.collection('platformAuditLogs').add({ action: 'platform_admin_created', targetUid: user.uid, createdBy: actorUid, timestamp, metadata: { role } });
       return { success: true, message: 'تم إنشاء حساب المشرف.' };
     } catch (error) {
@@ -912,7 +969,9 @@ export const updatePlatformAdmin = onCall({ region: 'us-central1', enforceAppChe
   const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : undefined;
   const role = data.role;
   const status = data.status;
-  if (!actorUid || !targetUid || !validPlatformRole(role) || !['active', 'disabled'].includes(String(status)) || (name !== undefined && (name.length < 2 || name.length > 120)) || (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  const useRolePermissions = data.useRolePermissions === true;
+  const customPermissions = data.permissions === undefined ? undefined : validPlatformPermissions(data.permissions);
+  if (!actorUid || !targetUid || !validPlatformRole(role) || !['active', 'disabled'].includes(String(status)) || (name !== undefined && (name.length < 2 || name.length > 120)) || (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) || customPermissions === null) return { success: false, message: 'بيانات المشرف غير صالحة.' };
   if (targetUid === actorUid && (status !== 'active' || role !== 'platform_owner')) return { success: false, message: 'لا يمكنك تقليل صلاحية أو تعطيل حسابك الحالي.' };
   const target = db.doc(`platformUsers/${targetUid}`);
   const current = await target.get();
@@ -926,11 +985,13 @@ export const updatePlatformAdmin = onCall({ region: 'us-central1', enforceAppChe
     const owners = await db.collection('platformUsers').where('role', '==', 'platform_owner').where('status', '==', 'active').get();
     if (owners.size <= 1) return { success: false, message: 'لا يمكن تعديل أو تعطيل آخر صاحب منصة نشط.' };
   }
+  const nextPermissions = useRolePermissions ? await rolePermissions(role) : customPermissions;
+  if (role === 'platform_owner' && nextPermissions && (!nextPermissions.includes('platform:dashboard:read') || !nextPermissions.includes('platform:admins:manage'))) return { success: false, message: 'لا يمكن إزالة صلاحيات الإدارة الأساسية من حساب صاحب المنصة.' };
   await auth.setCustomUserClaims(targetUid, claimsForPlatformRole(role));
   await auth.updateUser(targetUid, { disabled: status === 'disabled', ...(name !== undefined ? { displayName: name } : {}), ...(email !== undefined ? { email } : {}) });
   const timestamp = FieldValue.serverTimestamp();
-  await target.update({ role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}), updatedAt: timestamp, updatedBy: actorUid });
-  await db.collection('platformAuditLogs').add({ action: 'platform_admin_updated', targetUid, createdBy: actorUid, timestamp, metadata: { role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}) } });
+  await target.update({ role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}), ...(nextPermissions ? { permissions: nextPermissions, permissionsCustomized: !useRolePermissions } : {}), updatedAt: timestamp, updatedBy: actorUid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_admin_updated', targetUid, createdBy: actorUid, timestamp, metadata: { role, status, ...(name !== undefined ? { name } : {}), ...(email !== undefined ? { email } : {}), ...(nextPermissions ? { permissionsCustomized: !useRolePermissions } : {}) } });
   return { success: true, message: 'تم تحديث حساب المشرف.' };
 });
 

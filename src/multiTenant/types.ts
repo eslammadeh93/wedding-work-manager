@@ -17,6 +17,9 @@ export interface PlatformUser {
   email: string;
   role: PlatformUserRole;
   status: AccountStatus;
+  /** Effective permissions for this account; custom values override its role defaults. */
+  permissions?: string[];
+  permissionsCustomized?: boolean;
   createdAt: RecordTimestamp;
   updatedAt: RecordTimestamp;
 }
@@ -62,5 +65,5 @@ export interface AuthSession {
   companyId?: string;
   memberStatus?: AccountStatus;
   companyStatus?: CompanyStatus;
-  permissions: readonly import('./permissions').Permission[];
+  permissions: readonly string[];
 }

@@ -1,10 +1,6 @@
 import { Crown, LockKeyhole } from "lucide-react";
 import { PLATFORM_ROUTES, type PlatformRouteDefinition } from "./routes";
-import {
-  isPlatformRole,
-  platformRoleHasPermission,
-  type PlatformRole,
-} from "./permissions/platformPermissions";
+import type { PlatformPermission } from "./permissions/platformPermissions";
 import { PlatformBadge } from "./shared/PlatformBadge";
 
 const navigationGroups = [
@@ -18,21 +14,20 @@ const navigationGroups = [
 interface PlatformNavigationProps {
   currentPath: string;
   role: string;
+  permissions: readonly string[];
   onNavigate: (path: string) => void;
 }
 
 export function PlatformNavigation({
   currentPath,
   role,
+  permissions,
   onNavigate,
 }: PlatformNavigationProps) {
-  const platformRole: PlatformRole | null = isPlatformRole(role) ? role : null;
-  const visibleRoutes = platformRole
-    ? PLATFORM_ROUTES.filter((route) =>
-        platformRoleHasPermission(platformRole, route.permission) &&
-        (route.id !== "developerTools" || platformRole === "platform_owner"),
-      )
-    : [];
+  const visibleRoutes = PLATFORM_ROUTES.filter((route) =>
+    permissions.includes(route.permission as PlatformPermission) &&
+    (route.id !== "developerTools" || permissions.includes("platform:developer_tools:manage")),
+  );
   const active = (route: PlatformRouteDefinition) =>
     route.id === "companies"
       ? currentPath.startsWith("/platform/companies")

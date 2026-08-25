@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase/config';
 import { firestorePaths } from './firestorePaths';
 import { effectivePermissions, PERMISSION_MATRIX, type Permission } from './permissions';
+import { PLATFORM_PERMISSION_MATRIX, PLATFORM_PERMISSIONS, type PlatformPermission } from './platform/permissions/platformPermissions';
 import type { AuthSession, Company, CompanyMember, PlatformUser, PlatformUserRole } from './types';
 
 export class MultiTenantAuthError extends Error {}
@@ -39,7 +40,10 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
     if (!platformRole || !['platform_owner', 'platform_admin', 'platform_support', 'platform_billing', 'platform_read_only'].includes(platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if ((hasOwnerClaim && platformRole !== 'platform_owner') || (platformRoleClaim && platformRoleClaim !== platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if (platformProfile.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل.');
-    return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: platformRole, permissions: PERMISSION_MATRIX[platformRole] };
+    const savedPlatformPermissions = Array.isArray(platformProfile.permissions)
+      ? platformProfile.permissions.filter((permission): permission is PlatformPermission => typeof permission === 'string' && (PLATFORM_PERMISSIONS as readonly string[]).includes(permission))
+      : undefined;
+    return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: platformRole, permissions: savedPlatformPermissions || PLATFORM_PERMISSION_MATRIX[platformRole] };
   }
   if (!tokenCompanyId || !tokenRole) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات الحساب.');
   const memberSnapshot = await getDoc(doc(db, firestorePaths.companyMember(tokenCompanyId, user.uid)));

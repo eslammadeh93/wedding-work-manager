@@ -31,6 +31,7 @@ export type PlatformConsoleSettings = {
 };
 
 type Result = { success: boolean; message: string };
+type PermissionConfigurationResult = Result & { rolePermissions?: Record<string, string[]> };
 
 export async function getPlatformConsoleState(): Promise<{
   settings: PlatformConsoleSettings;
@@ -102,6 +103,12 @@ export async function updatePlatformNotification(data: {
   if (!result.data.success) throw new Error(result.data.message);
 }
 
+export async function deletePlatformNotification(data: { notificationId: string }): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "deletePlatformNotification");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
 export async function setPlatformMemberStatus(data: {
   companyId: string;
   memberUid: string;
@@ -161,8 +168,23 @@ export async function updatePlatformAdmin(data: {
   email?: string;
   role: "platform_owner" | "platform_admin" | "platform_support" | "platform_billing" | "platform_read_only";
   status: "active" | "disabled";
+  permissions?: string[];
+  useRolePermissions?: boolean;
 }): Promise<void> {
   const call = httpsCallable<typeof data, Result>(functions, "updatePlatformAdmin");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
+export async function getPlatformPermissionConfiguration(): Promise<Record<string, string[]>> {
+  const call = httpsCallable<undefined, PermissionConfigurationResult>(functions, "getPlatformPermissionConfiguration");
+  const result = await call();
+  if (!result.data.success || !result.data.rolePermissions) throw new Error(result.data.message);
+  return result.data.rolePermissions;
+}
+
+export async function updatePlatformRolePermissions(data: { role: string; permissions: string[] }): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "updatePlatformRolePermissions");
   const result = await call(data);
   if (!result.data.success) throw new Error(result.data.message);
 }

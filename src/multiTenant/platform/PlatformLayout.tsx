@@ -9,6 +9,7 @@ interface PlatformLayoutProps {
   currentPath: string;
   displayName: string;
   role: string;
+  permissions: readonly string[];
   menuOpen: boolean;
   onMenuOpen: () => void;
   onMenuClose: () => void;
@@ -21,6 +22,7 @@ export function PlatformLayout({
   currentPath,
   displayName,
   role,
+  permissions,
   menuOpen,
   onMenuOpen,
   onMenuClose,
@@ -58,6 +60,7 @@ export function PlatformLayout({
     <PlatformNavigation
       currentPath={currentPath}
       role={role}
+      permissions={permissions}
       onNavigate={onNavigate}
     />
   );

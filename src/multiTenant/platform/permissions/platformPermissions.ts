@@ -32,6 +32,10 @@ export const PLATFORM_PERMISSIONS = [
 
 export type PlatformPermission = (typeof PLATFORM_PERMISSIONS)[number];
 
+export const PLATFORM_PERMISSION_LABELS: Readonly<Record<PlatformPermission, string>> = {
+  'platform:dashboard:read': 'لوحة التحكم', 'platform:companies:read': 'عرض الشركات', 'platform:companies:create': 'إنشاء الشركات', 'platform:companies:update': 'تعديل الشركات', 'platform:companies:suspend': 'إيقاف الشركات', 'platform:companies:archive': 'أرشفة الشركات', 'platform:users:read': 'عرض المستخدمين', 'platform:users:manage': 'إدارة المستخدمين', 'platform:subscriptions:read': 'عرض الاشتراكات', 'platform:subscriptions:manage': 'إدارة الاشتراكات', 'platform:audit_logs:read': 'سجل النشاط', 'platform:console:read': 'عرض لوحة المنصة', 'platform:notifications:manage': 'إدارة الإشعارات', 'platform:support:manage': 'إدارة الدعم الفني', 'platform:settings:manage': 'إعدادات النظام', 'platform:developer_tools:manage': 'أدوات المطور', 'platform:support:impersonate': 'دخول الدعم بالنيابة', 'platform:admins:manage': 'إدارة المشرفين والصلاحيات', 'platform:dangerous_delete': 'الحذف الحساس',
+};
+
 const allPermissions = [...PLATFORM_PERMISSIONS] as const;
 
 export const PLATFORM_PERMISSION_MATRIX: Readonly<

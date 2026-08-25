@@ -1,10 +1,6 @@
 import type { ReactNode } from "react";
 import { useAuth } from "../../../context/AuthContext";
-import {
-  isPlatformRole,
-  platformRoleHasPermission,
-  type PlatformPermission,
-} from "./platformPermissions";
+import { type PlatformPermission } from "./platformPermissions";
 
 interface PlatformPermissionGuardProps {
   permission: PlatformPermission;
@@ -19,10 +15,8 @@ export function PlatformPermissionGuard({
 }: PlatformPermissionGuardProps) {
   const { authSession, loading } = useAuth();
   if (loading) return null;
-  const role = authSession?.role;
   const allowed =
     authSession?.userType === "platform" &&
-    isPlatformRole(role) &&
-    platformRoleHasPermission(role, permission);
+    authSession.permissions.includes(permission);
   return allowed ? <>{children}</> : <>{fallback}</>;
 }
