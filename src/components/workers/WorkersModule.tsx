@@ -20,13 +20,15 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { Worker } from '../../types';
 import { companyMembersService } from '../../multiTenant/companyMembersService';
 import { sanitizePhoneInput } from '../../utils/phone';
 
 export const WorkersModule: React.FC = () => {
   const { t } = useLanguage();
-  const { workers } = useData();
+  const { workers, addWorker, updateWorker, deleteWorker, toggleWorkerStatus } = useData();
+  const { isDemo } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -116,23 +118,30 @@ export const WorkersModule: React.FC = () => {
     setIsSaving(true);
     try {
       if (editingWorker) {
-        const updated = await companyMembersService.updateWorker({
-          workerId: editingWorker.id,
-          name: fullName.trim(),
-          username: cleanUsername,
-          jobTitle: jobTitle.trim(),
-          phone: phone.trim(),
-          notes: notes.trim(),
-        });
-        if (!updated.success) throw new Error(updated.message);
-        if (editingWorker.status !== status) { const changed = await companyMembersService.setWorkerStatus({ workerId: editingWorker.id, status }); if (!changed.success) throw new Error(changed.message); }
-        if (cleanCode) {
-          const reset = await companyMembersService.resetWorkerLoginCode({ workerId: editingWorker.id, loginCode: cleanCode });
-          if (!reset.success) throw new Error(reset.message);
+        if (isDemo) {
+          await updateWorker(editingWorker.id, { fullName: fullName.trim(), username: cleanUsername, jobTitle: jobTitle.trim(), phone: phone.trim(), notes: notes.trim(), status, ...(cleanCode ? { loginCode: cleanCode } : {}) });
+        } else {
+          const updated = await companyMembersService.updateWorker({
+            workerId: editingWorker.id,
+            name: fullName.trim(),
+            username: cleanUsername,
+            jobTitle: jobTitle.trim(),
+            phone: phone.trim(),
+            notes: notes.trim(),
+          });
+          if (!updated.success) throw new Error(updated.message);
+          if (editingWorker.status !== status) { const changed = await companyMembersService.setWorkerStatus({ workerId: editingWorker.id, status }); if (!changed.success) throw new Error(changed.message); }
+          if (cleanCode) {
+            const reset = await companyMembersService.resetWorkerLoginCode({ workerId: editingWorker.id, loginCode: cleanCode });
+            if (!reset.success) throw new Error(reset.message);
+          }
         }
       } else {
-        const result = await companyMembersService.create({ name: fullName.trim(), username: cleanUsername, loginCode: cleanCode, jobTitle: jobTitle.trim(), phone: phone.trim(), notes: notes.trim(), role: 'worker' });
-        if (!result.success) throw new Error(result.message);
+        if (isDemo) await addWorker({ fullName: fullName.trim(), username: cleanUsername, loginCode: cleanCode, jobTitle: jobTitle.trim(), phone: phone.trim(), notes: notes.trim(), status });
+        else {
+          const result = await companyMembersService.create({ name: fullName.trim(), username: cleanUsername, loginCode: cleanCode, jobTitle: jobTitle.trim(), phone: phone.trim(), notes: notes.trim(), role: 'worker' });
+          if (!result.success) throw new Error(result.message);
+        }
       }
 
       setIsModalOpen(false);
@@ -146,8 +155,11 @@ export const WorkersModule: React.FC = () => {
   const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`هل أنت تأكد من رغبتك في حذف العامل "${name}"؟`)) {
       try {
-        const result = await companyMembersService.deleteWorker({ workerId: id });
-        if (!result.success) throw new Error(result.message);
+        if (isDemo) await deleteWorker(id);
+        else {
+          const result = await companyMembersService.deleteWorker({ workerId: id });
+          if (!result.success) throw new Error(result.message);
+        }
       } catch (error) {
         alert(error instanceof Error ? error.message : 'تعذر حذف العامل بالكامل.');
       }
@@ -157,8 +169,11 @@ export const WorkersModule: React.FC = () => {
   const handleToggleStatus = async (worker: Worker) => {
     try {
       const newStatus = worker.status === 'active' ? 'inactive' : 'active';
-      const result = await companyMembersService.setWorkerStatus({ workerId: worker.id, status: newStatus });
-      if (!result.success) throw new Error(result.message);
+      if (isDemo) await toggleWorkerStatus(worker.id, newStatus);
+      else {
+        const result = await companyMembersService.setWorkerStatus({ workerId: worker.id, status: newStatus });
+        if (!result.success) throw new Error(result.message);
+      }
     } catch (error) { alert(error instanceof Error ? error.message : 'تعذر تحديث حالة العامل.'); }
   };
 

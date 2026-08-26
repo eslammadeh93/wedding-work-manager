@@ -33,7 +33,7 @@ import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
   const { orders, expenses, inventory, settings } = useData();
-  const { authSession, profile } = useAuth();
+  const { authSession, profile, isDemo } = useAuth();
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
@@ -43,9 +43,9 @@ export const ReportsModule: React.FC = () => {
   const [reportDataError, setReportDataError] = useState<string | null>(null);
 
   const companyId = useMemo(() => {
-    if (!authSession || profile?.role === 'worker') return null;
+    if (isDemo || !authSession || profile?.role === 'worker') return null;
     try { return trustedCompanyIdFromSession(authSession); } catch { return null; }
-  }, [authSession, profile?.role]);
+  }, [authSession, isDemo, profile?.role]);
   const usesReportQuery = USE_MULTI_TENANT_DATA && Boolean(companyId);
 
   useEffect(() => {

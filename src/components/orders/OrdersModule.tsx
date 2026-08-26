@@ -96,7 +96,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
 export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, todaysOrdersRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
   const { orders, workTasks, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
-  const { profile, authSession } = useAuth();
+  const { profile, authSession, isDemo } = useAuth();
 
   const isWorker = profile?.role === 'worker';
   const workerId = profile?.workerId || '';
@@ -147,10 +147,10 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [editingWorkTask, setEditingWorkTask] = useState<import('../../types').WorkTask | null>(null);
 
   const managerCompanyId = useMemo(() => {
-    if (isWorker || !authSession) return null;
+    if (isDemo || isWorker || !authSession) return null;
     try { return trustedCompanyIdFromSession(authSession); }
     catch { return null; }
-  }, [authSession, isWorker]);
+  }, [authSession, isDemo, isWorker]);
 
   // Managers fetch only the requested Firestore page. The context intentionally
   // keeps a small realtime window for dashboard widgets instead of all orders.

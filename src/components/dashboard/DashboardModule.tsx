@@ -10,6 +10,7 @@ import {
   Clock,
   Boxes,
   ArrowUpRight,
+  RotateCcw,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
@@ -22,6 +23,7 @@ import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 import { MoneyValue } from '../ui/MoneyValue';
 import { ImportantAlertsCenter } from './ImportantAlertsCenter';
 import { getImportantAlerts } from '../../utils/importantAlerts';
+import { useDemoMode } from '../../demo/DemoDataProvider';
 
 interface DashboardModuleProps {
   onNavigate: (tab: ActiveTab, refId?: string) => void;
@@ -38,6 +40,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { profile } = useAuth();
+  const { isDemo, resetDemo } = useDemoMode();
   const { orders, inventory, activityLogs, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
 
   // Metrics Calculations
@@ -128,6 +131,17 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           onOpenTodaysOrders={onOpenTodaysOrders}
           onOpenWorkerMovements={onOpenWorkerMovements}
         />
+        {isDemo && <div className="w-full md:w-auto rounded-xl border border-amber-400/40 bg-amber-50 px-3 py-2 dark:bg-amber-950/25">
+          <p className="mb-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">نسخة تجريبية — التعديلات محفوظة على هذا المتصفح فقط</p>
+          <button
+            type="button"
+            onClick={() => { if (window.confirm('سيتم حذف تعديلات العرض التجريبي على هذا المتصفح فقط وإعادة البيانات الافتراضية. هل تريد المتابعة؟')) resetDemo(); }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-slate-950 transition-colors hover:bg-amber-400"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            الوضع الافتراضي
+          </button>
+        </div>}
       </div>
 
       {/* Company Financial Balance Summary Banner */}

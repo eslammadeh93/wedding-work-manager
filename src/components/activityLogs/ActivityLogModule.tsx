@@ -36,7 +36,7 @@ type DateFilterType = 'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all
 export const ActivityLogModule: React.FC = () => {
   const { t, language } = useLanguage();
   const { activityLogs, orders } = useData();
-  const { profile, authSession } = useAuth();
+  const { profile, authSession, isDemo } = useAuth();
 
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
 
@@ -60,9 +60,9 @@ export const ActivityLogModule: React.FC = () => {
   }, []);
 
   const companyId = useMemo(() => {
-    if (!authSession || profile?.role === 'worker') return null;
+    if (isDemo || !authSession || profile?.role === 'worker') return null;
     try { return trustedCompanyIdFromSession(authSession); } catch { return null; }
-  }, [authSession, profile?.role]);
+  }, [authSession, isDemo, profile?.role]);
   const useServerPagination = USE_MULTI_TENANT_DATA && Boolean(companyId);
   const [pagedLogs, setPagedLogs] = useState<ActivityLogRecord[]>([]);
   const [pageCursor, setPageCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);

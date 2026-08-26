@@ -85,6 +85,10 @@ export const LoginPage: React.FC = () => {
           <button type="button" onClick={() => { setView('manager'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'manager' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول إداري</button>
           <button type="button" onClick={() => { setView('worker'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'worker' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول الموظف</button>
         </div>}
+        {!USE_MULTI_TENANT_DATA && view !== 'setup' && <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 dark:bg-slate-900 p-1">
+          <button type="button" onClick={() => { setView('manager'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'manager' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول إداري</button>
+          <button type="button" onClick={() => { setView('worker'); resetError(); }} className={`rounded-lg px-3 py-2 text-xs font-black ${view === 'worker' ? 'bg-white dark:bg-slate-700 text-amber-600 shadow-sm' : 'text-slate-500'}`}>دخول الموظف</button>
+        </div>}
         {displayError && <div className="p-3.5 bg-rose-950/80 border border-rose-700/80 text-rose-300 rounded-2xl text-xs font-black flex items-center justify-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /><span>{displayError}</span></div>}
         {!isManager ? <form onSubmit={handleWorkerLogin} className="space-y-4">
           {USE_MULTI_TENANT_DATA && <Field label="كود الشركة" icon={<KeyRound className="w-4 h-4" />} value={companyCode} onChange={(value) => setCompanyCode(value.replace(/\D/g, '').slice(0, 6))} placeholder="100001" inputMode="numeric" maxLength={6} />}
@@ -93,8 +97,8 @@ export const LoginPage: React.FC = () => {
           <Submit submitting={submitting}>دخول الموظف</Submit>
         </form> : <form onSubmit={handleManagerLogin} className="space-y-4">
           {view === 'setup' && <Field label="الاسم" icon={<User className="w-4 h-4" />} value={name} onChange={setName} placeholder="اسم المدير" />}
-          <Field label="البريد الإلكتروني" icon={<Mail className="w-4 h-4" />} value={email} onChange={setEmail} placeholder="name@example.com" email />
-          <Field label="كلمة المرور" icon={<Lock className="w-4 h-4" />} value={password} onChange={setPassword} placeholder="كلمة المرور" password minLength={6} />
+          <Field label="البريد الإلكتروني أو اسم المستخدم" icon={<Mail className="w-4 h-4" />} value={email} onChange={setEmail} placeholder="name@example.com أو test" />
+          <Field label="كلمة المرور" icon={<Lock className="w-4 h-4" />} value={password} onChange={setPassword} placeholder="كلمة المرور" password minLength={view === 'setup' ? 6 : undefined} />
           <Submit submitting={submitting}>{view === 'setup' ? 'إنشاء الحساب' : 'دخول المدير'}</Submit>
           {!USE_MULTI_TENANT_DATA && allUsers.length === 0 && <button type="button" onClick={() => { setView(view === 'setup' ? 'manager' : 'setup'); resetError(); }} className="w-full text-xs font-bold text-amber-400">{view === 'setup' ? 'لدي حساب بالفعل' : 'إنشاء حساب المدير الأول'}</button>}
         </form>}

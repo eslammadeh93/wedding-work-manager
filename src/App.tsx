@@ -186,7 +186,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
 };
 
 function AppContent() {
-  const { user, profile, authSession, loading, usersInitialized } = useAuth();
+  const { user, profile, authSession, loading, usersInitialized, isDemo } = useAuth();
   const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -400,8 +400,8 @@ function AppContent() {
             {activeTab === 'reports' && <CompanyTabGuard tab="reports"><ReportsModule /></CompanyTabGuard>}
             {activeTab === 'activityLog' && <CompanyTabGuard tab="activityLog"><ActivityLogModule /></CompanyTabGuard>}
             {activeTab === 'settings' && <CompanyTabGuard tab="settings"><SettingsModule /></CompanyTabGuard>}
-            {USE_MULTI_TENANT_DATA && activeTab === 'members' && <CompanyTabGuard tab="members"><CompanyMembersModule /></CompanyTabGuard>}
-            {USE_MULTI_TENANT_DATA && activeTab === 'profile' && <ProfileModule />}
+            {USE_MULTI_TENANT_DATA && !isDemo && activeTab === 'members' && <CompanyTabGuard tab="members"><CompanyMembersModule /></CompanyTabGuard>}
+            {USE_MULTI_TENANT_DATA && !isDemo && activeTab === 'profile' && <ProfileModule />}
           </Suspense>
         </main>
       </div>

@@ -24,7 +24,7 @@ const actionDetails = (action: string) => {
 /** Manager view for the worker events that generate operational notifications. */
 export function WorkerMovementsModule() {
   const { activityLogs, orders, workers, loading } = useData();
-  const { authSession } = useAuth();
+  const { authSession, isDemo } = useAuth();
   const [workerId, setWorkerId] = useState('');
   const [search, setSearch] = useState('');
   const [pagedLogs, setPagedLogs] = useState<ActivityLogRecord[]>([]);
@@ -36,8 +36,8 @@ export function WorkerMovementsModule() {
   const [openingOrderId, setOpeningOrderId] = useState<string | null>(null);
 
   const companyId = useMemo(() => {
-    try { return authSession ? trustedCompanyIdFromSession(authSession) : null; } catch { return null; }
-  }, [authSession]);
+    try { return !isDemo && authSession ? trustedCompanyIdFromSession(authSession) : null; } catch { return null; }
+  }, [authSession, isDemo]);
 
   useEffect(() => {
     if (!companyId) return;

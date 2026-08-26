@@ -52,6 +52,8 @@ interface AuthContextType {
   loading: boolean;
   usersInitialized: boolean;
   authError: string | null;
+  /** True only for the browser-local, fictional presentation workspace. */
+  isDemo: boolean;
   clearError: () => void;
   loginEmail: (email: string, pass: string) => Promise<void>;
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
@@ -72,6 +74,20 @@ type LoginAttemptAction = 'check' | 'failure' | 'success';
 type LocalLoginAttemptState = { failures: number; level: number; lockedUntil: number };
 type LoginAttemptResult = { attemptNumber?: number; maxAttempts?: number; nextLockMinutes?: number };
 const LOCAL_LOGIN_ATTEMPTS_KEY = 'wedding_manager_login_attempts';
+const DEMO_SESSION_KEY = 'wwm_demo_session_v1';
+const DEMO_UID = 'local-demo-user';
+const hasDemoSession = () => {
+  try { return localStorage.getItem(DEMO_SESSION_KEY) === 'active'; } catch { return false; }
+};
+const clearDemoSession = () => {
+  try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* storage is optional */ }
+};
+const demoProfile: UserProfile = { uid: DEMO_UID, email: 'test', displayName: 'مدير العرض التجريبي', role: 'super_admin', isActive: true };
+const demoAuthSession: AuthSession = {
+  uid: DEMO_UID, email: 'test', displayName: 'مدير العرض التجريبي', userType: 'company', role: 'company_super_admin', companyId: 'local-demo-company', memberStatus: 'active', companyStatus: 'active',
+  permissions: ['company:dashboard:read', 'company:calendar:read', 'company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write', 'company:suppliers:read', 'company:suppliers:write', 'company:workers:read', 'company:workers:write', 'company:inventory:read', 'company:inventory:write', 'company:expenses:read', 'company:expenses:write', 'company:categories:read', 'company:categories:write', 'company:activity_logs:read', 'company:worker_performance:read', 'company:reports:read', 'company:settings:read', 'company:settings:write', 'company:notifications:read'],
+};
+const demoUser = { uid: DEMO_UID, email: 'test', displayName: demoProfile.displayName } as User;
 
 const formatFailedLoginMessage = (attempt: LoginAttemptResult) => {
   if (!attempt.attemptNumber || !attempt.maxAttempts) return 'بيانات الدخول غير صحيحة.';
@@ -132,6 +148,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [usersInitialized, setUsersInitialized] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
+
+  const activateDemo = () => {
+    setIsDemo(true);
+    setUser(demoUser);
+    setProfile(demoProfile);
+    setAuthSession(demoAuthSession);
+    setUsersInitialized(true);
+    setLoading(false);
+  };
 
   const reportLoginAttempt = async (action: LoginAttemptAction): Promise<LoginAttemptResult | undefined> => {
     // Keep this route in sync with server.ts. It is deliberately relative so
@@ -183,7 +209,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Subscribe to all users from Firestore
   useEffect(() => {
-    if (USE_MULTI_TENANT_DATA) {
+    if (USE_MULTI_TENANT_DATA || isDemo) {
       setUsersInitialized(true);
       return;
     }
@@ -214,7 +240,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       setAuthError(null);
     }
-    if (user) {
+    if (isDemo) {
+      clearDemoSession();
+      setIsDemo(false);
+      // Clear a stale Firebase browser session without calling an application API.
+      try { await signOut(auth); } catch { /* no Firebase session is normal for a demo */ }
+    } else if (user) {
       try {
         sessionStorage.removeItem(`wedding_manager_active_tab:${user.uid}`);
       } catch {
@@ -299,6 +330,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const version = ++resolutionVersion;
       const isCurrent = () => !disposed && version === resolutionVersion;
       if (!isCurrent()) return;
+      // The demo account is a client-only session. It intentionally has no
+      // Firebase identity, so no Firestore rule can ever grant it access.
+      if (hasDemoSession()) {
+        activateDemo();
+        return;
+      }
+      setIsDemo(false);
       setUser(currentUser);
 
       if (currentUser) {
@@ -394,7 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void initializeAuth();
 
     return () => { disposed = true; resolutionVersion += 1; unsubscribe(); };
-  }, []);
+  }, [isDemo]);
 
   const clearError = () => setAuthError(null);
 
@@ -426,6 +464,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginEmail = async (email: string, pass: string) => {
     setAuthError(null);
     const trimmedEmail = sanitizeText(email).trim().toLowerCase();
+
+    if (trimmedEmail === 'test' && pass === 'test') {
+      try { localStorage.setItem(DEMO_SESSION_KEY, 'active'); } catch { /* the session remains active until refresh */ }
+      activateDemo();
+      return;
+    }
+    clearDemoSession();
+    setIsDemo(false);
 
     try {
       await reportLoginAttempt('check');
@@ -460,6 +506,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginMultiTenantEmail = async (email: string, pass: string) => {
     setAuthError(null);
+    if (sanitizeText(email).trim().toLowerCase() === 'test' && pass === 'test') {
+      try { localStorage.setItem(DEMO_SESSION_KEY, 'active'); } catch { /* the session remains active until refresh */ }
+      activateDemo();
+      return;
+    }
+    clearDemoSession();
+    setIsDemo(false);
     try {
       console.info('[auth-login] start', { method: 'email' });
       await reportLoginAttempt('check');
@@ -620,6 +673,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         usersInitialized,
         authError,
+        isDemo,
         clearError,
         loginEmail,
         loginWorker,

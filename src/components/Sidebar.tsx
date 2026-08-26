@@ -70,7 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { orders, inventory } = useData();
-  const { profile, authSession } = useAuth();
+  const { profile, authSession, isDemo } = useAuth();
 
   const pendingOrdersCount = orders.filter((o) => o.orderStatus === 'pending' || o.orderStatus === 'in_progress').length;
   const lowInventoryCount = inventory.filter((i) => i.availableQuantity <= i.minStockLevel).length;
@@ -95,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'profile', group: 'account', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 
-  const navItems = allNavItems.filter((item) => USE_MULTI_TENANT_DATA
+  const navItems = allNavItems.filter((item) => !isDemo && (item.id === 'members' || item.id === 'profile') ? false : USE_MULTI_TENANT_DATA
     ? authSession?.userType === 'company' && (item.id === 'profile' || !item.permission || authSession.permissions.includes(item.permission))
     : item.roles.includes(userRole));
   const groupedNavItems = navigationGroupOrder.map(group => ({ group, items: navItems.filter(item => item.group === group) })).filter(({ items }) => items.length > 0);

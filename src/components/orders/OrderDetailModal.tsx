@@ -49,7 +49,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { updateOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
-  const { profile, authSession } = useAuth();
+  const { profile, authSession, isDemo } = useAuth();
 
   const isWorker = profile?.role === 'worker';
   const canViewCustomerContact = order ? contactIsVisible(isWorker, order) : false;
@@ -88,12 +88,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   }, [isWorker, order, profile, addActivityLog]);
 
   React.useEffect(() => {
-    if (!order || !authSession) { setWorkerMovements([]); return; }
+    if (isDemo || !order || !authSession) { setWorkerMovements([]); return; }
     let companyId: string;
     try { companyId = trustedCompanyIdFromSession(authSession); }
     catch { setWorkerMovements([]); return; }
     return companyDataService.subscribeOrderWorkerMovements<WorkerMovement>(companyId, order.id, isWorker ? profile?.workerId : undefined, setWorkerMovements, () => setWorkerMovements([]));
-  }, [authSession, isWorker, order?.id, profile?.workerId]);
+  }, [authSession, isDemo, isWorker, order?.id, profile?.workerId]);
 
   const imagesList = React.useMemo(() => {
     if (order?.designImages && order.designImages.length > 0) {

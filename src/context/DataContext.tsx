@@ -40,6 +40,7 @@ import {
 } from '../data/sampleData';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
 import { MultiTenantDataProvider } from '../multiTenant/data/MultiTenantDataProvider';
+import { DemoDataProvider } from '../demo/DemoDataProvider';
 
 const defaultCategories: CategoryItem[] = [
   { id: 'cat_1', key: 'wedding_chairs', nameEn: 'Wedding Chairs', nameAr: 'كراسي أعراس' },
@@ -1037,8 +1038,11 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 };
 
 /** The mode choice is intentionally centralized; legacy code is never mounted in tenant mode. */
-export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =>
-  USE_MULTI_TENANT_DATA ? <MultiTenantDataProvider>{children}</MultiTenantDataProvider> : <LegacyDataProvider>{children}</LegacyDataProvider>;
+export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isDemo } = useAuth();
+  if (isDemo) return <DemoDataProvider>{children}</DemoDataProvider>;
+  return USE_MULTI_TENANT_DATA ? <MultiTenantDataProvider>{children}</MultiTenantDataProvider> : <LegacyDataProvider>{children}</LegacyDataProvider>;
+};
 
 export const useData = () => {
   const context = useContext(DataContext);
