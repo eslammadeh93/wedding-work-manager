@@ -67,6 +67,12 @@
   background: #fcfafb;
 }
 
+html {
+  /* Stops browser text re-scaling from changing the app's mobile layout. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 :root.dark {
   color-scheme: dark;
   background: #161214;
@@ -84,6 +90,16 @@ body {
   min-width: 320px;
   background: #fcfafb;
   color: #3c2b31;
+}
+
+/* iOS zooms a page when focusing inputs smaller than 16px. Keep the app at
+   its fixed viewport scale while preserving normal touch scrolling. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* Financial values stay isolated from surrounding RTL text and never split

@@ -3,15 +3,63 @@ import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, Alert
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderItemReservation, OrderSupplierRental, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource } from '../../types';
+import { Order, OrderItemReservation, OrderSupplierRental, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource, OrderAttachment } from '../../types';
 import { localDateString } from '../../utils/localDate';
-import { sanitizePhoneInput } from '../../utils/phone';
+import { sanitizePhoneInput, toInternationalPhoneDigits } from '../../utils/phone';
 
 interface OrderModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialOrder?: Order | null;
 }
+
+/**
+ * A new order stays only in the browser until the user submits it. This lets
+ * us restore in-progress work without accidentally creating a real order.
+ */
+interface NewOrderDraft {
+  orderNumber?: string;
+  selectedCustomerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  bookingDate?: string;
+  weddingDate?: string;
+  deliveryDate?: string;
+  returnDate?: string;
+  eventLocation?: string;
+  locationLink?: string;
+  salesEmployee?: string;
+  orderSource?: OrderSource;
+  workerId?: string;
+  workerName?: string;
+  workerCanContactCustomer?: boolean;
+  totalPrice?: number;
+  deposit?: number;
+  securityDeposit?: number;
+  workerCost?: number;
+  transportationCost?: number;
+  otherExpenses?: number;
+  paymentMethod?: string;
+  paymentStatus?: PaymentStatus;
+  orderStatus?: OrderStatus;
+  notes?: string;
+  designImages?: DesignImageItem[];
+  reservedItems?: OrderItemReservation[];
+  supplierRentals?: OrderSupplierRental[];
+  attachmentUrlInput?: string;
+  attachmentType?: 'contract' | 'image' | 'file';
+  attachments?: OrderAttachment[];
+}
+
+const readNewOrderDraft = (storageKey: string): NewOrderDraft | null => {
+  try {
+    const saved = localStorage.getItem(storageKey);
+    return saved ? JSON.parse(saved) as NewOrderDraft : null;
+  } catch {
+    // Browser storage is optional; failure must never prevent order entry.
+    return null;
+  }
+};
 
 const WorkerSearchableSelect: React.FC<{
   selectedWorkerId: string;
@@ -120,53 +168,58 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 }) => {
   const { t, language } = useLanguage();
   const { orders, customers, suppliers, inventory, workers, addOrder, updateOrder, checkStockAvailability } = useData();
-  const { authSession } = useAuth();
+  const { authSession, user } = useAuth();
 
   const isEdit = !!initialOrder;
   const canManageWorkerContact = authSession?.role === 'manager' || authSession?.role === 'company_super_admin';
+  const draftStorageKey = React.useMemo(() => {
+    const ownerId = authSession?.companyId || authSession?.uid || user?.uid || 'legacy';
+    return `wedding_order_draft:${ownerId}`;
+  }, [authSession?.companyId, authSession?.uid, user?.uid]);
+  const [initialDraft] = useState<NewOrderDraft | null>(() => isEdit ? null : readNewOrderDraft(draftStorageKey));
 
   // Form State
   const [orderNumber, setOrderNumber] = useState(
-    initialOrder?.orderNumber || `WED-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
+    initialOrder?.orderNumber || initialDraft?.orderNumber || `WED-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
   );
-  const [selectedCustomerId, setSelectedCustomerId] = useState(initialOrder?.customerId || '');
-  const [customerName, setCustomerName] = useState(initialOrder?.customerName || '');
-  const [customerPhone, setCustomerPhone] = useState(initialOrder?.customerPhone || '');
+  const [selectedCustomerId, setSelectedCustomerId] = useState(initialOrder?.customerId || initialDraft?.selectedCustomerId || '');
+  const [customerName, setCustomerName] = useState(initialOrder?.customerName || initialDraft?.customerName || '');
+  const [customerPhone, setCustomerPhone] = useState(initialOrder?.customerPhone || initialDraft?.customerPhone || '');
   const [bookingDate, setBookingDate] = useState(
-    initialOrder?.bookingDate || localDateString()
+    initialOrder?.bookingDate || initialDraft?.bookingDate || localDateString()
   );
   const [weddingDate, setWeddingDate] = useState(
-    initialOrder?.weddingDate || localDateString()
+    initialOrder?.weddingDate || initialDraft?.weddingDate || localDateString()
   );
   const [deliveryDate, setDeliveryDate] = useState(
-    initialOrder?.deliveryDate || localDateString()
+    initialOrder?.deliveryDate || initialDraft?.deliveryDate || localDateString()
   );
   const [returnDate, setReturnDate] = useState(
-    initialOrder?.returnDate || ''
+    initialOrder?.returnDate || initialDraft?.returnDate || ''
   );
-  const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || '');
-  const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || '');
-  const [salesEmployee, setSalesEmployee] = useState(initialOrder?.salesEmployee || '');
-  const [orderSource, setOrderSource] = useState<OrderSource>(initialOrder?.orderSource || 'other');
+  const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || initialDraft?.eventLocation || '');
+  const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || initialDraft?.locationLink || '');
+  const [salesEmployee, setSalesEmployee] = useState(initialOrder?.salesEmployee || initialDraft?.salesEmployee || '');
+  const [orderSource, setOrderSource] = useState<OrderSource>(initialOrder?.orderSource || initialDraft?.orderSource || 'other');
   
   // Worker assignment
-  const [workerId, setWorkerId] = useState(initialOrder?.workerId || '');
-  const [workerName, setWorkerName] = useState(initialOrder?.workerName || initialOrder?.executorName || '');
-  const [workerCanContactCustomer, setWorkerCanContactCustomer] = useState(initialOrder?.workerCanContactCustomer === true);
-  const [totalPrice, setTotalPrice] = useState<number>(initialOrder?.totalPrice || 0);
-  const [deposit, setDeposit] = useState<number>(initialOrder?.deposit || 0);
-  const [securityDeposit, setSecurityDeposit] = useState<number>(initialOrder?.securityDeposit || 0);
-  const [workerCost, setWorkerCost] = useState<number>(initialOrder?.workerCost || 0);
-  const [transportationCost, setTransportationCost] = useState<number>(initialOrder?.transportationCost || 0);
-  const [otherExpenses, setOtherExpenses] = useState<number>(initialOrder?.otherExpenses || 0);
-  const [paymentMethod, setPaymentMethod] = useState(initialOrder?.paymentMethod || 'InstaPay');
+  const [workerId, setWorkerId] = useState(initialOrder?.workerId || initialDraft?.workerId || '');
+  const [workerName, setWorkerName] = useState(initialOrder?.workerName || initialOrder?.executorName || initialDraft?.workerName || '');
+  const [workerCanContactCustomer, setWorkerCanContactCustomer] = useState(initialOrder?.workerCanContactCustomer === true || initialDraft?.workerCanContactCustomer === true);
+  const [totalPrice, setTotalPrice] = useState<number>(initialOrder?.totalPrice ?? initialDraft?.totalPrice ?? 0);
+  const [deposit, setDeposit] = useState<number>(initialOrder?.deposit ?? initialDraft?.deposit ?? 0);
+  const [securityDeposit, setSecurityDeposit] = useState<number>(initialOrder?.securityDeposit ?? initialDraft?.securityDeposit ?? 0);
+  const [workerCost, setWorkerCost] = useState<number>(initialOrder?.workerCost ?? initialDraft?.workerCost ?? 0);
+  const [transportationCost, setTransportationCost] = useState<number>(initialOrder?.transportationCost ?? initialDraft?.transportationCost ?? 0);
+  const [otherExpenses, setOtherExpenses] = useState<number>(initialOrder?.otherExpenses ?? initialDraft?.otherExpenses ?? 0);
+  const [paymentMethod, setPaymentMethod] = useState(initialOrder?.paymentMethod || initialDraft?.paymentMethod || 'InstaPay');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(
-    initialOrder?.paymentStatus || 'unpaid'
+    initialOrder?.paymentStatus || initialDraft?.paymentStatus || 'unpaid'
   );
   const [orderStatus, setOrderStatus] = useState<OrderStatus>(
-    initialOrder?.orderStatus || 'new'
+    initialOrder?.orderStatus || initialDraft?.orderStatus || 'new'
   );
-  const [notes, setNotes] = useState(initialOrder?.notes || '');
+  const [notes, setNotes] = useState(initialOrder?.notes || initialDraft?.notes || '');
   const [designImages, setDesignImages] = useState<DesignImageItem[]>(() => {
     if (initialOrder?.designImages && initialOrder.designImages.length > 0) {
       return initialOrder.designImages;
@@ -174,7 +227,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     if (initialOrder?.designImageUrl && initialOrder.designImageUrl.trim()) {
       return [{ url: initialOrder.designImageUrl.trim(), createdAt: initialOrder.createdAt || new Date().toISOString() }];
     }
-    return [{ url: '', createdAt: new Date().toISOString() }];
+    return initialDraft?.designImages?.length ? initialDraft.designImages : [{ url: '', createdAt: new Date().toISOString() }];
   });
 
   const handleAddDesignImage = () => {
@@ -198,14 +251,112 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     });
   };
   const [reservedItems, setReservedItems] = useState<OrderItemReservation[]>(
-    initialOrder?.reservedItems || []
+    initialOrder?.reservedItems || initialDraft?.reservedItems || []
   );
-  const [supplierRentals, setSupplierRentals] = useState<OrderSupplierRental[]>(initialOrder?.supplierRentals || []);
-  const [attachmentUrlInput, setAttachmentUrlInput] = useState('');
-  const [attachmentType, setAttachmentType] = useState<'contract' | 'image' | 'file'>('contract');
-  const [attachments, setAttachments] = useState(initialOrder?.attachments || []);
+  const [supplierRentals, setSupplierRentals] = useState<OrderSupplierRental[]>(initialOrder?.supplierRentals || initialDraft?.supplierRentals || []);
+  const [attachmentUrlInput, setAttachmentUrlInput] = useState(initialDraft?.attachmentUrlInput || '');
+  const [attachmentType, setAttachmentType] = useState<'contract' | 'image' | 'file'>(initialDraft?.attachmentType || 'contract');
+  const [attachments, setAttachments] = useState<OrderAttachment[]>(initialOrder?.attachments || initialDraft?.attachments || []);
   const [stockWarning, setStockWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  const persistDraft = React.useCallback(() => {
+    if (isEdit) return;
+    const draft: NewOrderDraft = {
+      orderNumber, selectedCustomerId, customerName, customerPhone,
+      bookingDate, weddingDate, deliveryDate, returnDate, eventLocation,
+      locationLink, salesEmployee, orderSource, workerId, workerName,
+      workerCanContactCustomer, totalPrice, deposit, securityDeposit,
+      workerCost, transportationCost, otherExpenses, paymentMethod,
+      paymentStatus, orderStatus, notes, designImages, reservedItems,
+      supplierRentals, attachmentUrlInput, attachmentType, attachments,
+    };
+    try {
+      localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    } catch {
+      // Storage can be disabled by the browser. The order form remains usable.
+    }
+  }, [
+    isEdit, draftStorageKey, orderNumber, selectedCustomerId, customerName,
+    customerPhone, bookingDate, weddingDate, deliveryDate, returnDate,
+    eventLocation, locationLink, salesEmployee, orderSource, workerId,
+    workerName, workerCanContactCustomer, totalPrice, deposit, securityDeposit,
+    workerCost, transportationCost, otherExpenses, paymentMethod, paymentStatus,
+    orderStatus, notes, designImages, reservedItems, supplierRentals,
+    attachmentUrlInput, attachmentType, attachments,
+  ]);
+
+  React.useEffect(() => {
+    persistDraft();
+  }, [persistDraft]);
+
+  React.useEffect(() => {
+    if (isEdit) return;
+    window.addEventListener('beforeunload', persistDraft);
+    return () => window.removeEventListener('beforeunload', persistDraft);
+  }, [isEdit, persistDraft]);
+
+  const clearDraft = () => {
+    if (isEdit) return;
+    try {
+      localStorage.removeItem(draftStorageKey);
+    } catch {
+      // Storage cleanup is best-effort and should not affect a saved order.
+    }
+  };
+
+  const handleClose = () => {
+    persistDraft();
+    onClose();
+  };
+
+  const handleStartFreshOrder = () => {
+    clearDraft();
+    setOrderNumber(`WED-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`);
+    setSelectedCustomerId('');
+    setCustomerName('');
+    setCustomerPhone('');
+    setBookingDate(localDateString());
+    setWeddingDate(localDateString());
+    setDeliveryDate(localDateString());
+    setReturnDate('');
+    setEventLocation('');
+    setLocationLink('');
+    setSalesEmployee('');
+    setOrderSource('other');
+    setWorkerId('');
+    setWorkerName('');
+    setWorkerCanContactCustomer(false);
+    setTotalPrice(0);
+    setDeposit(0);
+    setSecurityDeposit(0);
+    setWorkerCost(0);
+    setTransportationCost(0);
+    setOtherExpenses(0);
+    setPaymentMethod('InstaPay');
+    setPaymentStatus('unpaid');
+    setOrderStatus('new');
+    setNotes('');
+    setDesignImages([{ url: '', createdAt: new Date().toISOString() }]);
+    setReservedItems([]);
+    setSupplierRentals([]);
+    setAttachmentUrlInput('');
+    setAttachmentType('contract');
+    setAttachments([]);
+    setStockWarning(null);
+  };
+
+  const phoneMatches = React.useMemo(() => {
+    const typedPhone = toInternationalPhoneDigits(customerPhone);
+    if (typedPhone.length < 3) return [];
+
+    return customers
+      .filter((customer) => {
+        const savedPhone = toInternationalPhoneDigits(customer.phone);
+        return Boolean(savedPhone) && (savedPhone.includes(typedPhone) || typedPhone.includes(savedPhone));
+      })
+      .slice(0, 5);
+  }, [customers, customerPhone]);
 
   if (!isOpen) return null;
 
@@ -219,6 +370,15 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     if (found) {
       setCustomerName(found.name);
       setCustomerPhone(sanitizePhoneInput(found.phone));
+    }
+  };
+
+  const handleCustomerPhoneChange = (value: string) => {
+    const phone = sanitizePhoneInput(value);
+    setCustomerPhone(phone);
+    const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
+    if (selectedCustomer && toInternationalPhoneDigits(selectedCustomer.phone) !== toInternationalPhoneDigits(phone)) {
+      setSelectedCustomerId('');
     }
   };
 
@@ -401,6 +561,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         },
       );
     }
+    clearDraft();
     onClose();
     } catch (error) {
       setStockWarning(error instanceof Error ? error.message : 'تعذر حفظ الطلب. حاول مرة أخرى.');
@@ -410,27 +571,45 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div onClick={handleClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <h3 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2">
-            <FileText className="w-5 h-5 text-amber-500" />
-            <span>{isEdit ? t('editOrder') : t('newOrder')}</span>
-          </h3>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
-          >
-            <X className="w-5 h-5" />
-          </button>
+        <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2 whitespace-nowrap">
+              <FileText className="w-5 h-5 text-amber-500" />
+              <span>{isEdit ? t('editOrder') : t('newOrder')}</span>
+            </h3>
+            <button
+              onClick={handleClose}
+              className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          {!isEdit && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-amber-100 px-3 text-center text-xs font-bold text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                حفظ تلقائي كمسودة
+              </span>
+              <button
+                type="button"
+                onClick={handleStartFreshOrder}
+                className="inline-flex min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-rose-200 bg-rose-50 px-3 text-xs font-bold text-rose-700 shadow-sm transition-colors hover:bg-rose-100 dark:border-rose-900/70 dark:bg-rose-950/25 dark:text-rose-300 dark:hover:bg-rose-950/45"
+                title="حذف المسودة وبدء أوردر جديد فارغ"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>مسح المسودة</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto flex-1">
           {/* Section 1: Order Basics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div className="-order-1">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {t('orderNumber')}
               </label>
@@ -443,7 +622,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               />
             </div>
 
-            <div>
+            <div className="-order-2">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {t('selectCustomer')}
               </label>
@@ -461,7 +640,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               </select>
             </div>
 
-            <div>
+            <div className="-order-3">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {t('customerName')}
               </label>
@@ -475,7 +654,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               />
             </div>
 
-            <div>
+            <div className="order-first sm:col-span-2">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {t('phoneNumber')}
               </label>
@@ -483,10 +662,30 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 type="text"
                 required
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(sanitizePhoneInput(e.target.value))}
-                placeholder="+966 50 000 0000"
+                onChange={(e) => handleCustomerPhoneChange(e.target.value)}
+                placeholder="01xxxxxxxxx"
+                inputMode="tel"
+                autoFocus={!isEdit}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
               />
+              {!selectedCustomerId && phoneMatches.length > 0 && (
+                <div className="mt-2 overflow-hidden rounded-xl border border-amber-200 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20">
+                  <p className="px-3 py-2 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                    {language === 'ar' ? 'عميل موجود بنفس الرقم أو رقم قريب — اختره لملء البيانات:' : 'Existing customer match — select to fill their details:'}
+                  </p>
+                  {phoneMatches.map((customer) => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      onClick={() => handleCustomerSelect(customer.id)}
+                      className="flex w-full items-center justify-between gap-3 border-t border-amber-200/80 px-3 py-2.5 text-right text-xs transition-colors hover:bg-amber-100 dark:border-amber-900/70 dark:hover:bg-amber-950/50"
+                    >
+                      <span className="font-bold text-slate-800 dark:text-slate-100">{customer.name}</span>
+                      <span className="font-mono font-semibold text-amber-700 dark:text-amber-300" dir="ltr">{customer.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -1130,7 +1329,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               {t('cancel')}

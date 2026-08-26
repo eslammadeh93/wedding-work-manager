@@ -196,6 +196,7 @@ function AppContent() {
   const [todaysOrdersRequest, setTodaysOrdersRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
   const [restoredTabForUid, setRestoredTabForUid] = useState<string | null>(null);
+  const [showMobileSectionBar, setShowMobileSectionBar] = useState(false);
 
   // The browser history cannot be erased, but once a session ends every
   // history navigation is rewritten to the public login URL before protected
@@ -284,6 +285,21 @@ function AppContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // The section switcher at the top naturally scrolls away with long pages.
+  // On handheld screens, keep a compact replacement within reach once that
+  // happens, so the sidebar can be opened without returning to the top.
+  useEffect(() => {
+    const mobileViewport = window.matchMedia('(max-width: 1023px)');
+    const updateVisibility = () => setShowMobileSectionBar(mobileViewport.matches && window.scrollY > 160);
+    updateVisibility();
+    window.addEventListener('scroll', updateVisibility, { passive: true });
+    mobileViewport.addEventListener('change', updateVisibility);
+    return () => {
+      window.removeEventListener('scroll', updateVisibility);
+      mobileViewport.removeEventListener('change', updateVisibility);
+    };
   }, []);
 
   // With the flag off this branch is never selected: no platform module,
@@ -389,6 +405,27 @@ function AppContent() {
           </Suspense>
         </main>
       </div>
+
+      {/* Mobile section switcher: visible below the fixed top header while
+          scrolling long pages. It is hidden while the sidebar is open so the
+          backdrop remains the only active layer. */}
+      {showMobileSectionBar && !isSidebarOpen && (
+        <div className="fixed inset-x-0 top-14 z-40 border-y border-slate-200/90 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-lg dark:border-slate-700 dark:bg-slate-900/95 sm:top-16 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label={`فتح قائمة الأقسام، القسم الحالي: ${getPageTitle(activeTab, language)}`}
+            aria-expanded={isSidebarOpen}
+            className="mx-auto flex min-h-11 w-full max-w-lg items-center justify-between rounded-xl border border-amber-300/70 bg-amber-50 px-4 text-sm font-extrabold text-slate-800 shadow-sm transition-colors hover:bg-amber-100 active:scale-[0.99] dark:border-amber-800 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+          >
+            <span className="flex items-center gap-2">
+              <Menu className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              <span>{getPageTitle(activeTab, language)}</span>
+            </span>
+            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">تغيير القسم</span>
+          </button>
+        </div>
+      )}
 
       {/* Modals & Drawers */}
       <GlobalSearchErrorBoundary
