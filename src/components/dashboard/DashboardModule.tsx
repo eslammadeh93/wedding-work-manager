@@ -30,6 +30,7 @@ interface DashboardModuleProps {
   onCreateOrder: () => void;
   onOpenTodaysOrders: () => void;
   onOpenWorkerMovements: () => void;
+  onOpenCalculator: () => void;
 }
 
 export const DashboardModule: React.FC<DashboardModuleProps> = ({
@@ -37,6 +38,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   onCreateOrder,
   onOpenTodaysOrders,
   onOpenWorkerMovements,
+  onOpenCalculator,
 }) => {
   const { t, language } = useLanguage();
   const { profile } = useAuth();
@@ -130,6 +132,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           onCreateOrder={onCreateOrder}
           onOpenTodaysOrders={onOpenTodaysOrders}
           onOpenWorkerMovements={onOpenWorkerMovements}
+          onOpenCalculator={onOpenCalculator}
         />
         {isDemo && <div className="w-full md:w-auto rounded-xl border border-amber-400/40 bg-amber-50 px-3 py-2 dark:bg-amber-950/25">
           <p className="mb-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">نسخة تجريبية — التعديلات محفوظة على هذا المتصفح فقط</p>

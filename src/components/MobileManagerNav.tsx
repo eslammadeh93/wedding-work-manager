@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BellOff, BellRing, CalendarDays, Plus } from 'lucide-react';
+import { BellOff, BellRing, Calculator, CalendarDays, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
@@ -9,6 +9,7 @@ interface MobileManagerNavProps {
   onCreateOrder: () => void;
   onOpenTodaysOrders: () => void;
   onOpenWorkerMovements: () => void;
+  onOpenCalculator: () => void;
   variant?: 'mobile' | 'desktop';
 }
 
@@ -17,6 +18,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   onCreateOrder,
   onOpenTodaysOrders,
   onOpenWorkerMovements,
+  onOpenCalculator,
   variant = 'mobile',
 }) => {
   const { profile, authSession } = useAuth();
@@ -38,6 +40,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const canCreateOrder = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
   const canViewNotifications = !USE_MULTI_TENANT_DATA || permissions.includes('company:notifications:read');
+  const canUseCalculator = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
   const unreadMovements = notifications.filter(
     (notification) => !notification.read && ['worker_arrived', 'worker_completed'].includes(notification.type),
   ).length;
@@ -72,8 +75,8 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
     ? 'hidden lg:grid w-full lg:w-auto lg:min-w-[450px]'
     : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 bg-white/95 backdrop-blur-lg dark:border-slate-700 dark:bg-slate-900/95 lg:hidden';
   const contentClass = isDesktop
-    ? 'grid grid-cols-3 gap-1.5'
-    : `mx-auto grid max-w-lg gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${isManager ? 'grid-cols-4' : 'grid-cols-1 max-w-[150px]'}`;
+    ? 'grid grid-cols-4 gap-1.5'
+    : `mx-auto grid max-w-lg gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${isManager ? 'grid-cols-5' : 'grid-cols-1 max-w-[150px]'}`;
   const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 dark:border-slate-700' : 'min-h-[58px]';
   const secondaryButtonClass = isDesktop ? `${buttonClass} bg-slate-50 dark:bg-slate-800/70` : buttonClass;
   const pushBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
@@ -92,6 +95,17 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           >
             <Plus className="h-5 w-5" strokeWidth={2.5} />
             <span className="text-[10px] font-extrabold">إضافة طلب زفاف</span>
+          </button>
+        )}
+
+        {canUseCalculator && (
+          <button
+            type="button"
+            onClick={onOpenCalculator}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-emerald-50 dark:text-slate-300 dark:hover:bg-emerald-950/30 active:scale-95 ${secondaryButtonClass}`}
+          >
+            <Calculator className="h-5 w-5 text-emerald-500" />
+            <span className="text-[10px] font-bold">الحاسبة</span>
           </button>
         )}
 

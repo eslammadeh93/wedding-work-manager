@@ -25,7 +25,7 @@ export const OrderCustomerSection: React.FC<{ order: Order; isWorker: boolean; c
         <div>
           <p className="text-base font-extrabold text-slate-900 dark:text-white">{order.customerName}</p>
           {canViewCustomerContact && <p className="text-sm font-mono text-slate-600 dark:text-slate-300 font-bold dir-ltr text-left sm:text-right mt-0.5">{order.customerPhone}</p>}
-          {order.salesEmployee && !isWorker && <p className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 mt-1 font-semibold"><UserCheck className="w-3.5 h-3.5" /><span>{t('salesEmployee')}: {order.salesEmployee}</span></p>}
+          {(order.responsibleName || order.salesEmployee) && !isWorker && <p className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 mt-1 font-semibold"><UserCheck className="w-3.5 h-3.5" /><span>{language === 'ar' ? 'المسؤول عن الأوردر' : 'Order responsible'}: {order.responsibleName || order.salesEmployee}</span></p>}
           {!isWorker && <div className="mt-2"><OrderSourceBadge source={order.orderSource} language={language} /></div>}
           <OrderWorkerSummary order={order} />
         </div>

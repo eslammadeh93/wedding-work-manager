@@ -16,6 +16,7 @@ import { MobileManagerNav } from './components/MobileManagerNav';
 import { LoginPage } from './components/auth/LoginPage';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { WorkerPushNotificationsPrompt } from './components/WorkerPushNotificationsPrompt';
+import { OrderCalculatorModal } from './components/calculator/OrderCalculatorModal';
 
 import { Menu, Crown, Loader2 } from 'lucide-react';
 import wwmLogo from './assets/wwm-logo.png';
@@ -23,6 +24,7 @@ import wwmLogo from './assets/wwm-logo.png';
 // Load each workspace only when it is opened. This keeps PDF/Excel and other
 // heavy feature code out of the application's initial download.
 const DashboardModule = lazy(() => import('./components/dashboard/DashboardModule').then(({ DashboardModule }) => ({ default: DashboardModule })));
+const OrderCalculatorModule = lazy(() => import('./components/calculator/OrderCalculatorModule').then(({ OrderCalculatorModule }) => ({ default: OrderCalculatorModule })));
 const OrdersModule = lazy(() => import('./components/orders/OrdersModule').then(({ OrdersModule }) => ({ default: OrdersModule })));
 const WorkersModule = lazy(() => import('./components/workers/WorkersModule').then(({ WorkersModule }) => ({ default: WorkersModule })));
 const CustomersModule = lazy(() => import('./components/customers/CustomersModule').then(({ CustomersModule }) => ({ default: CustomersModule })));
@@ -49,7 +51,7 @@ function UnauthorizedCompanyMembers() {
 }
 
 const tabPermission: Partial<Record<ActiveTab, Permission>> = {
-  dashboard: 'company:dashboard:read', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
+  dashboard: 'company:dashboard:read', calculator: 'company:orders:write', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
@@ -57,7 +59,7 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   settings: 'company:settings:read', members: 'company:members:read',
   recycleBin: 'company:settings:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'calculator', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -66,6 +68,7 @@ const isActiveTab = (value: string | null): value is ActiveTab => value !== null
 // mounted: an unauthorized initial/restored tab must not request its chunk.
 const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<typeof useAuth>['profile']>['role'][]>> = {
   dashboard: ['super_admin', 'admin', 'manager'],
+  calculator: ['super_admin', 'admin', 'manager', 'employee'],
   orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
   workers: ['super_admin', 'admin', 'manager'],
   workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
@@ -112,6 +115,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
     switch (tab) {
       case 'dashboard':
         return 'لوحة التحكم';
+      case 'calculator':
+        return 'حاسبة الأسعار';
       case 'orders':
         return 'الطلبات';
       case 'workers':
@@ -149,6 +154,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
     switch (tab) {
       case 'dashboard':
         return 'Dashboard';
+      case 'calculator':
+        return 'Price Calculator';
       case 'orders':
         return 'Orders';
       case 'workers':
@@ -192,6 +199,7 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
   const [todaysOrdersRequest, setTodaysOrdersRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
@@ -256,7 +264,7 @@ function AppContent() {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
-      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'suppliers', 'calendar'];
+      const allowedEmployeeTabs: ActiveTab[] = ['calculator', 'orders', 'customers', 'suppliers', 'calendar'];
       if (!allowedEmployeeTabs.includes(activeTab)) {
         setActiveTab('orders');
       }
@@ -285,6 +293,22 @@ function AppContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Browsers can change a focused number input (and, in some environments, a
+  // focused select) when the user simply scrolls past it. Blur the form field
+  // before its default wheel behavior runs so the page keeps scrolling while
+  // the entered value remains untouched.
+  useEffect(() => {
+    const preventWheelValueChange = (event: WheelEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const field = target.closest('input, select, textarea') as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+      const isReadOnly = field instanceof HTMLSelectElement ? false : Boolean(field?.readOnly);
+      if (field && !field.disabled && !isReadOnly) field.blur();
+    };
+    document.addEventListener('wheel', preventWheelValueChange, { capture: true, passive: true });
+    return () => document.removeEventListener('wheel', preventWheelValueChange, true);
   }, []);
 
   // The section switcher at the top naturally scrolls away with long pages.
@@ -317,6 +341,8 @@ function AppContent() {
     setActiveTab('orders');
     setCreateOrderRequest((request) => request + 1);
   };
+
+  const handleOpenCalculator = () => setIsCalculatorOpen(true);
 
   const handleOpenTodaysOrders = () => {
     setActiveTab('orders');
@@ -386,7 +412,8 @@ function AppContent() {
               </div>
             }
           >
-            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovements={handleOpenWorkerMovements} /></CompanyTabGuard>}
+            {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovements={handleOpenWorkerMovements} onOpenCalculator={handleOpenCalculator} /></CompanyTabGuard>}
+            {activeTab === 'calculator' && <CompanyTabGuard tab="calculator"><OrderCalculatorModule onOpenCalculator={handleOpenCalculator} /></CompanyTabGuard>}
             {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} todaysOrdersRequest={todaysOrdersRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
             {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}
@@ -451,7 +478,10 @@ function AppContent() {
         onCreateOrder={handleCreateOrder}
         onOpenTodaysOrders={handleOpenTodaysOrders}
         onOpenWorkerMovements={handleOpenWorkerMovements}
+        onOpenCalculator={handleOpenCalculator}
       />
+
+      <OrderCalculatorModal isOpen={isCalculatorOpen} onClose={() => setIsCalculatorOpen(false)} />
 
     </div>
   );

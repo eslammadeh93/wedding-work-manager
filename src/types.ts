@@ -48,6 +48,28 @@ export interface OrderItemReservation {
   quantity: number;
 }
 
+/** A reusable item in the company's order-price calculator. */
+export interface OrderPriceCatalogItem {
+  id: string;
+  name: string;
+  unitPrice: number;
+}
+
+/** A price-calculator line saved as a snapshot on the order. */
+export interface OrderPricingLine {
+  id: string;
+  catalogItemId: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+}
+
+/** A person who owns sales follow-up and may be eligible for commission. */
+export interface OrderResponsible {
+  id: string;
+  name: string;
+}
+
 /** A rented service or item supplied externally for one wedding order. */
 export interface OrderSupplierRental {
   id: string;
@@ -153,6 +175,8 @@ export interface Order {
   eventLocation: string;
   locationLink?: string; // رابط موقع التنفيذ (Google Maps)
   salesEmployee?: string;
+  responsibleId?: string;
+  responsibleName?: string;
   /** Lead source. This is intentionally omitted from the worker-safe order projection. */
   orderSource?: OrderSource;
   executorName?: string; // المنفذ / Executor
@@ -340,6 +364,8 @@ export interface CompanySettings {
   logoUrl?: string;
   termsEn?: string;
   termsAr?: string;
+  orderPriceCatalog?: OrderPriceCatalogItem[];
+  orderResponsibles?: OrderResponsible[];
 }
 
 export type UserRole = 'super_admin' | 'admin' | 'manager' | 'employee' | 'worker';

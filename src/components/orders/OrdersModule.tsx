@@ -21,6 +21,7 @@ import {
   Sparkles,
   ArrowUpDown,
   Wrench,
+  UserCheck,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
@@ -95,7 +96,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
 
 export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, todaysOrdersRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
-  const { orders, workTasks, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
+  const { orders, workTasks, settings, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
   const { profile, authSession, isDemo } = useAuth();
 
   const isWorker = profile?.role === 'worker';
@@ -107,6 +108,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   const [selectedPayment, setSelectedPayment] = useState<string>('all');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('all');
   const [selectedExecutor, setSelectedExecutor] = useState<string>('all');
+  const [selectedResponsible, setSelectedResponsible] = useState<string>('all');
   const [selectedOrderSource, setSelectedOrderSource] = useState<string>('all');
   const [orderListScope, setOrderListScope] = useState<OrderListScope>('active');
 
@@ -120,6 +122,11 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     }
     return Array.from(new Set([...fromOrders, ...savedStorage].map((s) => s.trim()))).filter(Boolean);
   }, [orders]);
+
+  const responsibleOptions = useMemo(() => Array.from(new Set([
+    ...(settings.orderResponsibles || []).map((person) => person.name),
+    ...orders.map((order) => order.responsibleName || order.salesEmployee || ''),
+  ].map((name) => name.trim()).filter(Boolean))), [orders, settings.orderResponsibles]);
 
   // Quick Filter State
   const [quickFilter, setQuickFilter] = useState<QuickFilterType>('all');
@@ -253,6 +260,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     setSelectedPayment('all');
     setSelectedPaymentMethod('all');
     setSelectedExecutor('all');
+    setSelectedResponsible('all');
     setSelectedOrderSource('all');
     setQuickFilter('all');
     setDateFrom('');
@@ -338,6 +346,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
           ord.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
           ord.eventLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (ord.executorName && ord.executorName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+          ((ord.responsibleName || ord.salesEmployee || '').toLowerCase().includes(searchTerm.toLowerCase())) ||
           (ord.customerPhone || '').includes(searchTerm);
 
         if (!matchesSearch) return false;
@@ -347,6 +356,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
         if (selectedPayment !== 'all' && ord.paymentStatus !== selectedPayment) return false;
         if (selectedPaymentMethod !== 'all' && ord.paymentMethod !== selectedPaymentMethod) return false;
         if (selectedExecutor !== 'all' && ord.executorName !== selectedExecutor) return false;
+        if (selectedResponsible !== 'all' && (ord.responsibleName || ord.salesEmployee || '') !== selectedResponsible) return false;
         if (!isWorker && selectedOrderSource !== 'all' && getOrderSource(ord.orderSource) !== selectedOrderSource) return false;
 
         // 3. Quick Filters
@@ -442,6 +452,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     selectedPayment,
     selectedPaymentMethod,
     selectedExecutor,
+    selectedResponsible,
     selectedOrderSource,
     quickFilter,
     dateFilterType,
@@ -781,6 +792,16 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
           </select>
 
           <select
+            value={selectedResponsible}
+            onChange={(e) => setSelectedResponsible(e.target.value)}
+            aria-label={language === 'ar' ? 'المسؤول عن الأوردر' : 'Order responsible'}
+            className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+          >
+            <option value="all">{language === 'ar' ? 'كل المسؤولين' : 'All responsibles'}</option>
+            {responsibleOptions.map((person) => <option key={person} value={person}>{person}</option>)}
+          </select>
+
+          <select
             value={selectedOrderSource}
             onChange={(e) => setSelectedOrderSource(e.target.value)}
             aria-label={language === 'ar' ? 'مصدر الأوردر' : 'Order source'}
@@ -959,6 +980,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                   <th className="p-4">{t('orderNumber')}</th>
                   {!isWorker && <th className="p-4">{language === 'ar' ? 'المصدر' : 'Source'}</th>}
                   <th className="p-4">{t('customerName')}</th>
+                  {!isWorker && <th className="p-4">{language === 'ar' ? 'المسؤول' : 'Responsible'}</th>}
                   <th
                     className="p-4 cursor-pointer hover:text-amber-600 transition-colors"
                     onClick={() => toggleSort('bookingDate')}
@@ -1014,6 +1036,8 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                           </div>
                         )}
                       </td>
+
+                      {!isWorker && <td className="p-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">{ord.responsibleName || ord.salesEmployee || '—'}</td>}
 
                       {/* Booking Date Column */}
                       <td className="p-4 font-semibold text-emerald-800 dark:text-emerald-300">
@@ -1164,6 +1188,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
                     <Phone className="w-3.5 h-3.5 text-amber-500" />
                     <span>{ord.customerPhone}</span>
                   </p>}
+                  {!isWorker && (ord.responsibleName || ord.salesEmployee) && <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400"><UserCheck className="h-3.5 w-3.5 shrink-0" /><span>{ord.responsibleName || ord.salesEmployee}</span></p>}
 
                   {/* Dual Dates Box */}
                   <div className="mt-3 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-1.5 border border-slate-100 dark:border-slate-700/50">

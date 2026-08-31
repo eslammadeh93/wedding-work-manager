@@ -30,6 +30,8 @@ interface NewOrderDraft {
   eventLocation?: string;
   locationLink?: string;
   salesEmployee?: string;
+  responsibleId?: string;
+  responsibleName?: string;
   orderSource?: OrderSource;
   workerId?: string;
   workerName?: string;
@@ -168,7 +170,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   initialOrder,
 }) => {
   const { t, language } = useLanguage();
-  const { orders, customers, suppliers, inventory, workers, addOrder, updateOrder, checkStockAvailability } = useData();
+  const { orders, customers, suppliers, inventory, workers, settings, addOrder, updateOrder, checkStockAvailability } = useData();
   const { authSession, user } = useAuth();
 
   const isEdit = !!initialOrder;
@@ -201,6 +203,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [eventLocation, setEventLocation] = useState(initialOrder?.eventLocation || initialDraft?.eventLocation || '');
   const [locationLink, setLocationLink] = useState(initialOrder?.locationLink || initialDraft?.locationLink || '');
   const [salesEmployee, setSalesEmployee] = useState(initialOrder?.salesEmployee || initialDraft?.salesEmployee || '');
+  const [responsibleId, setResponsibleId] = useState(initialOrder?.responsibleId || initialDraft?.responsibleId || '');
+  const [responsibleName, setResponsibleName] = useState(initialOrder?.responsibleName || initialOrder?.salesEmployee || initialDraft?.responsibleName || initialDraft?.salesEmployee || '');
   const [orderSource, setOrderSource] = useState<OrderSource>(initialOrder?.orderSource || initialDraft?.orderSource || 'other');
   
   // Worker assignment
@@ -266,7 +270,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     const draft: NewOrderDraft = {
       orderNumber, selectedCustomerId, customerName, customerPhone,
       bookingDate, weddingDate, deliveryDate, returnDate, eventLocation,
-      locationLink, salesEmployee, orderSource, workerId, workerName,
+      locationLink, salesEmployee, responsibleId, responsibleName, orderSource, workerId, workerName,
       workerCanContactCustomer, totalPrice, deposit, securityDeposit,
       workerCost, transportationCost, otherExpenses, paymentMethod,
       paymentStatus, orderStatus, notes, designImages, reservedItems,
@@ -280,7 +284,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   }, [
     isEdit, draftStorageKey, orderNumber, selectedCustomerId, customerName,
     customerPhone, bookingDate, weddingDate, deliveryDate, returnDate,
-    eventLocation, locationLink, salesEmployee, orderSource, workerId,
+    eventLocation, locationLink, salesEmployee, responsibleId, responsibleName, orderSource, workerId,
     workerName, workerCanContactCustomer, totalPrice, deposit, securityDeposit,
     workerCost, transportationCost, otherExpenses, paymentMethod, paymentStatus,
     orderStatus, notes, designImages, reservedItems, supplierRentals,
@@ -514,7 +518,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       returnDate: returnDate || '',
       eventLocation,
       locationLink: locationLink.trim(),
-      salesEmployee,
+      salesEmployee: responsibleName.trim() || salesEmployee.trim(),
+      responsibleId: responsibleId.trim(),
+      responsibleName: responsibleName.trim(),
       orderSource,
       workerId: workerId.trim(),
       workerName: workerName.trim(),
@@ -697,15 +703,24 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                 <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
-                <span>{t('salesEmployee')}</span>
+                <span>المسؤول عن الأوردر</span>
               </label>
-              <input
-                type="text"
-                value={salesEmployee}
-                onChange={(e) => setSalesEmployee(e.target.value)}
-                placeholder="e.g. Fahad Al-Shammari"
+              <select
+                value={responsibleId || (responsibleName ? '__legacy__' : '')}
+                onChange={(e) => {
+                  const selectedId = e.target.value;
+                  const person = (settings.orderResponsibles || []).find((item) => item.id === selectedId);
+                  setResponsibleId(person?.id || '');
+                  setResponsibleName(person?.name || '');
+                  setSalesEmployee(person?.name || '');
+                }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
-              />
+              >
+                <option value="">بدون مسؤول</option>
+                {responsibleName && !responsibleId && <option value="__legacy__">{responsibleName}</option>}
+                {(settings.orderResponsibles || []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+              </select>
+              {(settings.orderResponsibles || []).length === 0 && <p className="mt-1 text-[11px] text-slate-500">أضف المسؤولين من صفحة إدارة الموظفين أولًا.</p>}
             </div>
 
             <div>
