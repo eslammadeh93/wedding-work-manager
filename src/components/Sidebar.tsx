@@ -16,6 +16,7 @@ import {
   BellRing,
   CalendarDays,
   ArchiveRestore,
+  History,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -89,15 +90,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'inventory', group: 'operations', labelKey: 'inventory', icon: Boxes, badge: lowInventoryCount, roles: ['super_admin', 'admin', 'manager'], permission: 'company:inventory:read' },
     { id: 'expenses', group: 'finance', label: 'رأس المال والمصروفات', icon: Wallet, roles: ['super_admin'], permission: 'company:expenses:read' },
     { id: 'reports', group: 'finance', labelKey: 'reports', icon: BarChart3, roles: ['super_admin', 'admin', 'manager'], permission: 'company:reports:read' },
+    { id: 'activityLog', group: 'finance', labelKey: 'activityLog', icon: History, roles: ['super_admin', 'admin', 'manager'], permission: 'company:activity_logs:read' },
     { id: 'members', group: 'administration', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
     { id: 'recycleBin', group: 'administration', label: language === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin', icon: ArchiveRestore, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'settings', group: 'administration', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'profile', group: 'account', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 
-  const navItems = allNavItems.filter((item) => !isDemo && (item.id === 'members' || item.id === 'profile') ? false : USE_MULTI_TENANT_DATA
-    ? authSession?.userType === 'company' && (item.id === 'profile' || !item.permission || authSession.permissions.includes(item.permission))
-    : item.roles.includes(userRole));
+  const navItems = allNavItems.filter((item) => {
+    // These screens rely on a real company membership. They are intentionally
+    // unavailable in demo and legacy workspaces, but must remain visible to a
+    // company owner in the multi-tenant workspace.
+    if ((item.id === 'members' || item.id === 'profile') && (isDemo || !USE_MULTI_TENANT_DATA)) return false;
+    return USE_MULTI_TENANT_DATA
+      ? authSession?.userType === 'company' && (item.id === 'profile' || !item.permission || authSession.permissions.includes(item.permission))
+      : item.roles.includes(userRole);
+  });
   const groupedNavItems = navigationGroupOrder.map(group => ({ group, items: navItems.filter(item => item.group === group) })).filter(({ items }) => items.length > 0);
 
   const handleTabClick = (id: ActiveTab) => {

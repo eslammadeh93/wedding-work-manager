@@ -27,6 +27,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ActivityLogRecord, Order } from '../../types';
 import { OrderDetailModal } from '../orders/OrderDetailModal';
 import { localDateString } from '../../utils/localDate';
+import { normalizeActivityLogRecord } from '../../utils/activityLogTimestamp';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
@@ -111,7 +112,12 @@ export const ActivityLogModule: React.FC = () => {
     setIsLoadingPage(false);
   };
 
-  const sourceLogs = useServerPagination ? pagedLogs : activityLogs;
+  // Server-written logs contain Firestore Timestamps while legacy logs keep
+  // ISO strings. Normalize before any string operations in filters/rendering.
+  const sourceLogs = useMemo(
+    () => (useServerPagination ? pagedLogs : activityLogs).map(normalizeActivityLogRecord),
+    [activityLogs, pagedLogs, useServerPagination],
+  );
 
   // Filtered Activity Logs
   const filteredLogs = useMemo(() => {

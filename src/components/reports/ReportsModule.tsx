@@ -13,6 +13,9 @@ import {
   Calendar,
   ReceiptText,
   WalletCards,
+  RefreshCw,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -22,6 +25,7 @@ import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 import { calculateMonthlyCash } from '../../utils/monthlyCash';
+import { reconcileMonthlyCash } from '../../utils/monthlyCashReconciliation';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
 import { formatMoney, MoneyValue } from '../ui/MoneyValue';
@@ -41,6 +45,7 @@ export const ReportsModule: React.FC = () => {
   const [reportDataOrders, setReportDataOrders] = useState<typeof orders>([]);
   const [isLoadingReportData, setIsLoadingReportData] = useState(false);
   const [reportDataError, setReportDataError] = useState<string | null>(null);
+  const [showCashReview, setShowCashReview] = useState(false);
 
   const companyId = useMemo(() => {
     if (isDemo || !authSession || profile?.role === 'worker') return null;
@@ -107,6 +112,10 @@ export const ReportsModule: React.FC = () => {
   const monthCapital = monthCapitalList.reduce((sum, e) => sum + e.amount, 0);
   const monthGeneralExpenses = monthGeneralExpensesList.reduce((sum, e) => sum + e.amount, 0);
   const cashSummary = calculateMonthlyCash(sourceOrders, expenses, selectedYear, selectedMonth);
+  const cashReconciliation = useMemo(
+    () => reconcileMonthlyCash(sourceOrders, expenses, selectedYear, selectedMonth),
+    [expenses, selectedMonth, selectedYear, sourceOrders],
+  );
   const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' });
 
   // Category breakdown of General Expenses
@@ -311,7 +320,7 @@ export const ReportsModule: React.FC = () => {
 
           <select
             value={selectedMonth}
-            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            onChange={(e) => { setSelectedMonth(Number(e.target.value)); setShowCashReview(false); }}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
           >
             {Array.from({ length: 12 }).map((_, i) => (
@@ -325,7 +334,7 @@ export const ReportsModule: React.FC = () => {
 
           <select
             value={selectedYear}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            onChange={(e) => { setSelectedYear(Number(e.target.value)); setShowCashReview(false); }}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
           >
             {availableYears.map((y) => (
@@ -393,8 +402,76 @@ export const ReportsModule: React.FC = () => {
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{language === 'ar' ? `حركة النقد الفعلية لشهر ${selectedMonthName}` : `Actual cash movement for ${selectedMonthName}`}</p>
           </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400">{language === 'ar' ? 'كل الأرقام تعتمد على التحصيل والصرف المسجّل فعلياً.' : 'All figures use recorded collections and spending.'}</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-slate-500 dark:text-slate-400">{language === 'ar' ? 'كل الأرقام تعتمد على التحصيل والصرف المسجّل فعلياً.' : 'All figures use recorded collections and spending.'}</span>
+            <button
+              type="button"
+              onClick={() => setShowCashReview(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-black text-white transition-colors hover:bg-slate-700 dark:bg-amber-400 dark:text-slate-950 dark:hover:bg-amber-300"
+            >
+              <RefreshCw className="w-4 h-4" />
+              {language === 'ar' ? 'إعادة حساب ومراجعة الشهر' : 'Recalculate & review month'}
+            </button>
+          </div>
         </div>
+
+        {showCashReview && <div className={`rounded-2xl border p-4 md:p-5 ${Math.abs(cashReconciliation.difference) < 0.01 && cashReconciliation.issues.length === 0 ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20' : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-2.5">
+              {Math.abs(cashReconciliation.difference) < 0.01 && cashReconciliation.issues.length === 0
+                ? <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />}
+              <div>
+                <h4 className="font-black text-slate-900 dark:text-white">{language === 'ar' ? `نتيجة مراجعة ${selectedMonthName}` : `${selectedMonthName} review result`}</h4>
+                <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                  {Math.abs(cashReconciliation.difference) < 0.01
+                    ? (language === 'ar' ? 'صافي فلوس الأوردرات مطابق للربح المتوقع.' : 'Net order cash matches expected profit.')
+                    : (cashReconciliation.difference > 0
+                      ? (language === 'ar' ? 'الربح المتوقع أعلى من صافي الفلوس المحصّلة.' : 'Expected profit is higher than net collected cash.')
+                      : (language === 'ar' ? 'صافي الفلوس المحصّلة أعلى من الربح المتوقع.' : 'Net collected cash is higher than expected profit.'))}
+                </p>
+              </div>
+            </div>
+            <div className="shrink-0 text-start sm:text-end">
+              <p className="text-[11px] font-bold text-slate-500">{language === 'ar' ? 'الفرق بين الرقمين' : 'Difference'}</p>
+              <MoneyValue amount={Math.abs(cashReconciliation.difference)} className={`mt-1 block text-xl font-black ${Math.abs(cashReconciliation.difference) < 0.01 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`} />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="rounded-xl bg-white/70 px-3 py-2.5 dark:bg-slate-950/30"><p className="text-[10px] font-bold text-slate-500">{language === 'ar' ? 'صافي الفلوس المحسوبة للشهر' : 'Net cash counted this month'}</p><MoneyValue amount={cashReconciliation.netOrderCash} className="mt-1 block text-base font-black text-emerald-700 dark:text-emerald-300" /></div>
+            <div className="rounded-xl bg-white/70 px-3 py-2.5 dark:bg-slate-950/30"><p className="text-[10px] font-bold text-slate-500">{language === 'ar' ? 'الربح المتوقع للأوردرات' : 'Expected order profit'}</p><MoneyValue amount={cashReconciliation.expectedProfit} className="mt-1 block text-base font-black text-slate-800 dark:text-slate-100" /></div>
+            <div className="rounded-xl bg-white/70 px-3 py-2.5 dark:bg-slate-950/30"><p className="text-[10px] font-bold text-slate-500">{language === 'ar' ? 'المبلغ غير المتطابق' : 'Amount not matching'}</p><MoneyValue amount={Math.abs(cashReconciliation.difference)} className="mt-1 block text-base font-black text-amber-700 dark:text-amber-300" /></div>
+          </div>
+
+          {Math.abs(cashReconciliation.difference) > 0.01 && <p className="mt-3 rounded-xl bg-amber-100/70 px-3 py-2.5 text-xs leading-5 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            {language === 'ar'
+              ? 'المعنى ببساطة: الربح المتوقع يحسب قيمة وربح الأوردر كاملًا لو موعده في هذا الشهر، بينما صافي الفلوس يحسب ما تم تحصيله وصرفه فعليًا. لذلك الفرق غالبًا فلوس متبقية لم تُحصّل بعد، أو تكلفة/دفعة تحتاج مراجعة.'
+              : 'Simply: expected profit counts the full planned profit of orders scheduled this month, while net cash counts only money actually collected and spent. The gap is usually an unpaid balance or a payment/cost needing review.'}
+          </p>}
+
+          {cashReconciliation.items.length > 0 && <div className="mt-4 border-t border-amber-200/80 pt-4 dark:border-amber-900/60">
+            <p className="mb-1 text-xs font-black text-slate-800 dark:text-slate-100">{language === 'ar' ? 'الأوردرات المسببة للفرق — بالتفصيل' : 'Orders causing the difference — details'}</p>
+            <p className="mb-2 text-[11px] leading-5 text-slate-500">{language === 'ar' ? 'قارن لكل أوردر بين الربح المتوقع منه والفلوس التي دخلت فعليًا في حساب هذا الشهر.' : 'Compare each order’s expected profit with the cash that actually entered this month’s calculation.'}</p>
+            <div className="space-y-2">
+              {cashReconciliation.items.slice(0, 6).map(item => <div key={item.orderId} className="rounded-xl bg-white/70 px-3 py-3 text-xs dark:bg-slate-950/30">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4"><span className="font-black text-slate-800 dark:text-slate-100">{item.orderNumber} <span className="font-normal text-slate-500">— {item.customerName}</span></span><span className="font-black text-amber-700 dark:text-amber-300">{language === 'ar' ? 'الفرق:' : 'Difference:'} <MoneyValue amount={Math.abs(item.difference)} className="ms-1 font-black" /></span></div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div><p className="text-[10px] text-slate-500">{language === 'ar' ? 'الربح المتوقع من الأوردر' : 'Expected from order'}</p><MoneyValue amount={item.expectedContribution} className="mt-0.5 block font-black text-slate-800 dark:text-slate-100" /></div>
+                  <div><p className="text-[10px] text-slate-500">{language === 'ar' ? 'المحتسب في فلوس الشهر' : 'Counted in monthly cash'}</p><MoneyValue amount={item.cashContribution} className="mt-0.5 block font-black text-emerald-700 dark:text-emerald-300" /></div>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-slate-600 dark:text-slate-300">{item.difference > 0 ? (language === 'ar' ? 'الربح المتوقع من هذا الأوردر أكبر من المبلغ الذي دخل حساب الشهر؛ راجع الدفعة أو الرصيد المتبقي وحالة تنفيذ الأوردر.' : 'This order’s forecast is higher than the cash counted this month; review its payment, remaining balance, and completion status.') : (language === 'ar' ? 'المبلغ الداخل في حساب الشهر أكبر من الربح المتوقع لهذا الأوردر؛ راجع الدفعات المسجلة والتكاليف.' : 'Cash counted this month is higher than this order’s forecast; review its payments and costs.')}</p>
+              </div>)}
+            </div>
+          </div>}
+
+          {cashReconciliation.issues.length > 0 && <div className="mt-4 border-t border-amber-200/80 pt-4 dark:border-amber-900/60">
+            <p className="mb-2 text-xs font-black text-slate-800 dark:text-slate-100">{language === 'ar' ? 'بيانات تحتاج مراجعة' : 'Data needing review'}</p>
+            <ul className="space-y-1.5 text-xs leading-5 text-rose-700 dark:text-rose-300">
+              {cashReconciliation.issues.slice(0, 8).map(issue => <li key={issue.id}>{language === 'ar' ? issue.messageAr : issue.messageEn}</li>)}
+            </ul>
+          </div>}
+        </div>}
 
         {/* The headline mirrors the operational cash formula shown to the user. */}
         <div className={`p-6 md:p-7 rounded-2xl border ${cashSummary.netMonthlyCash >= 0 ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-rose-500/10 border-rose-400/30'} flex flex-col items-center text-center md:flex-row md:items-center md:text-right justify-between gap-4`}>
