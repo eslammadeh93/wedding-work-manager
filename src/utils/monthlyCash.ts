@@ -186,6 +186,19 @@ export const calculateMonthlyCash = (
   year: number,
   month: number,
 ): MonthlyCashSummary => {
+  const monthEndKey = `${year}-${String(month + 1).padStart(2, '0')}-31`;
+  const orderById = new Map(orders.map(order => [order.id, order]));
+  // A report must reflect what the order looked like during that month. An
+  // order completed later can still have an August booking deposit for a
+  // September event; its current status must not erase that August cash.
+  const completedInSelectedMonth = (order: Order | undefined) => Boolean(
+    order
+    && order.orderStatus === 'completed'
+    && inMonth(dateKey(order.eventDate || order.weddingDate), year, month),
+  );
+  const isUpcomingForSelectedMonth = (order: Order) => order.orderStatus !== 'cancelled'
+    && order.orderStatus !== 'cancelled_deposit_retained'
+    && !completedInSelectedMonth(order);
   const allCollections = orders
     .filter((order) => order.orderStatus !== 'cancelled')
     .flatMap(orderCashCollections);
@@ -194,9 +207,12 @@ export const calculateMonthlyCash = (
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const sum = (items: Array<{ amount: number }>) => items.reduce((total, item) => total + item.amount, 0);
-  const collectedFromCompletedOrders = sum(collections.filter((collection) => collection.isCompletedOrder));
+  const collectedFromCompletedOrders = sum(collections.filter((collection) => completedInSelectedMonth(orderById.get(collection.orderId))));
   const retainedCancelledDeposits = sum(collections.filter((collection) => collection.isRetainedDeposit));
-  const advancesFromUpcomingOrders = sum(collections.filter((collection) => !collection.isCompletedOrder && !collection.isRetainedDeposit));
+  const advancesFromUpcomingOrders = sum(collections.filter((collection) => {
+    const order = orderById.get(collection.orderId);
+    return Boolean(order && isUpcomingForSelectedMonth(order) && !collection.isRetainedDeposit);
+  }));
 
   const standardCollections = collections.filter((collection) => !collection.isRetainedDeposit);
   const nonRetainedDeposits = sum(standardCollections.filter((collection) => collection.paymentType === 'deposit'));
@@ -209,11 +225,13 @@ export const calculateMonthlyCash = (
     .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
       && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + Math.max(0, positiveAmount(order.totalPrice) - recordedOrderPayment(order)), 0);
-  const upcomingOrderDeposits = sum(collections.filter((collection) =>
-    !collection.isCompletedOrder
-    && !collection.isRetainedDeposit
-    && collection.paymentType === 'deposit',
-  ));
+  const upcomingOrderDeposits = sum(collections.filter((collection) => {
+    const order = orderById.get(collection.orderId);
+    return Boolean(order
+      && isUpcomingForSelectedMonth(order)
+      && !collection.isRetainedDeposit
+      && collection.paymentType === 'deposit');
+  }));
 
   const monthlyEntries = financeEntries.filter((entry) => inMonth(dateKey(entry.date), year, month));
   const capitalAdded = monthlyEntries.filter(isCapital).reduce((total, entry) => total + positiveAmount(entry.amount), 0);
@@ -232,7 +250,7 @@ export const calculateMonthlyCash = (
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order), 0);
 
   const bookedOrderOtherExpenses = orders
-    .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
 
   // Before fulfillment, only the "other expenses" field is treated as spent.
@@ -240,7 +258,7 @@ export const calculateMonthlyCash = (
   // Other expenses belong to the booking month, even when an advance arrives
   // in a later month.
   const upcomingOrderOtherExpenses = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
   // The report's "total expenses" card is deliberately limited to upcoming
   // orders. Worker and transport costs remain represented by completed-order

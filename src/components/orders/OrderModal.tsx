@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Order, OrderItemReservation, OrderSupplierRental, PaymentStatus, OrderStatus, DesignImageItem, Worker, OrderSource, OrderAttachment } from '../../types';
 import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput, toInternationalPhoneDigits } from '../../utils/phone';
+import { recordedOrderPayment } from '../../utils/orderPayments';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -360,7 +361,12 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
   if (!isOpen) return null;
 
-  const remainingBalance = Math.max(0, totalPrice - deposit);
+  // The deposit is only the first payment. On an existing order use every
+  // recorded payment so this number remains accurate after settlement.
+  const paymentRecordedSoFar = initialOrder
+    ? Math.max(recordedOrderPayment(initialOrder), Number(deposit) || 0)
+    : Number(deposit) || 0;
+  const remainingBalance = Math.max(0, totalPrice - paymentRecordedSoFar);
   const totalOrderExpenses = (Number(workerCost) || 0) + (Number(transportationCost) || 0) + (Number(otherExpenses) || 0);
   const expectedNetProfit = (Number(totalPrice) || 0) - totalOrderExpenses;
 

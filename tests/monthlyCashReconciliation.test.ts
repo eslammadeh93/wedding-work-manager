@@ -27,3 +27,25 @@ test('flags payment and balance records that disagree with their calculated valu
   ], [], 2026, 7);
   assert.deepEqual(reconciliation.issues.map(issue => issue.kind), ['payment-history', 'remaining-balance']);
 });
+
+test('explains the exact action when a fully-paid label conflicts with an unpaid balance', () => {
+  const reconciliation = reconcileMonthlyCash([
+    order({ totalPrice: 2_800, totalPaid: 1_000, remainingBalance: 1_800, paymentStatus: 'fully_paid', paymentHistory: [{ id: 'deposit', amount: 1_000, date: '2026-08-02', method: 'cash' }] }),
+  ], [], 2026, 7);
+  const issue = reconciliation.issues.find(item => item.kind === 'payment-status');
+  assert.match(issue?.messageAr || '', /دفعة سداد بقيمة 1,800/);
+});
+
+test('matches an August deposit for an order completed after its September event', () => {
+  const reconciliation = reconcileMonthlyCash([
+    order({
+      bookingDate: '2026-08-29', createdAt: '2026-08-29', eventDate: '2026-09-02', weddingDate: '2026-09-02', orderStatus: 'completed',
+      totalPrice: 2_800, totalPaid: 2_800, remainingBalance: 0, paymentStatus: 'fully_paid', workerCost: 1_000, transportationCost: 500,
+      paymentHistory: [
+        { id: 'deposit', amount: 1_000, date: '2026-08-29', method: 'cash', type: 'deposit' },
+        { id: 'settlement', amount: 1_800, date: '2026-09-02', method: 'cash', type: 'settlement' },
+      ],
+    }),
+  ], [], 2026, 7);
+  assert.equal(reconciliation.difference, 0);
+});

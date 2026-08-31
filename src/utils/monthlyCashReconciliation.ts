@@ -2,7 +2,7 @@ import type { CompanyFinanceEntry, Order } from '../types';
 import { calculateMonthlyCash, orderCashCollections } from './monthlyCash';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from './orderPayments';
 
-export type ReconciliationIssueKind = 'payment-history' | 'remaining-balance' | 'overpaid' | 'invalid-amount';
+export type ReconciliationIssueKind = 'payment-history' | 'remaining-balance' | 'payment-status' | 'overpaid' | 'invalid-amount';
 
 export interface MonthlyCashReconciliationItem {
   orderId: string;
@@ -100,10 +100,11 @@ export const reconcileMonthlyCash = (
 
     // Net-cash formula: realised completed-order profit, all advances on
     // uncompleted orders, retained deposits, then booking-month other costs.
-    if (order.orderStatus === 'completed' && inMonth(executionDate, year, month)) {
+    const completedInSelectedMonth = order.orderStatus === 'completed' && inMonth(executionDate, year, month);
+    if (completedInSelectedMonth) {
       record.cashContribution += recordedOrderPayment(order) - completedOrderFulfillmentCosts(order) - positive(order.otherExpenses);
     }
-    if (isNormalOrder(order) && order.orderStatus !== 'completed') {
+    if (isNormalOrder(order) && !completedInSelectedMonth) {
       record.cashContribution += collectionsThisMonth.reduce((sum, collection) => sum + collection.amount, 0);
       if (inMonth(bookingDate, year, month)) record.cashContribution -= positive(order.otherExpenses);
     }
@@ -130,6 +131,16 @@ export const reconcileMonthlyCash = (
       issues.push({ id: `${order.id}-remaining-balance`, kind: 'remaining-balance', orderNumber: order.orderNumber, customerName: order.customerName,
         messageAr: `${label}: الرصيد المسجّل ${storedRemaining.toLocaleString('en-US')} بينما الرصيد المحسوب ${expectedRemaining.toLocaleString('en-US')}.`,
         messageEn: `${label}: stored remaining balance (${storedRemaining}) differs from calculated balance (${expectedRemaining}).` });
+    }
+    if (order.paymentStatus === 'fully_paid' && expectedRemaining > 0.01) {
+      issues.push({ id: `${order.id}-payment-status`, kind: 'payment-status', orderNumber: order.orderNumber, customerName: order.customerName,
+        messageAr: `${label}: الحالة مكتوبة «مدفوع بالكامل» لكن المتبقي الفعلي ${expectedRemaining.toLocaleString('en-US')}. الحل: إن كان المبلغ تم تحصيله، أضف دفعة سداد بقيمة ${expectedRemaining.toLocaleString('en-US')}. وإن لم يُحصّل، غيّر الحالة إلى «مدفوع جزئيًا».`,
+        messageEn: `${label}: marked fully paid but ${expectedRemaining} remains. Record a settlement payment if collected; otherwise change it to partially paid.` });
+    }
+    if (order.paymentStatus !== 'fully_paid' && positive(order.totalPrice) > 0 && expectedRemaining <= 0.01) {
+      issues.push({ id: `${order.id}-payment-status`, kind: 'payment-status', orderNumber: order.orderNumber, customerName: order.customerName,
+        messageAr: `${label}: كل سعر الأوردر مسجّل كمحصّل، لكن حالة الدفع ليست «مدفوع بالكامل». راجع حالة الدفع واحفظ الأوردر لتحديثها.`,
+        messageEn: `${label}: the full order price is recorded as paid, but the payment status is not fully paid. Review and save the order to update it.` });
     }
     if (paid > positive(order.totalPrice) + 0.01) {
       issues.push({ id: `${order.id}-overpaid`, kind: 'overpaid', orderNumber: order.orderNumber, customerName: order.customerName,
