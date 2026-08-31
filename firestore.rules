@@ -51,6 +51,9 @@ service cloud.firestore {
         || (!('permissions' in companyMember(companyId).data) && (
           (permission == 'orders:read' && memberRole(companyId) in ['manager', 'employee'])
           || (permission == 'orders:write' && memberRole(companyId) in ['manager', 'employee'])
+          || (permission == 'calculator:use' && memberRole(companyId) in ['manager', 'employee'])
+          || (permission == 'calculator:manage' && memberRole(companyId) == 'manager')
+          || (permission == 'order_responsibles:manage' && memberRole(companyId) == 'manager')
           || (permission == 'customers:read' && memberRole(companyId) in ['manager', 'employee'])
           || (permission == 'customers:write' && memberRole(companyId) in ['manager', 'employee'])
           || (permission == 'suppliers:read' && memberRole(companyId) in ['manager', 'employee'])
@@ -272,9 +275,9 @@ service cloud.firestore {
       match /activityLogs/{logId} { allow read: if hasCompanyPermission(companyId, 'activity_logs:read'); allow write: if false; }
       match /auditLogs/{logId} { allow read, write: if false; }
       match /settings/{settingsId} {
-        allow read: if settingsId == 'main' && hasCompanyPermission(companyId, 'settings:read');
-        allow create: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write') && companyIdMatchesPath(companyId);
-        allow update: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write') && companyIdMatchesPath(companyId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['companyId']);
+        allow read: if settingsId == 'main' && (hasCompanyPermission(companyId, 'settings:read') || hasCompanyPermission(companyId, 'calculator:use') || hasCompanyPermission(companyId, 'calculator:manage') || hasCompanyPermission(companyId, 'order_responsibles:manage') || hasCompanyPermission(companyId, 'orders:write'));
+        allow create: if settingsId == 'main' && canWriteOperations(companyId) && companyIdMatchesPath(companyId) && (hasCompanyPermission(companyId, 'settings:write') || (hasCompanyPermission(companyId, 'calculator:manage') && request.resource.data.keys().hasOnly(['orderPriceCatalog'])) || (hasCompanyPermission(companyId, 'order_responsibles:manage') && request.resource.data.keys().hasOnly(['orderResponsibles'])));
+        allow update: if settingsId == 'main' && canWriteOperations(companyId) && companyIdMatchesPath(companyId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['companyId']) && (hasCompanyPermission(companyId, 'settings:write') || (hasCompanyPermission(companyId, 'calculator:manage') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['orderPriceCatalog'])) || (hasCompanyPermission(companyId, 'order_responsibles:manage') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['orderResponsibles'])));
         allow delete: if settingsId == 'main' && canWriteOperations(companyId) && hasCompanyPermission(companyId, 'settings:write');
       }
       match /notifications/{notificationId} {

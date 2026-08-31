@@ -68,6 +68,10 @@ export interface OrderPricingLine {
 export interface OrderResponsible {
   id: string;
   name: string;
+  phone?: string;
+  /** Soft-deleted responsibles remain recoverable for seven days. */
+  deletedAt?: string | null;
+  purgeAt?: string | null;
 }
 
 /** A rented service or item supplied externally for one wedding order. */
@@ -177,6 +181,7 @@ export interface Order {
   salesEmployee?: string;
   responsibleId?: string;
   responsibleName?: string;
+  responsiblePhone?: string;
   /** Lead source. This is intentionally omitted from the worker-safe order projection. */
   orderSource?: OrderSource;
   executorName?: string; // المنفذ / Executor

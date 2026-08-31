@@ -147,7 +147,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     // Order managers must receive worker arrival/completion reports even when
     // the optional generic-notifications checkbox was not selected for them.
     if ((allowed('company:notifications:read') || allowed('company:orders:read')) && authSession?.uid) unsubs.push(listen<AppNotification>('notifications', setNotifications, { field: 'targetUid', value: authSession.uid }));
-    if (allowed('company:settings:read')) { remaining += 1; unsubs.push(companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError)); }
+    if (allowed('company:settings:read') || allowed('company:calculator:use') || allowed('company:calculator:manage') || allowed('company:order_responsibles:manage') || allowed('company:orders:write')) { remaining += 1; unsubs.push(companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError)); }
     if (remaining === 0) setLoading(false);
     return () => { unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
   }, [authSession, clear, profile?.workerId, retryVersion]);

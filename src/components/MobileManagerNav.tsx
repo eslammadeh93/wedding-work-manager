@@ -40,7 +40,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const canCreateOrder = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
   const canViewNotifications = !USE_MULTI_TENANT_DATA || permissions.includes('company:notifications:read');
-  const canUseCalculator = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
+  const canUseCalculator = !USE_MULTI_TENANT_DATA || permissions.includes('company:calculator:use');
   const unreadMovements = notifications.filter(
     (notification) => !notification.read && ['worker_arrived', 'worker_completed'].includes(notification.type),
   ).length;
@@ -69,7 +69,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
     } finally { setPushBusy(false); }
   };
 
-  if (!isManager && !showPushControl) return null;
+  if (!isManager && !showPushControl && !canUseCalculator) return null;
 
   const containerClass = isDesktop
     ? 'hidden lg:grid w-full lg:w-auto lg:min-w-[450px]'

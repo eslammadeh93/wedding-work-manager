@@ -51,7 +51,7 @@ function UnauthorizedCompanyMembers() {
 }
 
 const tabPermission: Partial<Record<ActiveTab, Permission>> = {
-  dashboard: 'company:dashboard:read', calculator: 'company:orders:write', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
+  dashboard: 'company:dashboard:read', calculator: 'company:calculator:manage', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
@@ -68,7 +68,7 @@ const isActiveTab = (value: string | null): value is ActiveTab => value !== null
 // mounted: an unauthorized initial/restored tab must not request its chunk.
 const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<typeof useAuth>['profile']>['role'][]>> = {
   dashboard: ['super_admin', 'admin', 'manager'],
-  calculator: ['super_admin', 'admin', 'manager', 'employee'],
+  calculator: ['super_admin', 'admin', 'manager'],
   orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
   workers: ['super_admin', 'admin', 'manager'],
   workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
@@ -264,7 +264,7 @@ function AppContent() {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
-      const allowedEmployeeTabs: ActiveTab[] = ['calculator', 'orders', 'customers', 'suppliers', 'calendar'];
+      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'suppliers', 'calendar'];
       if (!allowedEmployeeTabs.includes(activeTab)) {
         setActiveTab('orders');
       }

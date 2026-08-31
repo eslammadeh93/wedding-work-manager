@@ -3,7 +3,7 @@ export type CompanyMemberError = 'OK' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'INVALID_
 export type ManagedRole = 'manager' | 'employee' | 'worker';
 export type CompanyRole = ManagedRole | 'company_super_admin';
 export type CompanyPermission =
-  | 'company:dashboard:read' | 'company:calendar:read' | 'company:orders:read' | 'company:orders:write'
+  | 'company:dashboard:read' | 'company:calculator:use' | 'company:calculator:manage' | 'company:order_responsibles:manage' | 'company:calendar:read' | 'company:orders:read' | 'company:orders:write'
   | 'company:customers:read' | 'company:customers:write' | 'company:suppliers:read' | 'company:suppliers:write'
   | 'company:workers:read' | 'company:workers:write'
   | 'company:inventory:read' | 'company:inventory:write' | 'company:expenses:read' | 'company:expenses:write'

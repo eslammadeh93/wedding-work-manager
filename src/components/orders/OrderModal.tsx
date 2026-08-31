@@ -32,6 +32,7 @@ interface NewOrderDraft {
   salesEmployee?: string;
   responsibleId?: string;
   responsibleName?: string;
+  responsiblePhone?: string;
   orderSource?: OrderSource;
   workerId?: string;
   workerName?: string;
@@ -205,6 +206,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [salesEmployee, setSalesEmployee] = useState(initialOrder?.salesEmployee || initialDraft?.salesEmployee || '');
   const [responsibleId, setResponsibleId] = useState(initialOrder?.responsibleId || initialDraft?.responsibleId || '');
   const [responsibleName, setResponsibleName] = useState(initialOrder?.responsibleName || initialOrder?.salesEmployee || initialDraft?.responsibleName || initialDraft?.salesEmployee || '');
+  const [responsiblePhone, setResponsiblePhone] = useState(initialOrder?.responsiblePhone || initialDraft?.responsiblePhone || '');
   const [orderSource, setOrderSource] = useState<OrderSource>(initialOrder?.orderSource || initialDraft?.orderSource || 'other');
   
   // Worker assignment
@@ -270,7 +272,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     const draft: NewOrderDraft = {
       orderNumber, selectedCustomerId, customerName, customerPhone,
       bookingDate, weddingDate, deliveryDate, returnDate, eventLocation,
-      locationLink, salesEmployee, responsibleId, responsibleName, orderSource, workerId, workerName,
+      locationLink, salesEmployee, responsibleId, responsibleName, responsiblePhone, orderSource, workerId, workerName,
       workerCanContactCustomer, totalPrice, deposit, securityDeposit,
       workerCost, transportationCost, otherExpenses, paymentMethod,
       paymentStatus, orderStatus, notes, designImages, reservedItems,
@@ -284,7 +286,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   }, [
     isEdit, draftStorageKey, orderNumber, selectedCustomerId, customerName,
     customerPhone, bookingDate, weddingDate, deliveryDate, returnDate,
-    eventLocation, locationLink, salesEmployee, responsibleId, responsibleName, orderSource, workerId,
+    eventLocation, locationLink, salesEmployee, responsibleId, responsibleName, responsiblePhone, orderSource, workerId,
     workerName, workerCanContactCustomer, totalPrice, deposit, securityDeposit,
     workerCost, transportationCost, otherExpenses, paymentMethod, paymentStatus,
     orderStatus, notes, designImages, reservedItems, supplierRentals,
@@ -521,6 +523,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       salesEmployee: responsibleName.trim() || salesEmployee.trim(),
       responsibleId: responsibleId.trim(),
       responsibleName: responsibleName.trim(),
+      responsiblePhone: responsiblePhone.trim(),
       orderSource,
       workerId: workerId.trim(),
       workerName: workerName.trim(),
@@ -712,15 +715,16 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   const person = (settings.orderResponsibles || []).find((item) => item.id === selectedId);
                   setResponsibleId(person?.id || '');
                   setResponsibleName(person?.name || '');
+                  setResponsiblePhone(person?.phone || '');
                   setSalesEmployee(person?.name || '');
                 }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
               >
                 <option value="">بدون مسؤول</option>
                 {responsibleName && !responsibleId && <option value="__legacy__">{responsibleName}</option>}
-                {(settings.orderResponsibles || []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+                {(settings.orderResponsibles || []).filter((person) => !person.deletedAt).map((person) => <option key={person.id} value={person.id}>{person.name}{person.phone ? ` — ${person.phone}` : ''}</option>)}
               </select>
-              {(settings.orderResponsibles || []).length === 0 && <p className="mt-1 text-[11px] text-slate-500">أضف المسؤولين من صفحة إدارة الموظفين أولًا.</p>}
+              {(settings.orderResponsibles || []).filter((person) => !person.deletedAt).length === 0 && <p className="mt-1 text-[11px] text-slate-500">أضف المسؤولين من صفحة إدارة الموظفين أولًا.</p>}
             </div>
 
             <div>
