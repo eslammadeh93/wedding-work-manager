@@ -123,9 +123,15 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
         ? listenLatest<Order>('orders', setOrders, { orderByField: 'eventDate', direction: 'asc', pageSize: 75, from: { field: 'eventDate', value: operationalWindowStart() } })
         : () => undefined;
     const unsubs = [orderListener];
+    let deferredListenersTimer: number | undefined;
     // The operational listener intentionally loads only current orders. Keep a
     // separate realtime query for the recycle bin so deleting an old order is
     // immediately visible there too.
+    // Orders and company settings are sufficient for the first screen. Delay
+    // secondary datasets so Safari can paint before opening many Firestore
+    // streams at once on lower-memory iPhones.
+    deferredListenersTimer = window.setTimeout(() => {
+    if (failed) return;
     if (!workerOnly && allowed('company:orders:read')) {
       remaining += 1;
       unsubs.push(companyDataService.subscribeDeletedOrders<Order>(companyId, (items) => { setDeletedOrders(items); ready(); }, onError));
@@ -147,9 +153,10 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     // Order managers must receive worker arrival/completion reports even when
     // the optional generic-notifications checkbox was not selected for them.
     if ((allowed('company:notifications:read') || allowed('company:orders:read')) && authSession?.uid) unsubs.push(listen<AppNotification>('notifications', setNotifications, { field: 'targetUid', value: authSession.uid }));
+    }, 900);
     if (allowed('company:settings:read') || allowed('company:calculator:use') || allowed('company:calculator:manage') || allowed('company:order_responsibles:manage') || allowed('company:orders:write')) { remaining += 1; unsubs.push(companyDataService.subscribeSettings<CompanySettings>(companyId, (value) => { setSettings(value || initialCompanySettings); ready(); }, onError)); }
     if (remaining === 0) setLoading(false);
-    return () => { unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
+    return () => { if (deferredListenersTimer !== undefined) window.clearTimeout(deferredListenersTimer); unsubs.forEach((unsubscribe) => unsubscribe()); clear(); };
   }, [authSession, clear, profile?.workerId, retryVersion]);
 
   const company = useCallback(() => trustedCompanyIdFromSession(authSession), [authSession]);

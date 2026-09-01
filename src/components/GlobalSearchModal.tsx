@@ -1,4 +1,4 @@
-import React, { Component, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
   Boxes,
@@ -20,47 +20,6 @@ interface GlobalSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (tab: ActiveTab, refId?: string) => void;
-}
-
-interface GlobalSearchErrorBoundaryProps {
-  children: React.ReactNode;
-  onClose: () => void;
-}
-
-interface GlobalSearchErrorBoundaryState {
-  hasError: boolean;
-}
-
-export class GlobalSearchErrorBoundary extends Component<
-  GlobalSearchErrorBoundaryProps,
-  GlobalSearchErrorBoundaryState
-> {
-  declare props: GlobalSearchErrorBoundaryProps;
-  state: GlobalSearchErrorBoundaryState = { hasError: false };
-
-  static getDerivedStateFromError(): GlobalSearchErrorBoundaryState {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('Global Search rendering failed', error, info);
-  }
-
-  render() {
-    if (!this.state.hasError) return this.props.children;
-
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center pt-16 px-4">
-        <div role="alert" dir="rtl" className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 text-center">
-          <p className="font-bold text-slate-900 dark:text-white">تعذر عرض البحث العام.</p>
-          <p className="mt-2 text-sm text-slate-500">أغلق نافذة البحث ثم حاول مرة أخرى.</p>
-          <button type="button" onClick={this.props.onClose} className="mt-4 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold">
-            إغلاق
-          </button>
-        </div>
-      </div>
-    );
-  }
 }
 
 const text = (value: unknown): string => String(value ?? '').trim();

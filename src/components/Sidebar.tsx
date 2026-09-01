@@ -138,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800">
           <button onClick={() => handleTabClick('dashboard')} className="flex items-center gap-3 text-start cursor-pointer">
             <div className="w-8 h-8 sm:w-9 sm:h-9 overflow-hidden rounded-xl shadow-xs shadow-amber-500/20">
-              <img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" />
+              <img src={wwmLogo} alt="Wedding Work Manager" decoding="async" className="w-full h-full object-cover" />
             </div>
             <div className="flex flex-col">
               <span className="text-xs font-black tracking-tight text-slate-900 dark:text-white leading-tight">
@@ -196,7 +196,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-3.5 border-t border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/50">
             <div className="w-7 h-7 shrink-0 overflow-hidden rounded-lg shadow-sm">
-              <img src={wwmLogo} alt="Wedding Work Manager" className="h-full w-full object-cover" />
+              <img src={wwmLogo} alt="Wedding Work Manager" decoding="async" className="h-full w-full object-cover" />
             </div>
             <div className="text-[11px] min-w-0">
               <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{t('appName')}</p>

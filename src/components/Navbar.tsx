@@ -43,7 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="w-full h-full object-cover"
               />
             ) : (
-              <img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" />
+              <img src={wwmLogo} alt="Wedding Work Manager" decoding="async" className="w-full h-full object-cover" />
             )}
           </div>
           <span className="text-xs sm:text-base md:text-lg font-black tracking-tight text-slate-900 dark:text-white whitespace-nowrap">

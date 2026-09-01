@@ -181,6 +181,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubSettings: () => void = () => {};
     let unsubCategories: () => void = () => {};
     let unsubActivityLogs: () => void = () => {};
+    let deferredListenersTimer: number | undefined;
 
     if (!profile) {
       setOrders([]); setWorkTasks([]); setWorkers([]); setCustomers([]); setSuppliers([]); setInventory([]); setExpenses([]);
@@ -245,6 +246,10 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
+      // Orders are enough to paint the first dashboard. Start the remaining
+      // collection listeners just after that first paint, which avoids a large
+      // burst of Firestore work on memory-constrained iPhones.
+      deferredListenersTimer = window.setTimeout(() => {
       unsubWorkTasks = onSnapshot(collection(db, 'workTasks'), (snapshot) => {
         setWorkTasks(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as WorkTask)));
       });
@@ -337,6 +342,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCategories(defaultCategories);
         }
       });
+      }, 900);
 
       setNotifications([]);
       setLoading(false);
@@ -356,6 +362,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return () => {
+      if (deferredListenersTimer !== undefined) window.clearTimeout(deferredListenersTimer);
       unsubActivityLogs();
       unsubOrders();
       unsubWorkTasks();

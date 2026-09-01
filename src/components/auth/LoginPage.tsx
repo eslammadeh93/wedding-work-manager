@@ -76,7 +76,7 @@ export const LoginPage: React.FC = () => {
     </div>
     <div className="w-full max-w-md bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden z-10">
       <div className="p-6 text-center bg-gradient-to-b from-amber-500/15 to-transparent border-b border-slate-200 dark:border-slate-700/50">
-        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 overflow-hidden rounded-2xl shadow-lg shadow-amber-500/20"><img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" /></button>
+        <button type="button" onClick={handleLogoTap} className="w-14 h-14 mx-auto mb-3 overflow-hidden rounded-2xl shadow-lg shadow-amber-500/20"><img src={wwmLogo} alt="Wedding Work Manager" decoding="async" className="w-full h-full object-cover" /></button>
         <h1 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">{t('appName')}</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{view === 'worker' ? 'دخول الموظف' : view === 'setup' ? 'إنشاء حساب المدير الأول' : 'دخول المدير'}</p>
       </div>

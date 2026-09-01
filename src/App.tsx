@@ -10,16 +10,13 @@ import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBound
 
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
-import { GlobalSearchErrorBoundary, GlobalSearchModal } from './components/GlobalSearchModal';
-import { NotificationDrawer } from './components/NotificationDrawer';
+import { GlobalSearchErrorBoundary } from './components/GlobalSearchErrorBoundary';
 import { MobileManagerNav } from './components/MobileManagerNav';
 import { LoginPage } from './components/auth/LoginPage';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { WorkerPushNotificationsPrompt } from './components/WorkerPushNotificationsPrompt';
-import { OrderCalculatorModal } from './components/calculator/OrderCalculatorModal';
 
 import { Menu, Crown, Loader2 } from 'lucide-react';
-import wwmLogo from './assets/wwm-logo.png';
 
 // Load each workspace only when it is opened. This keeps PDF/Excel and other
 // heavy feature code out of the application's initial download.
@@ -41,6 +38,9 @@ const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule'
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
 const ProfileModule = lazy(() => import('./components/profile/ProfileModule').then(({ ProfileModule }) => ({ default: ProfileModule })));
 const RecycleBinModule = lazy(() => import('./components/recycleBin/RecycleBinModule').then(({ RecycleBinModule }) => ({ default: RecycleBinModule })));
+const GlobalSearchModal = lazy(() => import('./components/GlobalSearchModal').then(({ GlobalSearchModal }) => ({ default: GlobalSearchModal })));
+const NotificationDrawer = lazy(() => import('./components/NotificationDrawer').then(({ NotificationDrawer }) => ({ default: NotificationDrawer })));
+const OrderCalculatorModal = lazy(() => import('./components/calculator/OrderCalculatorModal').then(({ OrderCalculatorModal }) => ({ default: OrderCalculatorModal })));
 
 function UnauthorizedPlatform() {
   return <div dir="rtl" className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-center"><div><Crown className="w-10 h-10 text-amber-500 mx-auto mb-3" /><h1 className="font-black text-xl">غير مصرح لك بالدخول</h1><p className="text-sm text-slate-500 mt-2">هذه الصفحة متاحة لحسابات إدارة المنصة فقط.</p></div></div>;
@@ -357,7 +357,7 @@ function AppContent() {
   if (loading || !usersInitialized || (user && profile && authSession?.userType !== 'platform' && restoredTabForUid !== user.uid)) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 transition-colors">
-        <div className="w-12 h-12 overflow-hidden rounded-2xl mb-4 shadow-lg shadow-amber-500/20"><img src={wwmLogo} alt="Wedding Work Manager" className="w-full h-full object-cover" /></div>
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 shadow-lg shadow-amber-500/20"><Crown className="h-7 w-7 text-amber-500" /></div>
         <Loader2 className="w-6 h-6 text-amber-500 animate-spin mb-2" />
         <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Loading Wedding Work Manager...</p>
       </div>
@@ -455,24 +455,15 @@ function AppContent() {
       )}
 
       {/* Modals & Drawers */}
-      <GlobalSearchErrorBoundary
-        key={isSearchOpen ? 'global-search-open' : 'global-search-closed'}
-        onClose={() => setIsSearchOpen(false)}
-      >
-        <GlobalSearchModal
-          isOpen={isSearchOpen}
-          onClose={() => setIsSearchOpen(false)}
-          onNavigate={handleNavigate}
-        />
-      </GlobalSearchErrorBoundary>
+      {isSearchOpen && <GlobalSearchErrorBoundary key="global-search-open" onClose={() => setIsSearchOpen(false)}>
+        <Suspense fallback={null}>
+          <GlobalSearchModal isOpen onClose={() => setIsSearchOpen(false)} onNavigate={handleNavigate} />
+        </Suspense>
+      </GlobalSearchErrorBoundary>}
 
-      <NotificationDrawer
-        isOpen={isNotifDrawerOpen}
-        onClose={() => {
-          setIsNotifDrawerOpen(false);
-        }}
-        onNavigate={handleNavigate}
-      />
+      {isNotifDrawerOpen && <Suspense fallback={null}>
+        <NotificationDrawer isOpen onClose={() => setIsNotifDrawerOpen(false)} onNavigate={handleNavigate} />
+      </Suspense>}
 
       <MobileManagerNav
         onCreateOrder={handleCreateOrder}
@@ -481,7 +472,9 @@ function AppContent() {
         onOpenCalculator={handleOpenCalculator}
       />
 
-      <OrderCalculatorModal isOpen={isCalculatorOpen} onClose={() => setIsCalculatorOpen(false)} />
+      {isCalculatorOpen && <Suspense fallback={null}>
+        <OrderCalculatorModal isOpen onClose={() => setIsCalculatorOpen(false)} />
+      </Suspense>}
 
     </div>
   );
