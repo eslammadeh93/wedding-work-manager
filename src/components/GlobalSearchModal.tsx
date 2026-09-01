@@ -80,8 +80,8 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           )}
-          <button type="button" onClick={onClose} className="px-2.5 py-1 text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
-            Skip
+          <button type="button" onClick={onClose} aria-label="Close search" className="p-1.5 text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
