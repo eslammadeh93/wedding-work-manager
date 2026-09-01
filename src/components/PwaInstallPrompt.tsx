@@ -9,7 +9,9 @@ interface InstallPromptEvent extends Event {
 export const PwaInstallPrompt: React.FC = () => {
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null);
   const [showIosHint, setShowIosHint] = useState(false);
-  const [updateReady, setUpdateReady] = useState(false);
+  // The worker can detect an update before this component's effect attaches.
+  // Keep the signal on window so the update banner is never missed.
+  const [updateReady, setUpdateReady] = useState(() => window.__wwmPwaUpdateReady === true);
   const [deferred, setDeferred] = useState(false);
   const deferredKey = 'wwm-install-prompt-deferred-until';
 

@@ -10,17 +10,14 @@ firebase.initializeApp({
   appId: '1:1072232660356:web:318b463f2167c6e5b831d1',
 });
 const messaging = firebase.messaging();
-// v6 adds idempotent system-notification handling for foreground/background
-// FCM deliveries on already-installed PWAs.
-const CACHE_NAME = 'wwm-app-shell-v6';
+const BUILD_ID = '__WWM_BUILD_ID__';
+const CACHE_NAME = `wwm-app-shell-${BUILD_ID}`;
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png', '/wwm-notification-crown.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
 });
 
-// The page asks for activation after it is sent to the background, preventing
-// an update from interrupting a user in the middle of an order form.
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
@@ -68,16 +65,11 @@ const displayedPushes = new Set();
 messaging.onBackgroundMessage((payload) => {
   const data = payload.data || {};
   const notificationId = data.notificationId || data.deliveryId || payload.messageId || '';
-  // Firestore and FCM are at-least-once systems. A tag also handles a message
-  // that reaches a just-opened PWA while its service worker is still active.
   if (notificationId && displayedPushes.has(notificationId)) return;
   if (notificationId) displayedPushes.add(notificationId);
   return self.registration.showNotification(data.title || 'مدير أعمال الويدينج', {
     body: data.body || '',
     icon: '/wwm-logo.png',
-    // Android renders the small notification badge as a monochrome alpha mask.
-    // The full logo would become an empty white square there, so use the
-    // transparent crown-only badge while retaining the branded full icon.
     badge: '/wwm-notification-crown.png',
     tag: notificationId || undefined,
     renotify: false,

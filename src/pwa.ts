@@ -7,13 +7,19 @@ export function registerPwa() {
 
   const start = async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/service-worker.js');
+      // iOS is particularly aggressive about caching this file. `none` makes
+      // every explicit update check ask the server for the current worker.
+      const registration = await navigator.serviceWorker.register('/service-worker.js', { updateViaCache: 'none' });
       let updatePending = Boolean(registration.waiting);
       let reloadRequested = false;
-      const announceUpdate = () => window.dispatchEvent(new Event('wwm-pwa-update-ready'));
+      const announceUpdate = () => {
+        window.__wwmPwaUpdateReady = true;
+        window.dispatchEvent(new Event('wwm-pwa-update-ready'));
+      };
       const applyUpdateNow = () => {
         if (!updatePending || !registration.waiting) return;
         reloadRequested = true;
+        window.__wwmPwaUpdateReady = false;
         registration.waiting.postMessage({ type: 'SKIP_WAITING' });
         // A controllerchange is expected. The fallback still gives the user a
         // fresh complete application start if a browser delays that event.
@@ -37,7 +43,11 @@ export function registerPwa() {
       markUpdateReady();
       window.addEventListener('wwm-pwa-apply-update', applyUpdateNow);
       window.addEventListener('online', () => { void registration.update(); });
-      window.setInterval(() => { void registration.update(); }, 60 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void registration.update();
+      });
+      // Check while the app is left open, not just after a full restart.
+      window.setInterval(() => { void registration.update(); }, 5 * 60 * 1000);
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (reloadRequested) window.location.reload();
       });
@@ -49,4 +59,10 @@ export function registerPwa() {
 
   if (document.readyState === 'complete') void start();
   else window.addEventListener('load', () => { void start(); }, { once: true });
+}
+
+declare global {
+  interface Window {
+    __wwmPwaUpdateReady?: boolean;
+  }
 }
