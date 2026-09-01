@@ -1,7 +1,7 @@
 import React from 'react';
-import { Car, Check, Clock, DollarSign, FileText, Image as ImageIcon, MessageCircle, Package, Phone, Receipt, UserCheck, Wrench } from 'lucide-react';
+import { Car, Check, Clock, DollarSign, FileText, Image as ImageIcon, MessageCircle, Package, Pencil, Phone, Receipt, UserCheck, Wrench } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
-import type { Order, WorkerMovement } from '../../types';
+import type { Order, PaymentEntry, WorkerMovement } from '../../types';
 import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { OrderSourceBadge } from './OrderSourceBadge';
 
@@ -70,10 +70,10 @@ const Metric: React.FC<{ label: string; value: number; className?: string; premi
   </div>
 );
 
-export const OrderPaymentHistory: React.FC<{ order: Order; isWorker: boolean }> = ({ order, isWorker }) => {
+export const OrderPaymentHistory: React.FC<{ order: Order; isWorker: boolean; onEditPayment?: (payment: PaymentEntry) => void }> = ({ order, isWorker, onEditPayment }) => {
   const { t, language } = useLanguage();
   if (isWorker || !order.paymentHistory?.length) return null;
-  return <div><h4 className="font-bold text-slate-900 dark:text-white text-sm mb-2 flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span>{t('paymentHistory')}</span></h4><div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden text-xs">{order.paymentHistory.map((pay) => <div key={pay.id} className="p-2.5 bg-white dark:bg-slate-800/50 flex items-center justify-between"><div><span className="font-bold text-slate-900 dark:text-white">${pay.amount.toLocaleString()}</span><span className="mx-2 text-slate-400">({pay.method})</span>{pay.type && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${pay.type === 'settlement' ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{pay.type === 'settlement' ? (language === 'ar' ? 'سداد' : 'Settlement') : (language === 'ar' ? 'عربون' : 'Deposit')}</span>}{pay.notes && <span className="text-slate-500 italic">- {pay.notes}</span>}</div><span className="text-slate-400 font-mono">{pay.date}</span></div>)}</div></div>;
+  return <div><h4 className="font-bold text-slate-900 dark:text-white text-sm mb-2 flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span>{t('paymentHistory')}</span></h4><div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden text-xs">{order.paymentHistory.map((pay) => <div key={pay.id} className="p-2.5 bg-white dark:bg-slate-800/50 flex items-center justify-between gap-3"><div className="min-w-0"><span className="font-bold text-slate-900 dark:text-white">${pay.amount.toLocaleString()}</span><span className="mx-2 text-slate-400">({pay.method})</span>{pay.type && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${pay.type === 'settlement' ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{pay.type === 'settlement' ? (language === 'ar' ? 'سداد' : 'Settlement') : (language === 'ar' ? 'عربون' : 'Deposit')}</span>}{pay.notes && <span className="text-slate-500 italic">- {pay.notes}</span>}</div><div className="flex shrink-0 items-center gap-1.5"><span className="text-slate-400 font-mono">{pay.date}</span>{onEditPayment && <button type="button" onClick={() => onEditPayment(pay)} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/40 dark:hover:text-amber-300" title={language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'} aria-label={language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'}><Pencil className="h-3.5 w-3.5" /></button>}</div></div>)}</div></div>;
 };
 
 export const OrderInventorySection: React.FC<{ order: Order; isWorker: boolean }> = ({ order, isWorker }) => {

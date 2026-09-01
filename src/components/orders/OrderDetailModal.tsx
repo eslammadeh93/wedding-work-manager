@@ -21,7 +21,7 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
-import { Order, OrderStatus, WorkerMovement } from '../../types';
+import { Order, OrderStatus, PaymentEntry, WorkerMovement } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
 import { localDateString } from '../../utils/localDate';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
@@ -58,11 +58,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState('InstaPay');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [showAddPayment, setShowAddPayment] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<PaymentEntry | null>(null);
+  const [editedPaymentDate, setEditedPaymentDate] = useState('');
   const [copiedLocation, setCopiedLocation] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [isLogging, setIsLogging] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [isSavingPaymentEdit, setIsSavingPaymentEdit] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [logToast, setLogToast] = useState<string | null>(null);
   const [logToastIsError, setLogToastIsError] = useState(false);
@@ -177,6 +180,33 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setLogToast(err instanceof Error ? err.message : 'تعذر تسجيل بلاغ المنفذ. حاول مرة أخرى.');
     } finally {
       setIsLogging(false);
+    }
+  };
+
+  const handlePaymentDateEdit = (payment: PaymentEntry) => {
+    setEditingPayment(payment);
+    setEditedPaymentDate(payment.date.slice(0, 10));
+  };
+
+  const handlePaymentDateSave = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingPayment || !editedPaymentDate || isSavingPaymentEdit) return;
+
+    try {
+      setIsSavingPaymentEdit(true);
+      await updateOrder(order.id, {
+        paymentHistory: (order.paymentHistory || []).map((payment) => payment.id === editingPayment.id
+          ? { ...payment, date: editedPaymentDate }
+          : payment),
+      });
+      setEditingPayment(null);
+      setLogToastIsError(false);
+      setLogToast(language === 'ar' ? 'تم تعديل تاريخ الدفعة وتحديث الحسابات.' : 'Payment date updated and financial reports refreshed.');
+    } catch (error) {
+      setLogToastIsError(true);
+      setLogToast(error instanceof Error ? error.message : 'تعذر تعديل تاريخ الدفعة.');
+    } finally {
+      setIsSavingPaymentEdit(false);
     }
   };
 
@@ -612,7 +642,23 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             )}
           </div>
 
-          <OrderPaymentHistory order={order} isWorker={isWorker} />
+          {!isWorker && editingPayment && (
+            <form onSubmit={handlePaymentDateSave} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-black text-amber-950 dark:text-amber-100">{language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'}</h4>
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">{language === 'ar' ? `دفعة ${editingPayment.type === 'deposit' ? 'العربون' : 'السداد'} بقيمة $${editingPayment.amount.toLocaleString()}` : `${editingPayment.type === 'deposit' ? 'Deposit' : 'Settlement'} payment of $${editingPayment.amount.toLocaleString()}`}</p>
+                </div>
+                <button type="button" onClick={() => setEditingPayment(null)} disabled={isSavingPaymentEdit} className="rounded-lg p-1 text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:text-amber-200 dark:hover:bg-amber-900/40" aria-label={language === 'ar' ? 'إلغاء' : 'Cancel'}><X className="h-4 w-4" /></button>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <label className="block text-xs font-bold text-amber-950 dark:text-amber-100"><span className="mb-1 block">{language === 'ar' ? 'تاريخ التحصيل الفعلي' : 'Actual collection date'}</span><input type="date" required value={editedPaymentDate} onChange={(event) => setEditedPaymentDate(event.target.value)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-amber-800 dark:bg-slate-900 dark:text-white" /></label>
+                <div className="flex gap-2"><button type="button" onClick={() => setEditingPayment(null)} disabled={isSavingPaymentEdit} className="rounded-xl px-3 py-2 text-xs font-bold text-slate-600 hover:bg-amber-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-amber-900/40">{language === 'ar' ? 'إلغاء' : 'Cancel'}</button><button type="submit" disabled={isSavingPaymentEdit} className="rounded-xl bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-60">{isSavingPaymentEdit ? (language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ التاريخ' : 'Save date')}</button></div>
+              </div>
+            </form>
+          )}
+
+          <OrderPaymentHistory order={order} isWorker={isWorker} onEditPayment={handlePaymentDateEdit} />
           <OrderInventorySection order={order} isWorker={isWorker} />
 
           {/* Notes */}
