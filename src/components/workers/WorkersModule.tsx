@@ -461,6 +461,8 @@ export const WorkersModule: React.FC = () => {
                     type="text"
                     value={phone}
                     onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
+                    dir="ltr"
+                    inputMode="tel"
                     placeholder="01200000000"
                     className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white dir-ltr text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />

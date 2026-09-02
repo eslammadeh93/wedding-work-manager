@@ -1,12 +1,16 @@
-/** Removes spaces (including pasted tabs/newlines and non-breaking spaces) from phone input. */
-export const sanitizePhoneInput = (value: string) => value.replace(/\s+/g, '');
+const normalizeDigits = (value: string) => value
+  .replace(/[\u0660-\u0669]/g, digit => String(digit.charCodeAt(0) - 0x0660))
+  .replace(/[\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) - 0x06F0));
 
-const normalizeDigits = (value: string) => {
-  const arabicIndic = '٠١٢٣٤٥٦٧٨٩';
-  const easternArabicIndic = '۰۱۲۳۴۵۶۷۸۹';
-  return value
-    .replace(/[٠-٩]/g, digit => String(arabicIndic.indexOf(digit)))
-    .replace(/[۰-۹]/g, digit => String(easternArabicIndic.indexOf(digit)));
+/**
+ * Converts pasted phone numbers to a stable form for storage and RTL display.
+ * Separators such as spaces, parentheses, and all dash variants are removed;
+ * an international `+` is retained only when it starts the number.
+ */
+export const sanitizePhoneInput = (value: string) => {
+  const normalized = normalizeDigits(value.trim());
+  const digits = normalized.replace(/\D/g, '');
+  return digits ? `${normalized.startsWith('+') ? '+' : ''}${digits}` : '';
 };
 
 /** Returns digits in international form for wa.me. Local numbers default to Egypt (+20). */
