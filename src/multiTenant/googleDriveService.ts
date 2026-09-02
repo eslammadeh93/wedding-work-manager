@@ -24,6 +24,7 @@ export const googleDriveService = {
   connectionStatus: () => invoke<Record<string, never>, { connected: boolean }>('getGoogleDriveConnectionStatus', {}, 'تعذر التحقق من حالة Google Drive.'),
   disconnect: () => invoke<Record<string, never>, { success: boolean }>('disconnectGoogleDrive', {}, 'تعذر إلغاء ربط Google Drive.'),
   uploadImage: (input: { name: string; mimeType: string; base64: string }) => invoke<typeof input, { id: string; name: string; url: string }>('uploadOrderDesignImage', input, 'تعذر رفع الصورة إلى Google Drive.'),
+  deleteImage: (fileId: string) => invoke<{ fileId: string }, { success: boolean }>('deleteOrderDesignImage', { fileId }, 'تعذر حذف الصورة من Google Drive.'),
 };
 
 export const fileToBase64 = async (file: File) => {

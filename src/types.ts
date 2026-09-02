@@ -89,6 +89,8 @@ export interface OrderSupplierRental {
 export interface DesignImageItem {
   url: string;
   createdAt: string;
+  /** Present only for images uploaded by this app through the connected Google Drive account. */
+  driveFileId?: string;
 }
 
 export interface OrderAttachment {

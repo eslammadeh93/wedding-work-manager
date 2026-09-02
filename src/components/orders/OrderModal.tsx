@@ -250,7 +250,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     });
   };
 
-  const handleRemoveDesignImage = (index: number) => {
+  const removeDesignImageFromForm = (index: number) => {
     setDesignImages((prev) => {
       if (prev.length <= 1) {
         return [{ url: '', createdAt: new Date().toISOString() }];
@@ -268,6 +268,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [stockWarning, setStockWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingDesignImage, setIsUploadingDesignImage] = useState(false);
+  const [deletingDesignImageId, setDeletingDesignImageId] = useState<string | null>(null);
   const designImageFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleUploadDesignImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -280,9 +281,12 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     try {
       const uploaded = await googleDriveService.uploadImage({ name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
       setDesignImages((current) => {
+        if (googleDriveConnected) {
+          return [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }];
+        }
         const firstEmptyIndex = current.findIndex((image) => !image.url.trim());
-        if (firstEmptyIndex < 0) return [...current, { url: uploaded.url, createdAt: new Date().toISOString() }];
-        return current.map((image, index) => index === firstEmptyIndex ? { ...image, url: uploaded.url, createdAt: new Date().toISOString() } : image);
+        if (firstEmptyIndex < 0) return [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }];
+        return current.map((image, index) => index === firstEmptyIndex ? { ...image, url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id } : image);
       });
     } catch (error) {
       setStockWarning(error instanceof Error ? error.message : 'تعذر رفع الصورة إلى Google Drive.');
@@ -398,6 +402,28 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       return '';
     }
   }, [settings.designUploadFolderUrl]);
+  const displayedDesignImages = React.useMemo(() => {
+    const items = designImages.map((item, index) => ({ item, index }));
+    return googleDriveConnected ? items.filter(({ item }) => item.url.trim().length > 0) : items;
+  }, [designImages, googleDriveConnected]);
+  const handleRemoveDesignImage = async (index: number) => {
+    const image = designImages[index];
+    if (!googleDriveConnected || !image?.driveFileId) {
+      removeDesignImageFromForm(index);
+      return;
+    }
+    if (!window.confirm('سيتم نقل الصورة إلى سلة مهملات Google Drive وحذفها من الأوردر. هل تريد المتابعة؟')) return;
+    setDeletingDesignImageId(image.driveFileId);
+    setStockWarning(null);
+    try {
+      await googleDriveService.deleteImage(image.driveFileId);
+      removeDesignImageFromForm(index);
+    } catch (error) {
+      setStockWarning(error instanceof Error ? error.message : 'تعذر حذف الصورة من Google Drive.');
+    } finally {
+      setDeletingDesignImageId(null);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -1178,18 +1204,19 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isUploadingDesignImage ? 'جارٍ رفع الصورة…' : googleDriveConnected ? 'رفع تلقائي للصورة' : 'فتح فولدر الرفع'}</span>
+                  <span>{isUploadingDesignImage ? 'جارٍ رفع الصورة…' : googleDriveConnected ? 'رفع صورة' : 'فتح فولدر الرفع'}</span>
                 </button>
 
-                {/* Circular "+" Button */}
-                <button
-                  type="button"
-                  onClick={handleAddDesignImage}
-                  title={t('addDesignImageLink')}
-                  className="w-8 h-8 rounded-full bg-amber-500 hover:bg-amber-600 text-white transition-colors flex items-center justify-center shrink-0 shadow-xs cursor-pointer font-bold"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
+                {!googleDriveConnected && (
+                  <button
+                    type="button"
+                    onClick={handleAddDesignImage}
+                    title={t('addDesignImageLink')}
+                    className="w-8 h-8 rounded-full bg-amber-500 hover:bg-amber-600 text-white transition-colors flex items-center justify-center shrink-0 shadow-xs cursor-pointer font-bold"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1199,19 +1226,21 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
             {/* List of Design Image Links */}
             <div className="space-y-3 pt-1">
-              {designImages.map((item, index) => (
+              {displayedDesignImages.map(({ item, index }, visibleIndex) => (
                 <div key={index} className="flex flex-col md:flex-row items-stretch md:items-end gap-2.5">
                   {/* 1. Design Image Link */}
                   <div className="flex-1">
                     <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      {t('designImageUrl')} {designImages.length > 1 ? `#${index + 1}` : ''}
+                      {t('designImageUrl')} {displayedDesignImages.length > 1 ? `#${visibleIndex + 1}` : ''}
                     </label>
                     <input
                       type="url"
                       value={item.url}
                       onChange={(e) => handleUpdateDesignImage(index, e.target.value)}
+                      readOnly={googleDriveConnected}
+                      aria-readonly={googleDriveConnected}
                       placeholder={t('pasteDriveLink')}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500 text-left dir-ltr"
+                      className={`w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm outline-none text-left dir-ltr ${googleDriveConnected ? 'bg-slate-100 text-slate-500 dark:bg-slate-900/70 dark:text-slate-400 cursor-not-allowed' : 'bg-white dark:bg-slate-800 focus:ring-2 focus:ring-amber-500'}`}
                     />
                   </div>
 
@@ -1235,11 +1264,24 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                     <button
                       type="button"
                       onClick={() => handleRemoveDesignImage(index)}
-                      className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition-colors flex items-center justify-center gap-1 shrink-0 cursor-pointer h-[38px]"
+                      disabled={deletingDesignImageId === item.driveFileId}
+                      className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold transition-colors flex items-center justify-center gap-1 shrink-0 cursor-pointer h-[38px] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>{t('deleteLink')}</span>
+                      <span>{deletingDesignImageId === item.driveFileId ? 'جارٍ حذف الصورة…' : googleDriveConnected ? 'حذف الصورة' : t('deleteLink')}</span>
                     </button>
+
+                    {googleDriveConnected && (
+                      <button
+                        type="button"
+                        onClick={() => removeDesignImageFromForm(index)}
+                        title="حذف الرابط من الأوردر فقط وترك الصورة في Google Drive"
+                        className="px-3.5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 shrink-0 cursor-pointer h-[38px]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>حذف السطر</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

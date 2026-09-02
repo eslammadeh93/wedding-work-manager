@@ -32,6 +32,7 @@ export const googleDriveOAuthCallback = googleDriveFunctions.googleDriveOAuthCal
 export const getGoogleDriveConnectionStatus = googleDriveFunctions.getGoogleDriveConnectionStatus;
 export const disconnectGoogleDrive = googleDriveFunctions.disconnectGoogleDrive;
 export const uploadOrderDesignImage = googleDriveFunctions.uploadOrderDesignImage;
+export const deleteOrderDesignImage = googleDriveFunctions.deleteOrderDesignImage;
 const platformDashboardService = new PlatformDashboardService({ db });
 const platformRebuildService = new PlatformRebuildService(db);
 const platformAggregationTriggers = createPlatformAggregationTriggers(db);

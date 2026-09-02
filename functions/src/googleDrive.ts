@@ -8,6 +8,7 @@ const googleDriveClientSecret = defineSecret('GOOGLE_DRIVE_CLIENT_SECRET');
 const googleDriveTokenKey = defineSecret('GOOGLE_DRIVE_TOKEN_ENCRYPTION_KEY');
 const driveScope = 'https://www.googleapis.com/auth/drive.file';
 const connectionCollection = 'companyDriveConnections';
+const uploadedFileCollection = 'uploadedFiles';
 const options = {
   region: 'us-central1' as const,
   invoker: 'public' as const,
@@ -76,6 +77,13 @@ const fileName = (value: unknown) => {
   const clean = typeof value === 'string' ? value.trim().replace(/[\\/:*?"<>|]/g, '_') : '';
   if (!clean || clean.length > 180) throw new HttpsError('invalid-argument', 'اسم الصورة غير صالح.');
   return clean;
+};
+
+const driveFileId = (value: unknown) => {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(value)) {
+    throw new HttpsError('invalid-argument', 'معرّف صورة Google Drive غير صالح.');
+  }
+  return value;
 };
 
 const imageMimeType = (value: unknown) => {
@@ -194,7 +202,33 @@ export const createGoogleDriveFunctions = (db: FirebaseFirestore.Firestore) => {
       const driveResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
       const driveFile = await driveResponse.json() as { id?: string; name?: string; webViewLink?: string };
       if (!driveResponse.ok || !driveFile.id || !driveFile.webViewLink) throw new HttpsError('internal', 'تعذر رفع الصورة إلى Google Drive.');
+      await db.collection(connectionCollection).doc(companyId).collection(uploadedFileCollection).doc(driveFile.id).set({
+        folderId,
+        createdAt: FieldValue.serverTimestamp(),
+      });
       return { id: driveFile.id, name: driveFile.name || name, url: driveFile.webViewLink };
+    }),
+
+    deleteOrderDesignImage: onCall(options, async (request: Request) => {
+      const { companyId } = await authorize(request.auth, 'company:orders:write');
+      const fileId = driveFileId((request.data as { fileId?: unknown })?.fileId);
+      const { accessToken, folderId } = await refreshAccessToken(companyId);
+      const fileRef = db.collection(connectionCollection).doc(companyId).collection(uploadedFileCollection).doc(fileId);
+      const trackedFile = await fileRef.get();
+      if (!trackedFile.exists || trackedFile.data()?.folderId !== folderId) {
+        throw new HttpsError('permission-denied', 'لا يمكن حذف إلا الصور التي رفعها البرنامج إلى فولدر هذه الشركة.');
+      }
+      const driveResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trashed: true }),
+      });
+      const driveFile = await driveResponse.json() as { id?: string; trashed?: boolean };
+      if (!driveResponse.ok || !driveFile.id || !driveFile.trashed) {
+        throw new HttpsError('internal', 'تعذر حذف الصورة من Google Drive.');
+      }
+      await fileRef.delete();
+      return { success: true };
     }),
   };
 };
