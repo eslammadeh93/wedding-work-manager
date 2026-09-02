@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Settings as SettingsIcon,
   Crown,
@@ -9,11 +9,14 @@ import {
   Database,
   Save,
   CheckCircle2,
+  Link2,
+  Unlink,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { sanitizePhoneInput } from '../../utils/phone';
 import { useData } from '../../context/DataContext';
+import { googleDriveService } from '../../multiTenant/googleDriveService';
 
 export const SettingsModule: React.FC = () => {
   const { t, language, setLanguage } = useLanguage();
@@ -33,11 +36,58 @@ export const SettingsModule: React.FC = () => {
   const [addressEn, setAddressEn] = useState(settings.addressEn);
   const [taxNumber, setTaxNumber] = useState(settings.taxNumber || '');
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl || '');
+  const [designUploadFolderUrl, setDesignUploadFolderUrl] = useState(settings.designUploadFolderUrl || '');
   const [termsAr, setTermsAr] = useState(settings.termsAr || '');
   const [termsEn, setTermsEn] = useState(settings.termsEn || '');
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveConnected, setDriveConnected] = useState(Boolean(settings.googleDriveConnected));
+  const [driveMessage, setDriveMessage] = useState('');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => setDriveConnected(Boolean(settings.googleDriveConnected)), [settings.googleDriveConnected]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'google-drive-connected') return;
+      setDriveConnected(true);
+      setDriveMessage('تم ربط Google Drive بنجاح.');
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  const connectGoogleDrive = async () => {
+    if (!designUploadFolderUrl.trim()) return setDriveMessage('ضع رابط فولدر Google Drive أولًا.');
+    setDriveBusy(true);
+    setDriveMessage('');
+    try {
+      await updateSettings({ designUploadFolderUrl: designUploadFolderUrl.trim() });
+      const { authorizationUrl } = await googleDriveService.beginConnection(designUploadFolderUrl.trim());
+      const popup = window.open(authorizationUrl, 'google-drive-authorization', 'width=560,height=700,resizable=yes,scrollbars=yes');
+      if (!popup) setDriveMessage('اسمح بفتح النافذة المنبثقة لإكمال ربط Google Drive.');
+      else setDriveMessage('سجّل الدخول بحساب Google الذي يملك الفولدر، ثم وافق على صلاحية الرفع.');
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : 'تعذر بدء ربط Google Drive.');
+    } finally {
+      setDriveBusy(false);
+    }
+  };
+
+  const disconnectGoogleDrive = async () => {
+    setDriveBusy(true);
+    setDriveMessage('');
+    try {
+      await googleDriveService.disconnect();
+      setDriveConnected(false);
+      setDriveMessage('تم إلغاء ربط Google Drive.');
+    } catch (error) {
+      setDriveMessage(error instanceof Error ? error.message : 'تعذر إلغاء ربط Google Drive.');
+    } finally {
+      setDriveBusy(false);
+    }
+  };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +96,7 @@ export const SettingsModule: React.FC = () => {
     try {
       await updateSettings({
         companyNameAr, companyNameEn, phone, email, addressAr, addressEn,
-        taxNumber, logoUrl, termsAr, termsEn,
+        taxNumber, logoUrl, designUploadFolderUrl: designUploadFolderUrl.trim(), termsAr, termsEn,
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
@@ -260,6 +310,38 @@ export const SettingsModule: React.FC = () => {
               placeholder="https://example.com/logo.png"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
             />
+          </div>
+
+          <div className="sm:col-span-2 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/15">
+            <h4 className="mb-1 text-sm font-black text-indigo-950 dark:text-indigo-100">مركز رفع الصور</h4>
+            <p className="mb-3 text-xs text-slate-600 dark:text-slate-300">اختر الرفع اليدوي بالرابط، أو اربط حساب Google للرفع التلقائي.</p>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              رابط مركز رفع صور الأوردرات (Google Drive)
+            </label>
+            <input
+              type="url"
+              disabled={driveConnected}
+              value={designUploadFolderUrl}
+              onChange={(e) => setDesignUploadFolderUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              dir="ltr"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">يمكن استخدام الرابط وحده لفتح الفولدر والرفع يدويًا، أو ربط حساب Google للرفع التلقائي مباشرةً من الأوردر.</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void connectGoogleDrive()}
+                disabled={driveBusy || driveConnected}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Link2 className="w-4 h-4" />
+                {driveConnected ? 'Google Drive متصل' : driveBusy ? 'جارٍ بدء الربط…' : 'ربط Google Drive'}
+              </button>
+              {driveConnected && <button type="button" onClick={() => void disconnectGoogleDrive()} disabled={driveBusy} className="flex items-center gap-2 rounded-xl border border-rose-200 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><Unlink className="w-4 h-4" />إلغاء الربط</button>}
+              <span className={`text-xs font-bold ${driveConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>{driveConnected ? 'الرفع التلقائي مفعل لهذه الشركة.' : 'يمكنك استخدام الرفع اليدوي بالرابط أو ربط Google للرفع التلقائي.'}</span>
+            </div>
+            {driveMessage && <p className="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">{driveMessage}</p>}
           </div>
         </div>
 

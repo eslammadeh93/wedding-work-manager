@@ -367,6 +367,9 @@ export interface CompanySettings {
   addressAr: string;
   taxNumber?: string;
   logoUrl?: string;
+  designUploadFolderUrl?: string;
+  googleDriveConnected?: boolean;
+  googleDriveFolderId?: string;
   termsEn?: string;
   termsAr?: string;
   orderPriceCatalog?: OrderPriceCatalogItem[];

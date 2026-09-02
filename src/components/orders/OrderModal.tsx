@@ -7,6 +7,7 @@ import { Order, OrderItemReservation, OrderSupplierRental, PaymentStatus, OrderS
 import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput, toInternationalPhoneDigits } from '../../utils/phone';
 import { recordedOrderPayment } from '../../utils/orderPayments';
+import { fileToBase64, googleDriveService } from '../../multiTenant/googleDriveService';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -266,6 +267,29 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [attachments, setAttachments] = useState<OrderAttachment[]>(initialOrder?.attachments || initialDraft?.attachments || []);
   const [stockWarning, setStockWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingDesignImage, setIsUploadingDesignImage] = useState(false);
+  const designImageFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleUploadDesignImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) return setStockWarning('حجم الصورة يجب ألا يزيد عن 6 ميجابايت.');
+    setIsUploadingDesignImage(true);
+    setStockWarning(null);
+    try {
+      const uploaded = await googleDriveService.uploadImage({ name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
+      setDesignImages((current) => {
+        const firstEmptyIndex = current.findIndex((image) => !image.url.trim());
+        if (firstEmptyIndex < 0) return [...current, { url: uploaded.url, createdAt: new Date().toISOString() }];
+        return current.map((image, index) => index === firstEmptyIndex ? { ...image, url: uploaded.url, createdAt: new Date().toISOString() } : image);
+      });
+    } catch (error) {
+      setStockWarning(error instanceof Error ? error.message : 'تعذر رفع الصورة إلى Google Drive.');
+    } finally {
+      setIsUploadingDesignImage(false);
+    }
+  };
 
   const persistDraft = React.useCallback(() => {
     if (isEdit) return;
@@ -364,6 +388,16 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       })
       .slice(0, 5);
   }, [customers, customerPhone]);
+
+  const googleDriveConnected = settings.googleDriveConnected === true;
+  const designUploadFolderUrl = React.useMemo(() => {
+    try {
+      const url = new URL(settings.designUploadFolderUrl || '');
+      return url.protocol === 'https:' ? url.href : '';
+    } catch {
+      return '';
+    }
+  }, [settings.designUploadFolderUrl]);
 
   if (!isOpen) return null;
 
@@ -1134,16 +1168,17 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               </h4>
 
               <div className="flex items-center gap-2">
+                <input ref={designImageFileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={handleUploadDesignImage} className="hidden" />
                 {/* 2. Upload Design Image */}
                 <button
                   type="button"
-                  onClick={() => {
-                    window.open('https://drive.google.com/drive/u/1/folders/1mkwZJhpDPTZHiC-RZE8E31xXAF6Rsjh8', '_blank');
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
+                  onClick={() => googleDriveConnected ? designImageFileInputRef.current?.click() : window.open(designUploadFolderUrl, '_blank', 'noopener,noreferrer')}
+                  disabled={(!googleDriveConnected && !designUploadFolderUrl) || isUploadingDesignImage}
+                  title={designUploadFolderUrl ? 'فتح مركز رفع الصور' : 'اضبط رابط مركز رفع الصور من الإعدادات أولًا'}
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{t('uploadDesignImage')}</span>
+                  <span>{isUploadingDesignImage ? 'جارٍ رفع الصورة…' : googleDriveConnected ? 'رفع تلقائي للصورة' : 'فتح فولدر الرفع'}</span>
                 </button>
 
                 {/* Circular "+" Button */}
@@ -1157,6 +1192,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {!designUploadFolderUrl && <p className="text-[11px] text-amber-700 dark:text-amber-300">اضبط رابط مركز رفع الصور من الإعدادات أولًا.</p>}
+            {designUploadFolderUrl && !googleDriveConnected && <p className="text-[11px] text-slate-500">الرفع اليدوي مفعل: سيفتح فولدر Google Drive لتضيف الصورة بنفسك ثم تلصق رابطها هنا. يمكنك ربط Google Drive من الإعدادات لتفعيل الرفع التلقائي.</p>}
+            {googleDriveConnected && <p className="text-[11px] text-emerald-700 dark:text-emerald-300">الرفع التلقائي مفعل: اختر الصورة وسيتم رفعها وحفظ رابطها في الأوردر تلقائيًا.</p>}
 
             {/* List of Design Image Links */}
             <div className="space-y-3 pt-1">
