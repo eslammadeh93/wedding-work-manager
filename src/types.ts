@@ -55,6 +55,13 @@ export interface OrderPriceCatalogItem {
   unitPrice: number;
 }
 
+/** A named Google Maps link that can be reused in the transportation calculator. */
+export interface TransportationSavedLocation {
+  id: string;
+  name: string;
+  mapUrl: string;
+}
+
 /** A price-calculator line saved as a snapshot on the order. */
 export interface OrderPricingLine {
   id: string;
@@ -375,6 +382,7 @@ export interface CompanySettings {
   termsEn?: string;
   termsAr?: string;
   orderPriceCatalog?: OrderPriceCatalogItem[];
+  transportationSavedLocations?: TransportationSavedLocation[];
   orderResponsibles?: OrderResponsible[];
 }
 

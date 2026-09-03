@@ -18,6 +18,7 @@ import { createPlatformAggregationTriggers } from './platformAggregation.js';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
 import { cairoDate, notifyMemberDevices, notifyWorkerAboutOrder, notifyWorkerAboutTask } from './pushNotifications.js';
 import { createGoogleDriveFunctions } from './googleDrive.js';
+import { createTransportationFunctions } from './transportation.js';
 
 initializeApp();
 // This back-office application has many small functions and modest traffic.
@@ -27,12 +28,14 @@ setGlobalOptions({ region: 'us-central1', maxInstances: 1, cpu: 'gcf_gen1' });
 const db = getFirestore();
 const auth = getAuth();
 const googleDriveFunctions = createGoogleDriveFunctions(db);
+const transportationFunctions = createTransportationFunctions(db);
 export const beginGoogleDriveConnection = googleDriveFunctions.beginGoogleDriveConnection;
 export const googleDriveOAuthCallback = googleDriveFunctions.googleDriveOAuthCallback;
 export const getGoogleDriveConnectionStatus = googleDriveFunctions.getGoogleDriveConnectionStatus;
 export const disconnectGoogleDrive = googleDriveFunctions.disconnectGoogleDrive;
 export const uploadOrderDesignImage = googleDriveFunctions.uploadOrderDesignImage;
 export const deleteOrderDesignImage = googleDriveFunctions.deleteOrderDesignImage;
+export const calculateTransportationRoute = transportationFunctions.calculateTransportationRoute;
 const platformDashboardService = new PlatformDashboardService({ db });
 const platformRebuildService = new PlatformRebuildService(db);
 const platformAggregationTriggers = createPlatformAggregationTriggers(db);
