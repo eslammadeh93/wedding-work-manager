@@ -14,8 +14,6 @@ import {
   Image as ImageIcon,
   Upload,
   ExternalLink,
-  Copy,
-  Check,
   MessageCircle,
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -31,6 +29,7 @@ import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { OrderSourceBadge } from './OrderSourceBadge';
 import { OrderAttachmentsSection, OrderCustomerSection, OrderExecutionLog, OrderFinancialSummary, OrderInventorySection, OrderPaymentHistory } from './OrderDetailSections';
+import { OrderImagePreviewModal } from './OrderImagePreviewModal';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -60,8 +59,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [editingPayment, setEditingPayment] = useState<PaymentEntry | null>(null);
   const [editedPaymentDate, setEditedPaymentDate] = useState('');
-  const [copiedLocation, setCopiedLocation] = useState(false);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [isLogging, setIsLogging] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
@@ -70,6 +67,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [logToast, setLogToast] = useState<string | null>(null);
   const [logToastIsError, setLogToastIsError] = useState(false);
   const [workerMovements, setWorkerMovements] = useState<WorkerMovement[]>([]);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const hasLoggedOpenRef = React.useRef<string | null>(null);
 
@@ -109,15 +107,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   }, [order]);
 
   if (!order) return null;
-
-  const handleCopyLink = (url: string, index: number) => {
-    if (!url) return;
-    navigator.clipboard.writeText(url);
-    setCopiedIndex(index);
-    setTimeout(() => {
-      setCopiedIndex(null);
-    }, 2000);
-  };
 
   const handleStatusChange = async (newStatus: OrderStatus) => {
     if (isUpdatingStatus) return;
@@ -330,21 +319,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   <MapPin className="w-5 h-5" />
                   <span>{t('openLocation')}</span>
                 </button>
-
-                {/* 4. Design Images */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const el = document.getElementById('design-images-section');
-                    if (el) {
-                      el.scrollIntoView({ behavior: 'smooth' });
-                    }
-                  }}
-                  className="p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
-                >
-                  <ImageIcon className="w-5 h-5" />
-                  <span>{t('designImageSection')}</span>
-                </button>
               </div>
             </div>
           ) : (
@@ -516,11 +490,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <MapPin className="w-4 h-4 text-amber-500" />
                 <span>{t('installationLocation')}</span>
               </span>
-              {order.locationLink?.trim() ? (
-                <p className="text-xs font-mono text-slate-600 dark:text-slate-300 mt-1 truncate max-w-md ltr:text-left rtl:text-right">
-                  {order.locationLink}
-                </p>
-              ) : (
+              {!order.locationLink?.trim() && (
                 <p className="text-xs text-slate-400 italic mt-1">
                   {t('noLocationAdded')}
                 </p>
@@ -539,22 +509,6 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 >
                   <MapPin className="w-4 h-4" />
                   <span>{t('openLocation')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = order.locationLink!.trim().startsWith('http')
-                      ? order.locationLink!.trim()
-                      : `https://${order.locationLink!.trim()}`;
-                    navigator.clipboard.writeText(url);
-                    setCopiedLocation(true);
-                    setTimeout(() => setCopiedLocation(false), 2000);
-                  }}
-                  className="px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Copy className="w-4 h-4" />
-                  <span>{copiedLocation ? t('copied') : t('copyLink')}</span>
                 </button>
               </div>
             )}
@@ -591,49 +545,21 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             ) : (
               <div className="space-y-2.5">
                 {imagesList.map((img, idx) => (
-                  <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-2.5 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <div className="flex-1 min-w-0">
-                      <span className="block text-[11px] text-slate-400 font-semibold mb-0.5">
-                        {t('designImageUrl')} {imagesList.length > 1 ? `#${idx + 1}` : ''}
-                      </span>
-                      <p className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate dir-ltr text-left">
-                        {img.url}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <div key={idx} className="flex flex-col items-center gap-2.5 rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+                    <div className="flex w-full items-center justify-center">
                       <button
                         type="button"
                         onClick={() => {
                           if (img.url && img.url.trim().length > 0) {
-                            const url = toSafeExternalUrl(img.url);
-                            if (url) window.open(url, '_blank');
+                            setPreviewImageUrl(img.url.trim());
                           } else {
                             alert(t('noLink'));
                           }
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-3 py-3 text-sm font-bold text-white shadow-2xs transition-colors hover:bg-amber-600"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>{t('openLink')}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleCopyLink(img.url, idx)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-800 text-slate-800 dark:text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                      >
-                        {copiedIndex === idx ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{t('copiedLink')}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>{t('copyLink')}</span>
-                          </>
-                        )}
                       </button>
                     </div>
                   </div>
@@ -674,7 +600,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </div>
           )}
 
-          <OrderAttachmentsSection order={order} />
+          {!isWorker && <OrderAttachmentsSection order={order} />}
           <OrderExecutionLog
             movements={workerMovements}
             isWorker={isWorker}
@@ -683,6 +609,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             hasCompleted={hasCompleted}
             onLog={handleLogActivity}
             formatTime={(value) => movementTime(value).toLocaleTimeString(language === 'ar' ? 'ar-EG' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+          />
+
+          <OrderImagePreviewModal
+            url={previewImageUrl}
+            onClose={() => setPreviewImageUrl(null)}
+            title={language === 'ar' ? 'معاينة صورة التصميم' : 'Design image preview'}
           />
 
         </div>

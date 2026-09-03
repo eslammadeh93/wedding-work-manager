@@ -8,6 +8,7 @@ import { localDateString } from '../../utils/localDate';
 import { sanitizePhoneInput, toInternationalPhoneDigits } from '../../utils/phone';
 import { recordedOrderPayment } from '../../utils/orderPayments';
 import { fileToBase64, googleDriveService } from '../../multiTenant/googleDriveService';
+import { OrderImagePreviewModal } from './OrderImagePreviewModal';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -269,6 +270,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingDesignImages, setUploadingDesignImages] = useState<Array<{ id: string; name: string; failed?: boolean }>>([]);
   const [deletingDesignImageId, setDeletingDesignImageId] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const designImageFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleUploadDesignImage = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1255,7 +1257,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       type="button"
                       onClick={() => {
                         if (item.url && item.url.trim().length > 0) {
-                          window.open(item.url.trim(), '_blank');
+                          setPreviewImageUrl(item.url.trim());
                         } else {
                           alert(t('noLink'));
                         }
@@ -1456,6 +1458,11 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           </div>
         </form>
       </div>
+      <OrderImagePreviewModal
+        url={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
+        title={language === 'ar' ? 'معاينة صورة التصميم' : 'Design image preview'}
+      />
     </div>
   );
 };
