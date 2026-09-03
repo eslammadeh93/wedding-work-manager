@@ -32,6 +32,10 @@ const sourceOf = (value: Order['orderSource']): CustomerSourceItem['source'] =>
 
 const eventDateOf = (order: Order) => order.eventDate || order.weddingDate || '';
 const directCostsOf = (order: Order) => completedOrderFulfillmentCosts(order) + Number(order.otherExpenses || 0);
+// This chart is a monthly order-profit forecast: it includes every expense
+// saved on an order, whether or not the event is completed yet.
+const comparisonOrderCostsOf = (order: Order) =>
+  Number(order.workerCost || 0) + Number(order.transportationCost || 0) + Number(order.otherExpenses || 0);
 
 /** Supplier service lines are the only explicit service classifications today.
  * Orders without one are reported as the company's standard equipment/setup service. */
@@ -55,7 +59,7 @@ export function buildMonthlyComparison(orders: Order[], expenses: Expense[], yea
       })
       .reduce((total, expense) => total + Number(expense.amount || 0), 0);
     const revenue = monthOrders.reduce((total, order) => total + Number(order.totalPrice || 0), 0);
-    const directCosts = monthOrders.reduce((total, order) => total + directCostsOf(order), 0);
+    const directCosts = monthOrders.reduce((total, order) => total + comparisonOrderCostsOf(order), 0);
     return { month, orderCount: monthOrders.length, revenue, directCosts, netProfit: revenue - directCosts, operatingExpenses };
   });
 }

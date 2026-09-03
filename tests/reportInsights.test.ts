@@ -12,6 +12,13 @@ test('builds monthly comparison using event-month revenue and recognised direct 
   assert.deepEqual(comparison[1], { month: 1, orderCount: 1, revenue: 1_000, directCosts: 175, netProfit: 825, operatingExpenses: 75 });
 });
 
+test('includes planned worker and transportation costs for uncompleted monthly orders', () => {
+  const comparison = buildMonthlyComparison([
+    order({ orderStatus: 'confirmed', workerCost: 100, transportationCost: 50, otherExpenses: 25 }),
+  ], [], 2026);
+  assert.deepEqual(comparison[1], { month: 1, orderCount: 1, revenue: 1_000, directCosts: 175, netProfit: 825, operatingExpenses: 0 });
+});
+
 test('allocates a multi-service order equally across explicit service types', () => {
   const services = buildServiceProfitability([order({ supplierRentals: [
     { id: 'a', supplierId: 'a', supplierName: 'A', serviceType: 'إضاءة', itemDescription: '' },
