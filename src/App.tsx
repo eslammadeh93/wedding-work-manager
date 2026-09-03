@@ -51,7 +51,7 @@ function UnauthorizedCompanyMembers() {
 }
 
 const tabPermission: Partial<Record<ActiveTab, Permission>> = {
-  dashboard: 'company:dashboard:read', calculator: 'company:calculator:manage', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
+  dashboard: 'company:dashboard:read', calculator: 'company:calculator:use', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
@@ -116,7 +116,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
       case 'dashboard':
         return 'لوحة التحكم';
       case 'calculator':
-        return 'حاسبة الأسعار';
+        return 'الحاسبات';
       case 'orders':
         return 'الطلبات';
       case 'workers':
@@ -155,7 +155,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
       case 'dashboard':
         return 'Dashboard';
       case 'calculator':
-        return 'Price Calculator';
+        return 'Calculators';
       case 'orders':
         return 'Orders';
       case 'workers':
