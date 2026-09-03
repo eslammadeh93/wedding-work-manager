@@ -22,6 +22,7 @@ import { Menu, Crown, Loader2 } from 'lucide-react';
 // heavy feature code out of the application's initial download.
 const DashboardModule = lazy(() => import('./components/dashboard/DashboardModule').then(({ DashboardModule }) => ({ default: DashboardModule })));
 const OrderCalculatorModule = lazy(() => import('./components/calculator/OrderCalculatorModule').then(({ OrderCalculatorModule }) => ({ default: OrderCalculatorModule })));
+const CalculatorSettingsModule = lazy(() => import('./components/calculator/CalculatorSettingsModule').then(({ CalculatorSettingsModule }) => ({ default: CalculatorSettingsModule })));
 const OrdersModule = lazy(() => import('./components/orders/OrdersModule').then(({ OrdersModule }) => ({ default: OrdersModule })));
 const WorkersModule = lazy(() => import('./components/workers/WorkersModule').then(({ WorkersModule }) => ({ default: WorkersModule })));
 const CustomersModule = lazy(() => import('./components/customers/CustomersModule').then(({ CustomersModule }) => ({ default: CustomersModule })));
@@ -51,7 +52,7 @@ function UnauthorizedCompanyMembers() {
 }
 
 const tabPermission: Partial<Record<ActiveTab, Permission>> = {
-  dashboard: 'company:dashboard:read', calculator: 'company:calculator:use', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
+  dashboard: 'company:dashboard:read', calculator: 'company:calculator:use', calculatorSettings: 'company:calculator:manage', orders: 'company:orders:read', customers: 'company:customers:read', suppliers: 'company:suppliers:read',
   inventory: 'company:inventory:read', expenses: 'company:expenses:read', workers: 'company:workers:read',
   calendar: 'company:calendar:read', reports: 'company:reports:read', activityLog: 'company:activity_logs:read',
   workerPerformance: 'company:worker_performance:read',
@@ -59,7 +60,7 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   settings: 'company:settings:read', members: 'company:members:read',
   recycleBin: 'company:settings:read',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'calculator', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'calculator', 'calculatorSettings', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -69,6 +70,7 @@ const isActiveTab = (value: string | null): value is ActiveTab => value !== null
 const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<typeof useAuth>['profile']>['role'][]>> = {
   dashboard: ['super_admin', 'admin', 'manager'],
   calculator: ['super_admin', 'admin', 'manager'],
+  calculatorSettings: ['super_admin', 'admin', 'manager'],
   orders: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
   workers: ['super_admin', 'admin', 'manager'],
   workerPerformance: ['super_admin', 'admin', 'manager', 'worker'],
@@ -117,6 +119,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'لوحة التحكم';
       case 'calculator':
         return 'الحاسبات';
+      case 'calculatorSettings':
+        return 'إعدادات الحاسبات';
       case 'orders':
         return 'الطلبات';
       case 'workers':
@@ -156,6 +160,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Dashboard';
       case 'calculator':
         return 'Calculators';
+      case 'calculatorSettings':
+        return 'Calculator Settings';
       case 'orders':
         return 'Orders';
       case 'workers':
@@ -414,6 +420,7 @@ function AppContent() {
           >
             {activeTab === 'dashboard' && <CompanyTabGuard tab="dashboard"><DashboardModule onNavigate={handleNavigate} onCreateOrder={handleCreateOrder} onOpenTodaysOrders={handleOpenTodaysOrders} onOpenWorkerMovements={handleOpenWorkerMovements} onOpenCalculator={handleOpenCalculator} /></CompanyTabGuard>}
             {activeTab === 'calculator' && <CompanyTabGuard tab="calculator"><OrderCalculatorModule onOpenCalculator={handleOpenCalculator} /></CompanyTabGuard>}
+            {activeTab === 'calculatorSettings' && <CompanyTabGuard tab="calculatorSettings"><CalculatorSettingsModule /></CompanyTabGuard>}
             {activeTab === 'orders' && <CompanyTabGuard tab="orders"><OrdersModule createOrderRequest={createOrderRequest} todaysOrdersRequest={todaysOrdersRequest} openOrderId={notificationOrderId} onOrderOpened={() => setNotificationOrderId(undefined)} /></CompanyTabGuard>}
             {activeTab === 'workers' && <CompanyTabGuard tab="workers"><WorkersModule /></CompanyTabGuard>}
             {activeTab === 'workerPerformance' && <CompanyTabGuard tab="workerPerformance"><WorkerPerformanceModule /></CompanyTabGuard>}

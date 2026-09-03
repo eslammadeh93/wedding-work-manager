@@ -29,6 +29,7 @@ import wwmLogo from '../assets/wwm-logo.png';
 export type ActiveTab =
   | 'dashboard'
   | 'calculator'
+  | 'calculatorSettings'
   | 'orders'
   | 'workers'
   | 'customers'
@@ -83,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const allNavItems: { id: ActiveTab; group: NavigationGroup; labelKey?: keyof typeof import('../i18n/translations').translations['en']; label?: string; icon: React.FC<{ className?: string }>; badge?: number; roles: ('super_admin' | 'admin' | 'manager' | 'employee' | 'worker')[]; permission?: Permission }[] = [
     { id: 'dashboard', group: 'workspace', labelKey: 'dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'manager'], permission: 'company:dashboard:read' },
     { id: 'calculator', group: 'workspace', label: language === 'ar' ? 'الحاسبات' : 'Calculators', icon: Calculator, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:calculator:use' },
+    { id: 'calculatorSettings', group: 'workspace', label: language === 'ar' ? 'إعدادات الحاسبات' : 'Calculator Settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:calculator:manage' },
     { id: 'orders', group: 'sales', labelKey: userRole === 'worker' ? 'myOrders' : 'orders', icon: ClipboardList, badge: pendingOrdersCount, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:orders:read' },
     { id: 'customers', group: 'sales', labelKey: 'customers', icon: Users, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:customers:read' },
     { id: 'calendar', group: 'sales', label: language === 'ar' ? 'تقويم التركيبات' : 'Installation Calendar', icon: CalendarDays, roles: ['super_admin', 'admin', 'manager', 'employee'], permission: 'company:calendar:read' },
