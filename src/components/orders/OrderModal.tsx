@@ -397,6 +397,14 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   }, [customers, customerPhone]);
 
   const googleDriveConnected = settings.googleDriveConnected === true;
+  // A reassignment must first revoke contact access from the previously
+  // assigned worker. The Firestore rule enforces this too; keeping it in the
+  // form prevents a user from turning the switch back on before saving.
+  const workerAssignmentChangePending = Boolean(
+    isEdit
+      && initialOrder
+      && workerId.trim() !== String(initialOrder.workerId || '').trim()
+  );
   const designUploadFolderUrl = React.useMemo(() => {
     try {
       const url = new URL(settings.designUploadFolderUrl || '');
@@ -591,7 +599,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       workerId: workerId.trim(),
       workerName: workerName.trim(),
       executorName: workerName.trim(),
-      workerCanContactCustomer: workerId.trim() ? workerCanContactCustomer : false,
+      workerCanContactCustomer: workerId.trim() && !workerAssignmentChangePending
+        ? workerCanContactCustomer
+        : false,
       totalPrice: Number(totalPrice),
       deposit: Number(deposit),
       securityDeposit: Number(securityDeposit) || 0,
@@ -817,7 +827,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 onSelectWorker={(wId, wName) => {
                   if (isEdit && wId !== workerId) {
                     setWorkerCanContactCustomer(false);
-                    window.alert('تغيير العامل المسند سيوقف صلاحية رؤية رقم العميلة والتواصل معها. يمكنك تفعيلها يدويًا للعامل الجديد بعد الحفظ.');
                   } else if (!wId) {
                     setWorkerCanContactCustomer(false);
                   }
@@ -839,13 +848,14 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                       role="switch"
                       aria-checked={workerCanContactCustomer}
                       aria-label="السماح للعامل برؤية رقم العميلة والتواصل معها"
-                      disabled={!workerId}
+                      disabled={!workerId || workerAssignmentChangePending}
                       onClick={() => setWorkerCanContactCustomer(value => !value)}
                       className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${workerCanContactCustomer ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
                     >
                       <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${workerCanContactCustomer ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </label>
+                  {workerAssignmentChangePending && <p className="mt-2 text-[11px] font-medium text-amber-700 dark:text-amber-300">احفظ تغيير العامل أولاً، ثم فعّل صلاحية التواصل للعامل الجديد إذا لزم.</p>}
                 </div>
               )}
             </div>

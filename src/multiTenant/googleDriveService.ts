@@ -5,7 +5,8 @@ type DriveCallableError = Error & { code?: string };
 
 const errorMessage = (error: unknown, fallback: string) => {
   const code = String((error as DriveCallableError)?.code || '');
-  if (code.includes('permission-denied')) return 'ليس لديك صلاحية لتنفيذ هذه العملية.';
+  const serverMessage = (error as Error)?.message?.trim();
+  if (code.includes('permission-denied')) return serverMessage || 'ليس لديك صلاحية لتنفيذ هذه العملية.';
   if (code.includes('unauthenticated')) return 'انتهت جلسة تسجيل الدخول. سجّل الدخول مرة أخرى.';
   if (code.includes('failed-precondition')) return (error as Error)?.message || 'أكمل ربط Google Drive من الإعدادات أولًا.';
   return (error as Error)?.message || fallback;

@@ -216,7 +216,16 @@ export const createGoogleDriveFunctions = (db: FirebaseFirestore.Firestore) => {
       const fileRef = db.collection(connectionCollection).doc(companyId).collection(uploadedFileCollection).doc(fileId);
       const trackedFile = await fileRef.get();
       if (!trackedFile.exists || trackedFile.data()?.folderId !== folderId) {
-        throw new HttpsError('permission-denied', 'لا يمكن حذف إلا الصور التي رفعها البرنامج إلى فولدر هذه الشركة.');
+        // Files uploaded before the tracking collection was introduced are
+        // still safe to delete when Drive confirms that they belong to this
+        // company's connected folder.  Never trust the file ID alone.
+        const metadataResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,parents`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const metadata = await metadataResponse.json() as { id?: string; parents?: string[] };
+        if (!metadataResponse.ok || !metadata.id || !Array.isArray(metadata.parents) || !metadata.parents.includes(folderId)) {
+          throw new HttpsError('permission-denied', 'لا يمكن حذف هذه الصورة لأنها ليست داخل فولدر Google Drive الخاص بالشركة.');
+        }
       }
       const driveResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed`, {
         method: 'PATCH',
