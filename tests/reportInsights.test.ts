@@ -28,7 +28,7 @@ test('groups revenue and actual collections by customer source', () => {
 
 test('matches the safe cash rules by source, including retained deposits and future-order advances', () => {
   const orders = [
-    order({ id: 'completed', orderSource: 'organic', totalPaid: 1_000, workerCost: 200 }),
+    order({ id: 'completed', orderSource: 'organic', totalPaid: 1_000, workerCost: 200, paymentHistory: [{ id: 'settlement', amount: 1_000, date: '2026-02-12', method: 'cash', type: 'settlement' }] }),
     order({
       id: 'retained', orderSource: 'campaign', orderStatus: 'cancelled_deposit_retained', totalPrice: 3_000, totalPaid: 700,
       bookingDate: '2026-02-05', eventDate: '2026-02-10', weddingDate: '2026-02-10',

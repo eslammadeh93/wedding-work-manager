@@ -38,7 +38,7 @@ test('uses booking date for legacy payments without history', () => {
   assert.equal(result.advancesFromUpcomingOrders, 500);
 });
 
-test('records an upcoming order other expense in its booking month', () => {
+test('records an upcoming order other expense in its execution month, not its booking month', () => {
   const futureCollectionOrder = order({
     id: 'future-collection', bookingDate: '2026-07-22', createdAt: '2026-07-22', totalPaid: 400, otherExpenses: 100,
     paymentHistory: [{ id: 'august-payment', amount: 400, date: '2026-08-10', method: 'cash' }],
@@ -47,9 +47,9 @@ test('records an upcoming order other expense in its booking month', () => {
   const july = calculateMonthlyCash([futureCollectionOrder], [], 2026, 6);
   const august = calculateMonthlyCash([futureCollectionOrder], [], 2026, 7);
 
-  assert.equal(july.upcomingOrderOtherExpenses, 100);
-  assert.equal(july.orderCashBalanceToDate, -100);
-  assert.equal(august.upcomingOrderOtherExpenses, 0);
+  assert.equal(july.upcomingOrderOtherExpenses, 0);
+  assert.equal(july.orderCashBalanceToDate, 0);
+  assert.equal(august.upcomingOrderOtherExpenses, 100);
   assert.equal(august.orderCashBalanceToDate, 300);
 });
 
@@ -143,6 +143,28 @@ test('keeps a future order deposit in its booking month after the order is later
   assert.equal(result.netMonthlyOrderProfit, 1_000);
 });
 
+test('does not count an old deposit again when its order is completed in a later month', () => {
+  const completedLater = order({
+    id: 'completed-later', orderNumber: 'ORD-OLD-DEPOSIT', bookingDate: '2026-08-29', createdAt: '2026-08-29',
+    eventDate: '2026-09-02', weddingDate: '2026-09-02', orderStatus: 'completed',
+    totalPrice: 2_800, totalPaid: 2_800, workerCost: 1_000, transportationCost: 500,
+    paymentHistory: [
+      { id: 'deposit', amount: 1_000, date: '2026-08-29', method: 'cash', type: 'deposit' },
+      { id: 'settlement', amount: 1_800, date: '2026-09-02', method: 'cash', type: 'settlement' },
+    ],
+  });
+
+  const september = calculateMonthlyCash([completedLater], [], 2026, 8);
+
+  assert.equal(september.collectedFromCompletedOrders, 1_800);
+  assert.equal(september.completedOrdersNetProfit, 300); // 1,800 collected in September - 1,500 execution costs
+  assert.equal(september.netMonthlyCash, 300);
+  assert.deepEqual(september.netMonthlyCashBreakdown, [{
+    id: 'completed-later-completed', orderId: 'completed-later', orderNumber: 'ORD-OLD-DEPOSIT', customerName: 'Ø¹Ù…ÙŠÙ„',
+    kind: 'completed-order', amount: 300, collectedThisMonth: 1_800, completedOrderCosts: 1_500,
+  }]);
+});
+
 test('calculates the current safe balance from collections, capital, and recognised costs only', () => {
   const orders = [
     order({ id: 'completed', orderStatus: 'completed', eventDate: '2026-08-20', weddingDate: '2026-08-20', totalPaid: 1_000, paymentHistory: [{ id: 'paid', amount: 1_000, date: '2026-08-15', method: 'cash' }], workerCost: 200, transportationCost: 50, otherExpenses: 25 }),
@@ -153,6 +175,6 @@ test('calculates the current safe balance from collections, capital, and recogni
     { id: 'expense', type: 'expense' as const, category: 'إيجار', amount: 100, date: '2026-08-12', createdAt: '' },
   ];
 
-  assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 10)), 625);
+  assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 10)), 600);
   assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 31)), 1_250);
 });

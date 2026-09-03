@@ -16,8 +16,26 @@ export interface CashCollection {
   isLegacyEstimate?: boolean;
 }
 
+export type NetMonthlyCashBreakdownKind = 'completed-order' | 'upcoming-advance' | 'retained-deposit' | 'upcoming-expense';
+
+/** A single order's signed contribution to the selected month's net order cash. */
+export interface NetMonthlyCashBreakdownItem {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  kind: NetMonthlyCashBreakdownKind;
+  /** The signed amount included in the month's final total. */
+  amount: number;
+  /** Present for completed orders to show that only this month's collections count. */
+  collectedThisMonth?: number;
+  /** Present for completed orders; these costs are recognized in the execution month. */
+  completedOrderCosts?: number;
+}
+
 export interface MonthlyCashSummary {
   collections: CashCollection[];
+  netMonthlyCashBreakdown: NetMonthlyCashBreakdownItem[];
   collectedFromCompletedOrders: number;
   advancesFromUpcomingOrders: number;
   /** Payments retained from bookings cancelled with a non-refundable deposit. */
@@ -25,7 +43,7 @@ export interface MonthlyCashSummary {
   capitalAdded: number;
   operatingExpenses: number;
   completedOrderCosts: number;
-  /** Other expenses entered for orders booked this month but not completed yet. */
+  /** Other expenses recognized in this month's execution window for orders not completed yet. */
   upcomingOrderOtherExpenses: number;
   /** Money collected for completed orders less every direct cost on those orders. */
   completedOrdersNetProfit: number;
@@ -33,7 +51,7 @@ export interface MonthlyCashSummary {
   completedOrdersNetProfitWithRetainedDeposits: number;
   /** Upcoming-order advances after subtracting only their recorded other expenses. */
   upcomingOrderAdvancesNet: number;
-  /** Booking deposits for orders not yet completed, after their booking expenses. */
+  /** Booking deposits for orders not yet completed, after execution-month other expenses. */
   upcomingOrderDepositsNet: number;
   /** Booking deposits received this month for orders that are not yet completed. */
   upcomingOrderDepositsPaid: number;
@@ -45,11 +63,11 @@ export interface MonthlyCashSummary {
   totalSettlementPayments: number;
   /** Outstanding order balances expected in the selected month, by execution date. */
   expectedSettlementPayments: number;
-  /** Other expenses belonging to orders booked in the selected month. */
+  /** Other expenses belonging to orders scheduled for execution in the selected month. */
   bookedOrderOtherExpenses: number;
   /** Worker and transportation costs for orders completed in the selected month. */
   completedWorkerTransportCosts: number;
-  /** Other expenses for not-yet-completed orders booked in the selected month. */
+  /** Other expenses for not-yet-completed orders scheduled for execution in the selected month. */
   totalMonthlyOrderExpenses: number;
   /**
    * Completed-order net profit + advances from uncompleted orders + retained
@@ -96,7 +114,7 @@ export const calculateSafeBalanceToDate = (
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
   const upcomingOrderOtherExpenses = orders
     .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
-      && isOnOrBefore(dateKey(order.bookingDate || order.createdAt)))
+      && isOnOrBefore(dateKey(order.eventDate || order.weddingDate)))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
 
   return collected + capital - operatingExpenses - completedOrderCosts - upcomingOrderOtherExpenses;
@@ -250,15 +268,15 @@ export const calculateMonthlyCash = (
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order), 0);
 
   const bookedOrderOtherExpenses = orders
-    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
 
   // Before fulfillment, only the "other expenses" field is treated as spent.
   // Worker and transport costs remain pending until the order is completed.
-  // Other expenses belong to the booking month, even when an advance arrives
-  // in a later month.
+  // Other expenses are recognized in the scheduled execution month, rather
+  // than the booking month, because they have not been spent yet at booking.
   const upcomingOrderOtherExpenses = orders
-    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
   // The report's "total expenses" card is deliberately limited to upcoming
   // orders. Worker and transport costs remain represented by completed-order
@@ -268,9 +286,10 @@ export const calculateMonthlyCash = (
   // A completed order contributes its actual collected amount less every
   // direct cost. Its booking expenses must never be deducted a second time
   // from the headline cash result just because the booking was made this month.
-  const completedOrdersRevenue = orders
-    .filter((order) => order.orderStatus === 'completed' && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
-    .reduce((total, order) => total + recordedOrderPayment(order), 0);
+  // The completion month receives only payments actually collected during that
+  // month. A deposit recorded in an earlier month has already affected that
+  // earlier month's cash and must never be counted again on completion.
+  const completedOrdersRevenue = collectedFromCompletedOrders;
   const completedOrdersNetProfit = completedOrdersRevenue - completedOrderCosts;
   const netMonthlyCash = completedOrdersNetProfit
     + advancesFromUpcomingOrders
@@ -312,15 +331,61 @@ export const calculateMonthlyCash = (
   const completedCostsToDate = orders
     .filter((order) => order.orderStatus === 'completed' && onOrBeforeMonthEnd(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
-  // Other expenses are recorded in the booking month, so they remain deducted
-  // from the safe in every later month while the order is not completed.
+  // Other expenses become an outflow on the scheduled execution date. They
+  // must not reduce the safe while the event is still in a future month.
   const upcomingOrderOtherExpensesToDate = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && onOrBeforeMonthEnd(dateKey(order.bookingDate || order.createdAt), year, month))
+    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && onOrBeforeMonthEnd(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
   const orderCashBalanceToDate = collectedToDate - completedCostsToDate - upcomingOrderOtherExpensesToDate;
 
+  const netMonthlyCashBreakdown: NetMonthlyCashBreakdownItem[] = [
+    ...orders
+      .filter((order) => order.orderStatus === 'completed' && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
+      .map((order) => {
+        const collectedThisMonth = sum(collections.filter((collection) => collection.orderId === order.id));
+        const orderCosts = completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses);
+        return {
+          id: `${order.id}-completed`,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          kind: 'completed-order' as const,
+          amount: collectedThisMonth - orderCosts,
+          collectedThisMonth,
+          completedOrderCosts: orderCosts,
+        };
+      }),
+    ...orders
+      .filter((order) => isUpcomingForSelectedMonth(order))
+      .map((order) => {
+        const amount = sum(collections.filter((collection) => collection.orderId === order.id && !collection.isRetainedDeposit));
+        return amount > 0 ? {
+          id: `${order.id}-advance`, orderId: order.id, orderNumber: order.orderNumber, customerName: order.customerName,
+          kind: 'upcoming-advance' as const, amount,
+        } : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null),
+    ...orders
+      .filter((order) => order.orderStatus === 'cancelled_deposit_retained')
+      .map((order) => {
+        const amount = sum(collections.filter((collection) => collection.orderId === order.id && collection.isRetainedDeposit));
+        return amount > 0 ? {
+          id: `${order.id}-retained`, orderId: order.id, orderNumber: order.orderNumber, customerName: order.customerName,
+          kind: 'retained-deposit' as const, amount,
+        } : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null),
+    ...orders
+      .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month) && positiveAmount(order.otherExpenses) > 0)
+      .map((order) => ({
+        id: `${order.id}-expense`, orderId: order.id, orderNumber: order.orderNumber, customerName: order.customerName,
+        kind: 'upcoming-expense' as const, amount: -positiveAmount(order.otherExpenses),
+      })),
+  ];
+
   return {
     collections,
+    netMonthlyCashBreakdown,
     collectedFromCompletedOrders,
     advancesFromUpcomingOrders,
     retainedCancelledDeposits,

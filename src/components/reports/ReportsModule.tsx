@@ -16,6 +16,9 @@ import {
   RefreshCw,
   ShieldCheck,
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  X,
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -24,7 +27,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
-import { calculateMonthlyCash } from '../../utils/monthlyCash';
+import { calculateMonthlyCash, orderCashCollections } from '../../utils/monthlyCash';
 import { reconcileMonthlyCash } from '../../utils/monthlyCashReconciliation';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
@@ -33,6 +36,71 @@ import { buildCustomerSourceBreakdown, buildMonthlySourceCashNet, buildMonthlyCo
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
+
+type CashCardKey = 'income' | 'completedProfit' | 'retainedDeposits' | 'upcomingDeposits' | 'upcomingDepositsNet' | 'upcomingExpenses' | 'otherExpenses' | 'expectedSettlements' | 'expectedProfit';
+
+interface CashCardDetailItem {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  type: 'deposit' | 'settlement' | 'completed-profit' | 'retained-deposit' | 'upcoming-expense' | 'expected-settlement' | 'expected-profit';
+  amount: number;
+  collectedThisMonth?: number;
+  costs?: number;
+}
+
+const cashDetailTypeLabel = (type: CashCardDetailItem['type'], language: 'ar' | 'en') => {
+  const labels = {
+    deposit: language === 'ar' ? 'عربون / مقدم' : 'Deposit / advance',
+    settlement: language === 'ar' ? 'دفعة سداد' : 'Settlement payment',
+    'completed-profit': language === 'ar' ? 'أوردر مكتمل بعد التكاليف' : 'Completed order after costs',
+    'retained-deposit': language === 'ar' ? 'عربون محتفَظ به' : 'Retained deposit',
+    'upcoming-expense': language === 'ar' ? 'مصروف أوردر غير مكتمل' : 'Uncompleted-order expense',
+    'expected-settlement': language === 'ar' ? 'دفعة سداد متوقعة' : 'Expected settlement',
+    'expected-profit': language === 'ar' ? 'ربح متوقع من الأوردر' : 'Expected order profit',
+  } as const;
+  return labels[type];
+};
+
+const CashCardDetailsModal: React.FC<{
+  title: string;
+  total: number;
+  items: CashCardDetailItem[];
+  language: 'ar' | 'en';
+  onClose: () => void;
+}> = ({ title, total, items, language, onClose }) => (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <section role="dialog" aria-modal="true" aria-label={title} dir={language === 'ar' ? 'rtl' : 'ltr'} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl dark:bg-slate-900" onMouseDown={(event) => event.stopPropagation()}>
+      <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div>
+          <h2 className="text-lg font-black text-slate-900 dark:text-white">{title}</h2>
+          <p className="mt-1 text-xs text-slate-500">{language === 'ar' ? 'تفاصيل كل أوردر داخل في هذا الرقم.' : 'Every order included in this amount.'}</p>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800" aria-label={language === 'ar' ? 'إغلاق' : 'Close'}><X className="h-5 w-5" /></button>
+      </header>
+      <div className="space-y-3 p-5">
+        {items.length === 0 ? <p className="rounded-2xl bg-slate-50 p-8 text-center text-sm text-slate-500 dark:bg-white/[0.05]">{language === 'ar' ? 'لا توجد أوردرات أو دفعات داخلة في هذا الرقم.' : 'No orders or payments are included in this amount.'}</p> : items.map((item) => {
+          const isDeduction = item.amount < 0;
+          return <div key={item.id} className="flex items-start justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+            <div className="min-w-0">
+              <p className="font-black text-slate-900 dark:text-white">{item.orderNumber} <span className="font-normal text-slate-500">— {item.customerName}</span></p>
+              <span className="mt-2 inline-flex rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{cashDetailTypeLabel(item.type, language)}</span>
+              {item.collectedThisMonth !== undefined && <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                {language === 'ar' ? 'تحصيل هذا الشهر: ' : 'Collected this month: '}<MoneyValue amount={item.collectedThisMonth} fit={false} className="font-black" />
+                <span className="mx-1.5">−</span>{language === 'ar' ? 'تكاليف التنفيذ: ' : 'Execution costs: '}<MoneyValue amount={item.costs || 0} fit={false} className="font-black" />
+              </p>}
+            </div>
+            <MoneyValue amount={Math.abs(item.amount)} prefix={isDeduction ? '-' : '+'} className={`shrink-0 text-lg font-black ${isDeduction ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-300'}`} />
+          </div>;
+        })}
+      </div>
+      <footer className="sticky bottom-0 flex items-center justify-between gap-4 border-t border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <span className="font-black text-slate-900 dark:text-white">{language === 'ar' ? 'إجمالي البطاقة' : 'Card total'}</span>
+        <MoneyValue amount={total} className={`text-xl font-black ${total >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`} />
+      </footer>
+    </section>
+  </div>
+);
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
@@ -46,6 +114,8 @@ export const ReportsModule: React.FC = () => {
   const [isLoadingReportData, setIsLoadingReportData] = useState(false);
   const [reportDataError, setReportDataError] = useState<string | null>(null);
   const [showCashReview, setShowCashReview] = useState(false);
+  const [showNetCashBreakdown, setShowNetCashBreakdown] = useState(false);
+  const [selectedCashCard, setSelectedCashCard] = useState<CashCardKey | null>(null);
 
   const companyId = useMemo(() => {
     if (isDemo || !authSession || profile?.role === 'worker') return null;
@@ -141,6 +211,68 @@ export const ReportsModule: React.FC = () => {
     return buildCustomerSourceBreakdown(reportOrders).map((item) => ({ ...item, netProfit: sourceCashNet[item.source] }));
   }, [reportOrders, selectedMonth, selectedYear, sourceOrders]);
   const comparisonMax = Math.max(...monthlyComparison.map((item) => Math.max(item.revenue, item.directCosts, Math.abs(item.netProfit))), 1);
+  const cashCardDetails = useMemo(() => {
+    const monthPrefix = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-`;
+    const monthEnd = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-31`;
+    const inSelectedMonth = (date?: string) => Boolean(date?.startsWith(monthPrefix));
+    const amount = (value: number | undefined) => Math.max(0, Number(value) || 0);
+    const orderById = new Map(sourceOrders.map((order) => [order.id, order]));
+    const isCompletedThisMonth = (order: typeof sourceOrders[number]) => order.orderStatus === 'completed' && inSelectedMonth(order.eventDate || order.weddingDate);
+    const isUpcoming = (order: typeof sourceOrders[number]) => order.orderStatus !== 'cancelled'
+      && order.orderStatus !== 'cancelled_deposit_retained' && !isCompletedThisMonth(order);
+    const collectionDetail = (collection: typeof cashSummary.collections[number]): CashCardDetailItem => ({
+      id: collection.id,
+      orderNumber: collection.orderNumber,
+      customerName: collection.customerName,
+      type: collection.isRetainedDeposit ? 'retained-deposit' : collection.paymentType === 'deposit' ? 'deposit' : 'settlement',
+      amount: collection.amount,
+    });
+    const upcomingDepositCollections = cashSummary.collections.filter((collection) => {
+      const order = orderById.get(collection.orderId);
+      return Boolean(order && isUpcoming(order) && !collection.isRetainedDeposit && collection.paymentType === 'deposit');
+    });
+    const upcomingExpenseItems = cashSummary.netMonthlyCashBreakdown
+      .filter((item) => item.kind === 'upcoming-expense')
+      .map((item) => ({ id: item.id, orderNumber: item.orderNumber, customerName: item.customerName, type: 'upcoming-expense' as const, amount: item.amount }));
+    const expectedSettlements = sourceOrders
+      .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inSelectedMonth(order.eventDate || order.weddingDate))
+      .map((order) => ({
+        id: `${order.id}-expected-settlement`, orderNumber: order.orderNumber, customerName: order.customerName,
+        type: 'expected-settlement' as const, amount: Math.max(0, amount(order.totalPrice) - recordedOrderPayment(order)),
+      }))
+      .filter((item) => item.amount > 0);
+    const expectedProfitItems = [
+      ...sourceOrders
+        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inSelectedMonth(order.eventDate || order.weddingDate))
+        .map((order) => ({
+          id: `${order.id}-expected-profit`, orderNumber: order.orderNumber, customerName: order.customerName,
+          type: 'expected-profit' as const, amount: amount(order.totalPrice) - amount(order.otherExpenses) - amount(order.workerCost) - amount(order.transportationCost),
+        })),
+      ...cashSummary.collections
+        .filter((collection) => collection.isRetainedDeposit)
+        .map((collection) => ({ ...collectionDetail(collection), id: `${collection.id}-expected-profit` })),
+      ...sourceOrders
+        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
+          && inSelectedMonth(order.bookingDate || order.createdAt) && (order.eventDate || order.weddingDate || '') > monthEnd)
+        .flatMap((order) => orderCashCollections(order)
+          .filter((collection) => inSelectedMonth(collection.date) && collection.paymentType === 'deposit')
+          .map((collection) => ({ ...collectionDetail(collection), id: `${collection.id}-future-profit` }))),
+    ];
+
+    return {
+      income: cashSummary.collections.map(collectionDetail),
+      completedProfit: cashSummary.netMonthlyCashBreakdown
+        .filter((item) => item.kind === 'completed-order')
+        .map((item) => ({ id: item.id, orderNumber: item.orderNumber, customerName: item.customerName, type: 'completed-profit' as const, amount: item.amount, collectedThisMonth: item.collectedThisMonth, costs: item.completedOrderCosts })),
+      retainedDeposits: cashSummary.collections.filter((collection) => collection.isRetainedDeposit).map(collectionDetail),
+      upcomingDeposits: upcomingDepositCollections.map(collectionDetail),
+      upcomingDepositsNet: [...upcomingDepositCollections.map(collectionDetail), ...upcomingExpenseItems],
+      upcomingExpenses: upcomingExpenseItems,
+      otherExpenses: upcomingExpenseItems,
+      expectedSettlements,
+      expectedProfit: expectedProfitItems,
+    } satisfies Record<CashCardKey, CashCardDetailItem[]>;
+  }, [cashSummary, selectedMonth, selectedYear, sourceOrders]);
 
   // Top Rented Inventory Items count
   const itemUsageMap: Record<string, number> = {};
@@ -155,6 +287,19 @@ export const ReportsModule: React.FC = () => {
   const topRentedItems = Object.entries(itemUsageMap)
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
+
+  const cashCards = [
+    { key: 'income' as const, label: language === 'ar' ? 'إجمالي الدخل هذا الشهر' : 'Total income this month', value: cashSummary.grossMonthlyIncome, color: 'text-emerald-700 dark:text-emerald-400' },
+    { key: 'completedProfit' as const, label: language === 'ar' ? 'صافي ربح الأوردرات المكتملة' : 'Completed order net profit', value: cashSummary.completedOrdersNetProfit, color: cashSummary.completedOrdersNetProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
+    { key: 'retainedDeposits' as const, label: language === 'ar' ? 'عربونات أوردرات ملغاة محتفَظ بها' : 'Retained deposits from cancelled orders', value: cashSummary.retainedCancelledDeposits, color: 'text-violet-700 dark:text-violet-300' },
+    { key: 'upcomingDeposits' as const, label: language === 'ar' ? 'إجمالي مقدمات الأوردرات غير المكتملة' : 'Total deposits for uncompleted orders', value: cashSummary.upcomingOrderDepositsPaid, color: 'text-cyan-700 dark:text-cyan-400' },
+    { key: 'upcomingDepositsNet' as const, label: language === 'ar' ? 'صافي عربونات الأوردرات غير المكتملة بعد المصاريف الأخرى' : 'Uncompleted order deposits after other expenses', value: cashSummary.upcomingOrderDepositsNet, color: cashSummary.upcomingOrderDepositsNet >= 0 ? 'text-cyan-700 dark:text-cyan-400' : 'text-rose-700 dark:text-rose-400' },
+    { key: 'upcomingExpenses' as const, label: language === 'ar' ? 'إجمالي مصاريف الأوردرات غير المكتملة' : 'Total upcoming-order expenses', value: cashSummary.totalMonthlyOrderExpenses, color: 'text-rose-700 dark:text-rose-400' },
+    { key: 'otherExpenses' as const, label: language === 'ar' ? 'إجمالي المصاريف الأخرى فقط' : 'Total other expenses only', value: cashSummary.bookedOrderOtherExpenses, color: 'text-orange-700 dark:text-orange-400' },
+    { key: 'expectedSettlements' as const, label: language === 'ar' ? 'إجمالي دفعات السداد المنتظرة' : 'Expected settlement payments', value: cashSummary.expectedSettlementPayments, color: 'text-violet-700 dark:text-violet-300' },
+    { key: 'expectedProfit' as const, label: language === 'ar' ? 'الربح المتوقع خلال الشهر' : 'Expected profit by month end', value: cashSummary.netMonthlyOrderProfit, color: cashSummary.netMonthlyOrderProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
+  ];
+  const activeCashCard = selectedCashCard ? cashCards.find((card) => card.key === selectedCashCard) : null;
 
   // PDF Export Function
   const handleExportPdf = () => {
@@ -320,7 +465,7 @@ export const ReportsModule: React.FC = () => {
 
           <select
             value={selectedMonth}
-            onChange={(e) => { setSelectedMonth(Number(e.target.value)); setShowCashReview(false); }}
+            onChange={(e) => { setSelectedMonth(Number(e.target.value)); setShowCashReview(false); setSelectedCashCard(null); }}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
           >
             {Array.from({ length: 12 }).map((_, i) => (
@@ -334,7 +479,7 @@ export const ReportsModule: React.FC = () => {
 
           <select
             value={selectedYear}
-            onChange={(e) => { setSelectedYear(Number(e.target.value)); setShowCashReview(false); }}
+            onChange={(e) => { setSelectedYear(Number(e.target.value)); setShowCashReview(false); setSelectedCashCard(null); }}
             className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
           >
             {availableYears.map((y) => (
@@ -474,30 +619,75 @@ export const ReportsModule: React.FC = () => {
         </div>}
 
         {/* The headline mirrors the operational cash formula shown to the user. */}
-        <div className={`p-6 md:p-7 rounded-2xl border ${cashSummary.netMonthlyCash >= 0 ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-rose-500/10 border-rose-400/30'} flex flex-col items-center text-center md:flex-row md:items-center md:text-right justify-between gap-4`}>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={showNetCashBreakdown}
+          onClick={() => setShowNetCashBreakdown((isOpen) => !isOpen)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setShowNetCashBreakdown((isOpen) => !isOpen);
+            }
+          }}
+          className={`relative cursor-pointer p-6 md:p-7 rounded-2xl border transition-colors hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-amber-400/70 ${cashSummary.netMonthlyCash >= 0 ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-rose-500/10 border-rose-400/30'} flex flex-col items-center text-center md:flex-row md:items-center md:text-right justify-between gap-4`}
+        >
           <div className="w-full md:w-auto">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white"><WalletCards className="w-5 h-5 text-amber-600 dark:text-amber-300" />{language === 'ar' ? `صافي فلوس الأوردرات لشهر ${selectedMonthName}` : `Net order cash for ${selectedMonthName}`}</div>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{language === 'ar' ? 'صافي ربح الأوردرات المكتملة + عربونات الأوردرات غير المكتملة + العربونات المحتفظ بها − المصاريف الأخرى للأوردرات غير المكتملة فقط.' : 'Completed-order net profit + uncompleted-order advances + retained deposits − other expenses for uncompleted orders only.'}</p>
           </div>
           <MoneyValue amount={cashSummary.netMonthlyCash} className={`self-center max-w-full text-[clamp(1.875rem,9vw,3rem)] font-black tracking-tight ${cashSummary.netMonthlyCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`} />
+          <span className="absolute bottom-3 end-5 inline-flex items-center gap-1 text-[11px] font-black text-slate-600 dark:text-slate-300">
+            {showNetCashBreakdown ? (language === 'ar' ? '\u0625\u062E\u0641\u0627\u0621 \u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644' : 'Hide breakdown') : (language === 'ar' ? '\u0627\u0636\u063A\u0637 \u0644\u0639\u0631\u0636 \u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644' : 'View breakdown')}
+            {showNetCashBreakdown ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
         </div>
 
+        {showNetCashBreakdown && <div className="-mt-3 rounded-b-2xl border border-t-0 border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-xs font-black text-slate-900 dark:text-white">{language === 'ar' ? '\u062A\u0641\u0627\u0635\u064A\u0644 \u062A\u0643\u0648\u064A\u0646 \u0635\u0627\u0641\u064A \u0627\u0644\u0641\u0644\u0648\u0633' : 'Net cash breakdown'}</p>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500">
+              {language === 'ar' ? '\u0627\u0636\u063A\u0637 \u0639\u0644\u0649 \u0627\u0644\u0645\u0631\u0628\u0639 \u0644\u0625\u062E\u0641\u0627\u0621 \u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644' : 'Click the card to hide details'}
+              <ChevronUp className="h-3.5 w-3.5" />
+            </span>
+          </div>
+          <div className="space-y-2 text-xs">
+            {cashSummary.netMonthlyCashBreakdown.length === 0 ? <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-slate-500 dark:bg-white/[0.05]">{language === 'ar' ? '\u0644\u0627 \u062A\u0648\u062C\u062F \u062D\u0631\u0643\u0629 \u0645\u0627\u0644\u064A\u0629 \u0644\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0641\u064A \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631.' : 'No order cash activity this month.'}</p> : cashSummary.netMonthlyCashBreakdown.map((item) => {
+              const isDeduction = item.amount < 0;
+              const typeLabel = item.kind === 'completed-order'
+                ? (language === 'ar' ? '\u0623\u0648\u0631\u062F\u0631 \u0645\u0643\u062A\u0645\u0644' : 'Completed order')
+                : item.kind === 'upcoming-advance'
+                  ? (language === 'ar' ? '\u0639\u0631\u0628\u0648\u0646 \u0623\u0648\u0631\u062F\u0631 \u0642\u0627\u062F\u0645' : 'Upcoming-order advance')
+                  : item.kind === 'retained-deposit'
+                    ? (language === 'ar' ? '\u0639\u0631\u0628\u0648\u0646 \u0645\u062D\u062A\u0641\u0638 \u0628\u0647' : 'Retained deposit')
+                    : (language === 'ar' ? '\u0645\u0635\u0631\u0648\u0641 \u0623\u0648\u0631\u062F\u0631 \u0642\u0627\u062F\u0645' : 'Upcoming-order expense');
+
+              return <div key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-slate-50 px-3 py-3 dark:bg-white/[0.05]">
+                <div className="min-w-0">
+                  <p className="font-black text-slate-900 dark:text-white">{item.orderNumber} <span className="font-normal text-slate-500">— {item.customerName}</span></p>
+                  <p className="mt-1 text-[11px] font-bold text-slate-500">{typeLabel}</p>
+                  {item.kind === 'completed-order' && <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                    {language === 'ar' ? '\u062A\u062D\u0635\u064A\u0644 \u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631: ' : 'Collected this month: '}<MoneyValue amount={item.collectedThisMonth || 0} className="font-black" fit={false} />
+                    <span className="mx-1.5">−</span>{language === 'ar' ? '\u062A\u0643\u0627\u0644\u064A\u0641 \u0627\u0644\u062A\u0646\u0641\u064A\u0630: ' : 'Execution costs: '}<MoneyValue amount={item.completedOrderCosts || 0} className="font-black" fit={false} />
+                  </p>}
+                </div>
+                <MoneyValue amount={Math.abs(item.amount)} prefix={isDeduction ? '-' : '+'} className={`shrink-0 font-black ${isDeduction ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-300'}`} />
+              </div>;
+            })}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-4 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+            <span className="font-black text-slate-900 dark:text-white">{language === 'ar' ? '\u0627\u0644\u0646\u0627\u062A\u062C \u0627\u0644\u0646\u0647\u0627\u0626\u064A' : 'Final total'}</span>
+            <MoneyValue amount={cashSummary.netMonthlyCash} className={`font-black ${cashSummary.netMonthlyCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`} />
+          </div>
+        </div>}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {[ 
-            { label: language === 'ar' ? 'إجمالي الدخل هذا الشهر' : 'Total income this month', value: cashSummary.grossMonthlyIncome, color: 'text-emerald-700 dark:text-emerald-400' },
-            { label: language === 'ar' ? 'صافي ربح الأوردرات المكتملة' : 'Completed order net profit', value: cashSummary.completedOrdersNetProfit, color: cashSummary.completedOrdersNetProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
-            { label: language === 'ar' ? 'عربونات أوردرات ملغاة محتفَظ بها' : 'Retained deposits from cancelled orders', value: cashSummary.retainedCancelledDeposits, color: 'text-violet-700 dark:text-violet-300' },
-            { label: language === 'ar' ? 'إجمالي مقدمات الأوردرات غير المكتملة' : 'Total deposits for uncompleted orders', value: cashSummary.upcomingOrderDepositsPaid, color: 'text-cyan-700 dark:text-cyan-400' },
-            { label: language === 'ar' ? 'صافي عربونات الأوردرات غير المكتملة بعد المصاريف الأخرى' : 'Uncompleted order deposits after other expenses', value: cashSummary.upcomingOrderDepositsNet, color: cashSummary.upcomingOrderDepositsNet >= 0 ? 'text-cyan-700 dark:text-cyan-400' : 'text-rose-700 dark:text-rose-400' },
-            { label: language === 'ar' ? 'إجمالي مصاريف الأوردرات غير المكتملة' : 'Total upcoming-order expenses', value: cashSummary.totalMonthlyOrderExpenses, color: 'text-rose-700 dark:text-rose-400' },
-            { label: language === 'ar' ? 'إجمالي المصاريف الأخرى فقط' : 'Total other expenses only', value: cashSummary.bookedOrderOtherExpenses, color: 'text-orange-700 dark:text-orange-400' },
-            { label: language === 'ar' ? 'إجمالي دفعات السداد المنتظرة' : 'Expected settlement payments', value: cashSummary.expectedSettlementPayments, color: 'text-violet-700 dark:text-violet-300' },
-            { label: language === 'ar' ? 'الربح المتوقع خلال الشهر' : 'Expected profit by month end', value: cashSummary.netMonthlyOrderProfit, color: cashSummary.netMonthlyOrderProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400' },
-          ].map((card) => (
-            <div key={card.label} className="min-h-36 min-w-0 p-4 rounded-2xl bg-slate-50 border border-slate-200 dark:bg-white/[0.03] dark:border-white/[0.09] flex flex-col items-center justify-center gap-3 text-center sm:min-h-44 sm:p-5 sm:gap-5">
-              <span className="w-full text-sm font-black leading-6 text-slate-800 dark:text-slate-200">{card.label}</span>
-              <MoneyValue amount={card.value} className={`max-w-full text-center text-[clamp(1.5rem,2.5vw,2.25rem)] font-black tracking-tight ${card.color}`} />
-            </div>
+          {cashCards.map((card) => (
+            <button type="button" key={card.key} onClick={() => setSelectedCashCard(card.key)} className="flex min-h-36 min-w-0 flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-400/70 dark:border-white/[0.09] dark:bg-white/[0.03] dark:hover:bg-white/[0.06] sm:min-h-44 sm:p-5">
+              <span className="block w-full text-sm font-black leading-6 text-slate-800 dark:text-slate-200">{card.label}</span>
+              <MoneyValue amount={card.value} className={`block max-w-full text-center text-[clamp(1.5rem,2.5vw,2.25rem)] font-black tracking-tight ${card.color}`} />
+              <span className="block text-[10px] font-bold text-slate-400">{language === 'ar' ? 'اضغط لعرض التفاصيل' : 'Click for details'}</span>
+            </button>
           ))}
         </div>
       </section>
@@ -509,7 +699,7 @@ export const ReportsModule: React.FC = () => {
         </div>
         {cashSummary.retainedCancelledDeposits > 0 && <p className="px-5 py-2.5 bg-violet-50 text-xs font-bold text-violet-800 dark:bg-violet-950/30 dark:text-violet-200">{language === 'ar' ? `يشمل ${formatMoney(cashSummary.retainedCancelledDeposits)} عربونات محفوظة من طلبات أُلغيت.` : `Includes ${formatMoney(cashSummary.retainedCancelledDeposits)} in retained deposits from cancelled bookings.`}</p>}
         {cashSummary.collections.length === 0 ? <p className="p-8 text-center text-sm text-slate-400">{language === 'ar' ? 'لا توجد تحصيلات مسجلة في هذا الشهر.' : 'No collections recorded this month.'}</p> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs text-start"><thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500"><tr><th className="p-3.5 text-start">{language === 'ar' ? 'التاريخ' : 'Date'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'الأوردر / العميل' : 'Order / customer'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'نوع التحصيل' : 'Collection type'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'طريقة الدفع' : 'Method'}</th><th className="p-3.5 text-end">{language === 'ar' ? 'المبلغ' : 'Amount'}</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{cashSummary.collections.map((collection) => <tr key={collection.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td className="p-3.5 font-semibold text-slate-500">{collection.date}</td><td className="p-3.5"><p className="font-bold text-slate-900 dark:text-white">{collection.orderNumber}</p><p className="text-slate-500 mt-0.5">{collection.customerName}</p></td><td className="p-3.5"><span className={`inline-flex px-2.5 py-1 rounded-lg font-bold ${collection.isCompletedOrder ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{collection.isCompletedOrder ? (language === 'ar' ? 'أوردر مكتمل' : 'Completed order') : (language === 'ar' ? 'مقدم أوردر قادم' : 'Upcoming advance')}{collection.isLegacyEstimate ? ` · ${language === 'ar' ? 'تقديري' : 'Estimated'}` : ''}</span></td><td className="p-3.5 text-slate-600 dark:text-slate-300">{collection.method}</td><td className="p-3.5 text-end font-black text-emerald-600 dark:text-emerald-400"><MoneyValue amount={collection.amount} prefix="+" /></td></tr>)}</tbody></table></div>}
-        <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: تكاليف الأوردرات تُخصم عند اكتمال الأوردر وبحسب تاريخ المناسبة، لعدم وجود تاريخ صرف منفصل لكل تكلفة. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order costs are deducted on the completed event date because individual cost payment dates are not yet stored. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
+        <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: مصاريف «أخرى» للأوردر تُخصم في شهر التنفيذ، أما تكلفة العامل والانتقالات فتُخصم عند اكتمال الأوردر. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order other expenses are deducted in the execution month, while worker and transportation costs are deducted when the order is completed. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
       </section>
 
       {/* Company finance ledger: capital and general expenses */}
@@ -605,6 +795,14 @@ export const ReportsModule: React.FC = () => {
           </div>
         )}
       </div>
+
+      {activeCashCard && <CashCardDetailsModal
+        title={activeCashCard.label}
+        total={activeCashCard.value}
+        items={cashCardDetails[activeCashCard.key]}
+        language={language}
+        onClose={() => setSelectedCashCard(null)}
+      />}
     </div>
   );
 };
