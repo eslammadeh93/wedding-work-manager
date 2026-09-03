@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, AlertTriangle, UserCheck, Image, Upload, ExternalLink, Receipt, ChevronDown, Check, Wrench } from 'lucide-react';
+import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, AlertTriangle, UserCheck, Image, Upload, ExternalLink, Receipt, ChevronDown, Check, Wrench, LoaderCircle } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
@@ -267,32 +267,33 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [attachments, setAttachments] = useState<OrderAttachment[]>(initialOrder?.attachments || initialDraft?.attachments || []);
   const [stockWarning, setStockWarning] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isUploadingDesignImage, setIsUploadingDesignImage] = useState(false);
+  const [uploadingDesignImages, setUploadingDesignImages] = useState<Array<{ id: string; name: string; failed?: boolean }>>([]);
   const [deletingDesignImageId, setDeletingDesignImageId] = useState<string | null>(null);
   const designImageFileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleUploadDesignImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleUploadDesignImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []) as File[];
     event.target.value = '';
-    if (!file) return;
-    if (file.size > 6 * 1024 * 1024) return setStockWarning('حجم الصورة يجب ألا يزيد عن 6 ميجابايت.');
-    setIsUploadingDesignImage(true);
+    if (files.length === 0) return;
     setStockWarning(null);
-    try {
-      const uploaded = await googleDriveService.uploadImage({ name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
-      setDesignImages((current) => {
-        if (googleDriveConnected) {
-          return [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }];
-        }
-        const firstEmptyIndex = current.findIndex((image) => !image.url.trim());
-        if (firstEmptyIndex < 0) return [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }];
-        return current.map((image, index) => index === firstEmptyIndex ? { ...image, url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id } : image);
-      });
-    } catch (error) {
-      setStockWarning(error instanceof Error ? error.message : 'تعذر رفع الصورة إلى Google Drive.');
-    } finally {
-      setIsUploadingDesignImage(false);
-    }
+    const validFiles = files.filter((file) => file.size <= 6 * 1024 * 1024);
+    if (validFiles.length !== files.length) setStockWarning('حجم كل صورة يجب ألا يزيد عن 6 ميجابايت.');
+    const queue = validFiles.map((file) => ({ file, id: `upload_${Date.now()}_${Math.random().toString(36).slice(2)}` }));
+    setUploadingDesignImages((current) => [...current, ...queue.map(({ id, file }) => ({ id, name: file.name }))]);
+    queue.forEach(({ file, id }) => { void (async () => {
+      try {
+        const uploaded = await googleDriveService.uploadImage({ name: file.name, mimeType: file.type, base64: await fileToBase64(file) });
+        setDesignImages((current) => {
+          if (googleDriveConnected) return [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }];
+          const firstEmptyIndex = current.findIndex((image) => !image.url.trim());
+          return firstEmptyIndex < 0 ? [...current, { url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id }] : current.map((image, index) => index === firstEmptyIndex ? { ...image, url: uploaded.url, createdAt: new Date().toISOString(), driveFileId: uploaded.id } : image);
+        });
+        setUploadingDesignImages((current) => current.filter((item) => item.id !== id));
+      } catch (error) {
+        setUploadingDesignImages((current) => current.map((item) => item.id === id ? { ...item, failed: true } : item));
+        setStockWarning(error instanceof Error ? error.message : 'تعذر رفع صورة إلى Google Drive.');
+      }
+    })(); });
   };
 
   const persistDraft = React.useCallback(() => {
@@ -1194,17 +1195,17 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               </h4>
 
               <div className="flex items-center gap-2">
-                <input ref={designImageFileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={handleUploadDesignImage} className="hidden" />
+                <input ref={designImageFileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={handleUploadDesignImage} className="hidden" />
                 {/* 2. Upload Design Image */}
                 <button
                   type="button"
                   onClick={() => googleDriveConnected ? designImageFileInputRef.current?.click() : window.open(designUploadFolderUrl, '_blank', 'noopener,noreferrer')}
-                  disabled={(!googleDriveConnected && !designUploadFolderUrl) || isUploadingDesignImage}
+                  disabled={!googleDriveConnected && !designUploadFolderUrl}
                   title={designUploadFolderUrl ? 'فتح مركز رفع الصور' : 'اضبط رابط مركز رفع الصور من الإعدادات أولًا'}
                   className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isUploadingDesignImage ? 'جارٍ رفع الصورة…' : googleDriveConnected ? 'رفع صورة' : 'فتح فولدر الرفع'}</span>
+                  <span>{googleDriveConnected ? 'رفع صور' : 'فتح فولدر الرفع'}</span>
                 </button>
 
                 {!googleDriveConnected && (
@@ -1226,6 +1227,10 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
             {/* List of Design Image Links */}
             <div className="space-y-3 pt-1">
+              {uploadingDesignImages.map((upload) => <div key={upload.id} className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs dark:border-indigo-900/60 dark:bg-indigo-950/25">
+                <span className="min-w-0 truncate font-bold text-indigo-900 dark:text-indigo-100">{upload.name}</span>
+                <span className={`inline-flex shrink-0 items-center gap-1.5 font-bold ${upload.failed ? 'text-rose-600 dark:text-rose-300' : 'text-indigo-600 dark:text-indigo-300'}`}>{upload.failed ? 'تعذر الرفع' : <><LoaderCircle className="h-4 w-4 animate-spin" />جارٍ الرفع…</>}</span>
+              </div>)}
               {displayedDesignImages.map(({ item, index }, visibleIndex) => (
                 <div key={index} className="flex flex-col md:flex-row items-stretch md:items-end gap-2.5">
                   {/* 1. Design Image Link */}

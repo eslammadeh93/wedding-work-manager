@@ -43,7 +43,7 @@ interface CashCardDetailItem {
   id: string;
   orderNumber: string;
   customerName: string;
-  type: 'deposit' | 'settlement' | 'completed-profit' | 'retained-deposit' | 'upcoming-expense' | 'expected-settlement' | 'expected-profit';
+  type: 'deposit' | 'settlement' | 'completed-profit' | 'retained-deposit' | 'upcoming-expense' | 'expected-settlement' | 'expected-profit' | 'capital' | 'operating-expense' | 'completed-order-cost';
   amount: number;
   collectedThisMonth?: number;
   costs?: number;
@@ -58,6 +58,9 @@ const cashDetailTypeLabel = (type: CashCardDetailItem['type'], language: 'ar' | 
     'upcoming-expense': language === 'ar' ? 'مصروف أوردر غير مكتمل' : 'Uncompleted-order expense',
     'expected-settlement': language === 'ar' ? 'دفعة سداد متوقعة' : 'Expected settlement',
     'expected-profit': language === 'ar' ? 'ربح متوقع من الأوردر' : 'Expected order profit',
+    capital: language === 'ar' ? 'إضافة رأس مال' : 'Capital added',
+    'operating-expense': language === 'ar' ? 'مصروف تشغيلي' : 'Operating expense',
+    'completed-order-cost': language === 'ar' ? 'تكلفة أوردر منفّذ' : 'Completed-order cost',
   } as const;
   return labels[type];
 };
@@ -116,6 +119,7 @@ export const ReportsModule: React.FC = () => {
   const [showCashReview, setShowCashReview] = useState(false);
   const [showNetCashBreakdown, setShowNetCashBreakdown] = useState(false);
   const [selectedCashCard, setSelectedCashCard] = useState<CashCardKey | null>(null);
+  const [showSafeBalanceDetails, setShowSafeBalanceDetails] = useState(false);
 
   const companyId = useMemo(() => {
     if (isDemo || !authSession || profile?.role === 'worker') return null;
@@ -273,6 +277,37 @@ export const ReportsModule: React.FC = () => {
       expectedProfit: expectedProfitItems,
     } satisfies Record<CashCardKey, CashCardDetailItem[]>;
   }, [cashSummary, selectedMonth, selectedYear, sourceOrders]);
+  const safeBalanceDetails = useMemo<CashCardDetailItem[]>(() => {
+    const monthEnd = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-31`;
+    const isOnOrBeforeMonthEnd = (date?: string) => Boolean(date && date.slice(0, 10) <= monthEnd);
+    const amount = (value: number | undefined) => Math.max(0, Number(value) || 0);
+    const isCapital = (entry: typeof expenses[number]) => entry.type === 'capital' || entry.category === 'رأس مال';
+
+    return [
+      ...sourceOrders
+        .filter((order) => order.orderStatus !== 'cancelled')
+        .flatMap((order) => orderCashCollections(order))
+        .filter((collection) => isOnOrBeforeMonthEnd(collection.date))
+        .map((collection) => ({
+          id: `safe-${collection.id}`, orderNumber: collection.orderNumber, customerName: collection.customerName,
+          type: collection.isRetainedDeposit ? 'retained-deposit' as const : collection.paymentType === 'deposit' ? 'deposit' as const : 'settlement' as const,
+          amount: collection.amount,
+        })),
+      ...expenses
+        .filter((entry) => isCapital(entry) && isOnOrBeforeMonthEnd(entry.date))
+        .map((entry) => ({ id: `safe-capital-${entry.id}`, orderNumber: language === 'ar' ? 'رأس المال' : 'Capital', customerName: entry.notes || entry.description || '—', type: 'capital' as const, amount: amount(entry.amount) })),
+      ...expenses
+        .filter((entry) => !isCapital(entry) && isOnOrBeforeMonthEnd(entry.date))
+        .map((entry) => ({ id: `safe-expense-${entry.id}`, orderNumber: entry.category || (language === 'ar' ? 'مصروف تشغيلي' : 'Operating expense'), customerName: entry.notes || entry.description || '—', type: 'operating-expense' as const, amount: -amount(entry.amount) })),
+      ...sourceOrders
+        .filter((order) => order.orderStatus === 'completed' && isOnOrBeforeMonthEnd(order.eventDate || order.weddingDate))
+        .map((order) => ({ id: `safe-completed-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'completed-order-cost' as const, amount: -(completedOrderFulfillmentCosts(order) + amount(order.otherExpenses)) }))
+        .filter((item) => item.amount < 0),
+      ...sourceOrders
+        .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && isOnOrBeforeMonthEnd(order.eventDate || order.weddingDate) && amount(order.otherExpenses) > 0)
+        .map((order) => ({ id: `safe-upcoming-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'upcoming-expense' as const, amount: -amount(order.otherExpenses) })),
+    ];
+  }, [expenses, language, selectedMonth, selectedYear, sourceOrders]);
 
   // Top Rented Inventory Items count
   const itemUsageMap: Record<string, number> = {};
