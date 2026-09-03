@@ -55,14 +55,20 @@ export class CompanyProvisioningService {
       if (existingEmail) return failure('EMAIL_EXISTS', 'البريد الإلكتروني مستخدم بالفعل.');
       const slugMatches = await db.collection('companies').where('slug', '==', request.slug).limit(1).get();
       if (!slugMatches.empty) return failure('SLUG_EXISTS', 'Slug مستخدم بالفعل.');
+      // Generate the company ID before creating the account so its Auth token
+      // is ready for the first company-session resolution.
+      const companyRef = db.collection('companies').doc();
       try {
         const user = await auth.createUser({ displayName: request.ownerName, email: request.ownerEmail, password: request.ownerPassword, emailVerified: false });
         ownerUid = user.uid;
+        await auth.setCustomUserClaims(ownerUid, { companyId: companyRef.id, role: 'company_super_admin' });
       } catch (error) {
         if ((error as { code?: string }).code === 'auth/email-already-exists') return failure('EMAIL_EXISTS', 'البريد الإلكتروني مستخدم بالفعل.');
+        // A claim-assignment failure happens after the Auth user exists. Let
+        // the outer handler remove that partial account before returning.
+        if (ownerUid) throw error;
         return failure('AUTH_CREATION_FAILED', 'تعذر إنشاء مستخدم المالك.');
       }
-      const companyRef = db.collection('companies').doc();
       const memberRef = companyRef.collection('members').doc(ownerUid);
       const auditRef = db.collection('platformAuditLogs').doc();
       // Registries make slug/code uniqueness transactionally enforceable for this provisioning path.
