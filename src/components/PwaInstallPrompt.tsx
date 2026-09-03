@@ -67,7 +67,7 @@ export const PwaInstallPrompt: React.FC = () => {
     );
   }
   return (
-    <div className="fixed bottom-4 left-4 right-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95" dir="rtl">
+    <div className="fixed bottom-[calc(max(1rem,env(safe-area-inset-bottom))+5rem)] left-4 right-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95" dir="rtl">
       <div className="min-w-0 text-right">
         <p className="text-xs font-black text-slate-900 dark:text-white">ثبّت مدير أعمال الويدينج</p>
         <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{showIosHint ? 'من مشاركة Safari اختر «إضافة إلى الشاشة الرئيسية».' : 'افتحه من شاشة جهازك كتطبيق مستقل.'}</p>

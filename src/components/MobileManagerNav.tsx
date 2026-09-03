@@ -27,7 +27,9 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
 
-  const isManager = ['super_admin', 'admin', 'manager'].includes(profile?.role || '');
+  // Company owners use company_super_admin in the tenant session. Treat them
+  // as managers here too, otherwise the bottom actions collapse into a column.
+  const isManager = ['super_admin', 'admin', 'manager', 'company_super_admin'].includes(authSession?.role || profile?.role || '');
   const isWorker = profile?.role === 'worker';
   const isCompanyMember = Boolean(authSession?.companyId && authSession?.uid);
   const canControlPush = isCompanyMember && !isWorker;
