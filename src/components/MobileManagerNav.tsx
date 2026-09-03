@@ -27,9 +27,6 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
 
-  // Company owners use company_super_admin in the tenant session. Treat them
-  // as managers here too, otherwise the bottom actions collapse into a column.
-  const isManager = ['super_admin', 'admin', 'manager', 'company_super_admin'].includes(authSession?.role || profile?.role || '');
   const isWorker = profile?.role === 'worker';
   const isCompanyMember = Boolean(authSession?.companyId && authSession?.uid);
   const canControlPush = isCompanyMember && !isWorker;
@@ -71,15 +68,15 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
     } finally { setPushBusy(false); }
   };
 
-  if (!isManager && !showPushControl && !canUseCalculator) return null;
+  if (!showPushControl && !canUseCalculator && !canCreateOrder && !canViewOrders && !canViewNotifications) return null;
 
   const containerClass = isDesktop
     ? 'hidden lg:grid w-full lg:w-auto lg:min-w-[450px]'
     : 'fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/90 bg-white/95 backdrop-blur-lg dark:border-slate-700 dark:bg-slate-900/95 lg:hidden';
   const contentClass = isDesktop
     ? 'grid grid-cols-4 gap-1.5'
-    : `mx-auto grid max-w-lg gap-1 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${isManager ? 'grid-cols-5' : 'grid-cols-1 max-w-[150px]'}`;
-  const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 dark:border-slate-700' : 'min-h-[58px]';
+    : 'mx-auto flex max-w-lg items-stretch gap-1 px-2 pt-2 pb-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]';
+  const buttonClass = isDesktop ? 'min-h-[62px] border border-slate-200 dark:border-slate-700' : 'min-h-[58px] min-w-0 flex-1';
   const secondaryButtonClass = isDesktop ? `${buttonClass} bg-slate-50 dark:bg-slate-800/70` : buttonClass;
   const pushBlocked = typeof Notification !== 'undefined' && Notification.permission === 'denied';
 
