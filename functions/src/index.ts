@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldPath, FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { onCall } from 'firebase-functions/v2/https';
-import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentWritten, onDocumentWrittenWithAuthContext } from 'firebase-functions/v2/firestore';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2/options';
 import * as logger from 'firebase-functions/logger';
@@ -641,7 +641,12 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
 
 type PlatformOwnerRequest = { auth?: { uid: string; token?: Record<string, unknown> }; data: unknown };
 const defaultPlatformConsoleSettings = { expiryDays: 30, compactMode: false, dailyDigest: true };
-type PlatformCapability = 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:read' | 'platform:subscriptions:manage' | 'platform:plans:read' | 'platform:plans:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:settings:manage' | 'platform:admins:manage';
+const supportTicketStatusLabel: Record<string, string> = { open: 'جديد', in_progress: 'قيد المتابعة', resolved: 'تم الحل' };
+const platformActorIdentity = async (uid: string) => {
+  const profile = await db.doc(`platformUsers/${uid}`).get();
+  return { name: String(profile.data()?.name || profile.data()?.email || 'حساب دعم المنصة'), email: String(profile.data()?.email || '') };
+};
+type PlatformCapability = 'platform:companies:read' | 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:read' | 'platform:subscriptions:manage' | 'platform:plans:read' | 'platform:plans:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:support:impersonate' | 'platform:settings:manage' | 'platform:admins:manage';
 const platformPermissionValues = ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:create', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:plans:manage', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:developer_tools:manage', 'platform:support:impersonate', 'platform:admins:manage', 'platform:dangerous_delete'] as const;
 type ManagedPlatformPermission = typeof platformPermissionValues[number];
 const platformRolePermissionDefaults: Record<string, readonly ManagedPlatformPermission[]> = {
@@ -659,11 +664,11 @@ const rolePermissions = async (role: string): Promise<ManagedPlatformPermission[
   return permissions || [...(platformRolePermissionDefaults[role] || [])];
 };
 const platformRoleCapabilities: Record<string, readonly PlatformCapability[]> = {
-  platform_owner: ['platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:plans:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
-  platform_admin: ['platform:companies:update', 'platform:users:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
-  platform_support: ['platform:console:read', 'platform:support:manage'],
-  platform_billing: ['platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read'],
-  platform_read_only: [],
+  platform_owner: ['platform:companies:read', 'platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:plans:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
+  platform_admin: ['platform:companies:read', 'platform:companies:update', 'platform:users:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
+  platform_support: ['platform:companies:read', 'platform:console:read', 'platform:support:manage'],
+  platform_billing: ['platform:companies:read', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read'],
+  platform_read_only: ['platform:companies:read'],
 };
 const isActivePlatformUserFor = async (request: PlatformOwnerRequest, capability: PlatformCapability): Promise<string | null> => {
   const uid = request.auth?.uid;
@@ -682,6 +687,297 @@ const isActivePlatformOwner = async (request: PlatformOwnerRequest): Promise<str
   const profile = await db.doc(`platformUsers/${uid}`).get();
   return profile.exists && profile.data()?.role === 'platform_owner' && profile.data()?.status === 'active' ? uid : null;
 };
+
+// Support impersonation is deliberately server-owned.  The browser never gets
+// a reusable company password, and its temporary tenant token is constrained
+// by a session record that Firestore Rules check on every request.
+const supportSessionDurationMs = 5 * 60 * 1000;
+const normalizePhone = (value: unknown) => String(value || '').replace(/\D/g, '');
+const supportCodeHash = (sessionId: string, code: string) => crypto.createHash('sha256').update(`${sessionId}:${code}`).digest('hex');
+const supportAudit = async (sessionId: string, input: Record<string, unknown>) => {
+  await db.collection(`supportImpersonationSessions/${sessionId}/auditLogs`).add({ ...input, createdAt: FieldValue.serverTimestamp() });
+};
+
+/** A second confirmation before a platform user can open a company's private details. */
+export const verifyPlatformCompanyDetailsPhone = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const platformUid = await isActivePlatformUserFor(request, 'platform:companies:read');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const ownerPhone = normalizePhone(data.ownerPhone);
+  if (!platformUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId)) return { success: false, message: 'غير مصرح لك بعرض تفاصيل الشركة.' };
+  if (ownerPhone.length < 8) return { success: false, message: 'أدخل رقم موبايل صاحب الشركة المسجل.' };
+  const owners = await db.collection(`companies/${companyId}/members`).where('role', '==', 'company_super_admin').where('status', '==', 'active').get();
+  const matched = owners.docs.some(owner => normalizePhone(owner.data()?.phone) === ownerPhone);
+  if (!matched) return { success: false, message: 'رقم الموبايل لا يطابق رقم صاحب الشركة المسجل.' };
+  await db.collection('platformAuditLogs').add({ action: 'company_details_phone_verified', companyId, actorUid: platformUid, timestamp: FieldValue.serverTimestamp() });
+  return { success: true, message: 'تم تأكيد رقم صاحب الشركة.' };
+});
+
+/** Platform-owner-only reader for the append-only support-session evidence. */
+export const listSupportImpersonationAuditLogs = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  if (!await isActivePlatformOwner(request)) return { success: false, message: 'غير مصرح لك بعرض سجلات جلسات الدعم.' };
+  const asIso = (value: unknown) => value && typeof (value as { toDate?: unknown }).toDate === 'function'
+    ? ((value as { toDate: () => Date }).toDate().toISOString())
+    : null;
+  const sessions = await db.collection('supportImpersonationSessions').orderBy('requestedAt', 'desc').limit(50).get();
+  const items = await Promise.all(sessions.docs.map(async session => {
+    const value = session.data() || {};
+    const audit = await session.ref.collection('auditLogs').orderBy('createdAt', 'asc').limit(500).get();
+    return {
+      id: session.id,
+      companyId: String(value.companyId || ''),
+      companyName: String(value.companyName || ''),
+      status: String(value.status || 'unknown'),
+      platformActorName: String(value.platformActorName || ''),
+      platformActorEmail: String(value.platformActorEmail || ''),
+      recipientName: String(value.recipientName || ''),
+      recipientEmail: String(value.recipientEmail || ''),
+      recipientPhone: String(value.recipientPhone || ''),
+      requestedAt: asIso(value.requestedAt),
+      activatedAt: asIso(value.activatedAt),
+      endedAt: asIso(value.endedAt),
+      expiresAtMs: Number(value.expiresAtMs || 0),
+      auditLogs: audit.docs.map(row => {
+        const item = row.data() || {};
+        return {
+          id: row.id,
+          action: String(item.action || ''),
+          actorUid: String(item.actorUid || ''),
+          detail: typeof item.detail === 'string' ? item.detail : '',
+          companyId: typeof item.companyId === 'string' ? item.companyId : '',
+          collection: typeof item.collection === 'string' ? item.collection : '',
+          documentId: typeof item.documentId === 'string' ? item.documentId : '',
+          operation: typeof item.operation === 'string' ? item.operation : '',
+          changedFields: Array.isArray(item.changedFields) ? item.changedFields.filter(field => typeof field === 'string').slice(0, 100) : [],
+          entityLabel: typeof item.entityLabel === 'string' ? item.entityLabel : '',
+          changes: Array.isArray(item.changes) ? item.changes.filter(change => change && typeof change === 'object').slice(0, 30) : [],
+          createdAt: asIso(item.createdAt),
+        };
+      }),
+    };
+  }));
+  return { success: true, sessions: items };
+});
+
+const supportSectionLabels: Record<string, string> = {
+  dashboard: 'لوحة التحكم', calculator: 'الحاسبات', calculatorSettings: 'إعدادات الحاسبات', orders: 'الطلبات', workers: 'الموظفون', workerPerformance: 'أداء الموظفين', workerMovements: 'حركة الموظفين', customers: 'العملاء', suppliers: 'الموردون', inventory: 'المخزون', expenses: 'المصروفات', calendar: 'التقويم', reports: 'التقارير', activityLog: 'سجل النشاط', settings: 'الإعدادات', members: 'حسابات الشركة', profile: 'الملف الشخصي', recycleBin: 'سلة المحذوفات',
+};
+
+/** Records only meaningful navigation inside an already authorized support session. */
+export const recordSupportImpersonationActivity = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async request => {
+  const sessionId = typeof request.auth?.token.supportSessionId === 'string' ? request.auth.token.supportSessionId : '';
+  const companyId = typeof request.auth?.token.companyId === 'string' ? request.auth.token.companyId : '';
+  const input = (request.data as Record<string, unknown> | undefined) || {};
+  const section = typeof input.section === 'string' ? input.section : '';
+  const event = input.event === 'order_opened' ? 'order_opened' : '';
+  const orderNumber = typeof input.orderNumber === 'string' ? input.orderNumber.slice(0, 100) : '';
+  const customerName = typeof input.customerName === 'string' ? input.customerName.slice(0, 120) : '';
+  const label = supportSectionLabels[section];
+  if (!sessionId || !companyId || (!label && !(event === 'order_opened' && orderNumber)) || !request.auth?.uid) return { success: false, message: 'نشاط جلسة الدعم غير صالح.' };
+  const [pointer, session] = await Promise.all([
+    db.doc(`supportImpersonationActive/${request.auth.uid}`).get(),
+    db.doc(`supportImpersonationSessions/${sessionId}`).get(),
+  ]);
+  if (!pointer.exists || pointer.data()?.sessionId !== sessionId || pointer.data()?.companyId !== companyId || Number(pointer.data()?.expiresAtMs || 0) <= Date.now() || !session.exists || session.data()?.status !== 'active') return { success: false, message: 'انتهت جلسة الدعم.' };
+  await supportAudit(sessionId, event === 'order_opened'
+    ? { action: 'order_opened', actorUid: request.auth.uid, companyId, entityLabel: `الطلب ${orderNumber}${customerName ? ` — ${customerName}` : ''}`, detail: `فتح تفاصيل الطلب ${orderNumber}${customerName ? ` — ${customerName}` : ''}.` }
+    : { action: 'page_opened', actorUid: request.auth.uid, companyId, section, detail: `فتح قسم ${label}.` });
+  return { success: true };
+});
+
+export const getCompanySupportApprovalRecipients = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request) => {
+  const companyId = typeof request.auth?.token.companyId === 'string' ? request.auth.token.companyId : '';
+  if (!request.auth?.uid || !companyId || request.auth.token.role !== 'company_super_admin') return { success: false, message: 'غير مصرح لك بإدارة موافقات الدعم.' };
+  const members = await db.collection(`companies/${companyId}/members`).where('status', '==', 'active').get();
+  const configured = await db.doc(`companies/${companyId}/settings/supportAccess`).get();
+  const configuredUids: string[] = Array.isArray(configured.data()?.recipientUids) ? (configured.data()!.recipientUids as unknown[]).filter((uid: unknown): uid is string => typeof uid === 'string') : [];
+  const fallback = members.docs.filter(item => item.data().role === 'company_super_admin').map(item => item.id);
+  const allowed = configuredUids.length ? configuredUids : fallback;
+  return { success: true, recipientUids: allowed, members: members.docs.filter(item => item.data().role !== 'worker').map(item => ({ uid: item.id, name: String(item.data().name || ''), email: String(item.data().email || ''), role: String(item.data().role || ''), phone: String(item.data().phone || ''), selected: allowed.includes(item.id) })) };
+});
+
+export const updateCompanySupportApprovalRecipients = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request) => {
+  const companyId = typeof request.auth?.token.companyId === 'string' ? request.auth.token.companyId : '';
+  const recipientUids = Array.isArray((request.data as Record<string, unknown> | undefined)?.recipientUids) ? (request.data as { recipientUids: unknown[] }).recipientUids.filter((uid): uid is string => typeof uid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(uid)) : [];
+  if (!request.auth?.uid || !companyId || request.auth.token.role !== 'company_super_admin') return { success: false, message: 'غير مصرح لك بإدارة موافقات الدعم.' };
+  if (!recipientUids.length) return { success: false, message: 'اختر حسابًا واحدًا على الأقل لاستلام كود موافقة الدعم.' };
+  const refs = recipientUids.map(uid => db.doc(`companies/${companyId}/members/${uid}`));
+  const snapshots = await db.getAll(...refs);
+  if (snapshots.some(item => !item.exists || item.data()?.status !== 'active' || item.data()?.role === 'worker')) return { success: false, message: 'توجد حسابات غير صالحة ضمن المستلمين.' };
+  await db.doc(`companies/${companyId}/settings/supportAccess`).set({ companyId, recipientUids: [...new Set(recipientUids)], updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  return { success: true, message: 'تم حفظ مستلمي كود موافقة الدعم.' };
+});
+
+export const startSupportImpersonationRequest = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const platformUid = await isActivePlatformUserFor(request, 'platform:support:impersonate');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const recipientPhone = normalizePhone(data.recipientPhone);
+  if (!platformUid || !companyId || recipientPhone.length < 8) return { success: false, message: 'اختر الشركة وأدخل رقم الحساب المصرح له باستلام كود الدعم.' };
+  const activePointer = await db.doc(`supportImpersonationActive/${platformUid}`).get();
+  if (activePointer.exists && Number(activePointer.data()?.expiresAtMs || 0) > Date.now()) return { success: false, message: 'لديك جلسة دعم فعّالة بالفعل؛ أنهِها أولًا.' };
+  const company = await db.doc(`companies/${companyId}`).get();
+  if (!company.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const platformActor = await db.doc(`platformUsers/${platformUid}`).get();
+  const owners = await db.collection(`companies/${companyId}/members`).where('role', '==', 'company_super_admin').where('status', '==', 'active').get();
+  if (!owners.docs.length) return { success: false, message: 'لا يوجد حساب صاحب شركة نشط لاستلام موافقة الدعم.' };
+  const activeMembers = await db.collection(`companies/${companyId}/members`).where('status', '==', 'active').get();
+  const recipient = activeMembers.docs.find(member => normalizePhone(member.data().phone) === recipientPhone);
+  if (!recipient || recipient.data()?.role === 'worker') return { success: false, message: 'هذا الرقم غير مصرح له باستلام كود موافقة الدعم.' };
+  const recipientConfig = await db.doc(`companies/${companyId}/settings/supportAccess`).get();
+  const configured: string[] = Array.isArray(recipientConfig.data()?.recipientUids) ? (recipientConfig.data()!.recipientUids as unknown[]).filter((uid: unknown): uid is string => typeof uid === 'string') : [];
+  const recipientIsOwner = recipient.data()?.role === 'company_super_admin';
+  // Owner accounts are always allowed. Any other account must be explicitly
+  // selected by the company owner in the support-approval recipients setting.
+  if (!recipientIsOwner && !configured.includes(recipient.id)) return { success: false, message: 'هذا الرقم غير مصرح له باستلام كود موافقة الدعم.' };
+  // The entered, authorized account receives the code, and the company owner
+  // is informed as well. A Set prevents duplicate notifications if that
+  // account is itself the owner.
+  const notificationRecipients = [...new Set([recipient.id, ...owners.docs.map(owner => owner.id)])];
+  const sessionRef = db.collection('supportImpersonationSessions').doc();
+  const code = String(crypto.randomInt(100000, 1000000));
+  const expiresAtMs = Date.now() + supportSessionDurationMs;
+  await sessionRef.create({ platformUid, platformActorName: String(platformActor.data()?.name || ''), platformActorEmail: String(platformActor.data()?.email || ''), companyId, companyName: String(company.data()?.name || ''), recipientPhone, recipientUid: recipient.id, recipientName: String(recipient.data()?.name || ''), recipientEmail: String(recipient.data()?.email || ''), recipientUids: notificationRecipients, codeHash: supportCodeHash(sessionRef.id, code), attempts: 0, status: 'pending', expiresAtMs, requestedAt: FieldValue.serverTimestamp() });
+  const batch = db.batch();
+  notificationRecipients.forEach(uid => batch.set(db.collection(`companies/${companyId}/notifications`).doc(), { companyId, targetUid: uid, type: 'support_impersonation_request', title: 'موافقة دخول الدعم الفني', body: `كود موافقة دخول الدعم: ${code}. صالح لمدة 5 دقائق فقط.`, status: 'unread', createdAt: FieldValue.serverTimestamp() }));
+  await batch.commit();
+  await supportAudit(sessionRef.id, { action: 'support_session_requested', actorUid: platformUid, detail: 'تم إرسال كود الموافقة إلى الحساب المصرح له وحساب صاحب الشركة.' });
+  return { success: true, sessionId: sessionRef.id, expiresAtMs, message: 'تم إرسال كود الموافقة إلى الحساب المصرح له وحساب صاحب الشركة.' };
+});
+
+export const verifySupportImpersonationCode = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const platformUid = await isActivePlatformUserFor(request, 'platform:support:impersonate');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
+  const code = typeof data.code === 'string' ? data.code.trim() : '';
+  if (!platformUid || !sessionId || !/^\d{6}$/.test(code)) return { success: false, message: 'بيانات التحقق غير صحيحة.' };
+  const sessionRef = db.doc(`supportImpersonationSessions/${sessionId}`);
+  const result = await db.runTransaction(async tx => {
+    const session = await tx.get(sessionRef);
+    if (!session.exists || session.data()?.platformUid !== platformUid) throw new Error('INVALID_SESSION');
+    const value = session.data() || {};
+    if (Number(value.expiresAtMs || 0) <= Date.now()) { tx.update(sessionRef, { status: 'expired', expiredAt: FieldValue.serverTimestamp() }); throw new Error('EXPIRED'); }
+    // A browser can finish the server verification just before its Auth state
+    // listener updates. Retrying the same approved code must resume that very
+    // session rather than leaving the support agent locked outside it.
+    if (value.status === 'active') {
+      if (supportCodeHash(sessionId, code) !== value.codeHash) throw new Error('INVALID_CODE');
+      return { companyId: String(value.companyId), expiresAtMs: Number(value.expiresAtMs), companyName: String(value.companyName || ''), resumed: true };
+    }
+    if (value.status !== 'pending') throw new Error('INVALID_SESSION');
+    const attempts = Number(value.attempts || 0) + 1;
+    if (attempts > 5) { tx.update(sessionRef, { status: 'blocked', attempts, blockedAt: FieldValue.serverTimestamp() }); throw new Error('BLOCKED'); }
+    if (supportCodeHash(sessionId, code) !== value.codeHash) { tx.update(sessionRef, { attempts }); throw new Error('INVALID_CODE'); }
+    const companyId = String(value.companyId);
+    const companyMemberRef = db.doc(`companies/${companyId}/members/${platformUid}`);
+    const member = await tx.get(companyMemberRef);
+    if (member.exists && member.data()?.supportSession !== true) throw new Error('MEMBERSHIP_CONFLICT');
+    tx.set(companyMemberRef, { uid: platformUid, companyId, name: 'دعم المنصة (جلسة مؤقتة)', email: '', role: 'company_super_admin', status: 'active', supportSession: true, supportSessionId: sessionId, createdAt: FieldValue.serverTimestamp(), createdBy: platformUid }, { merge: true });
+    tx.set(db.doc(`supportImpersonationActive/${platformUid}`), { sessionId, companyId, expiresAtMs: Number(value.expiresAtMs), updatedAt: FieldValue.serverTimestamp() });
+    tx.update(sessionRef, { status: 'active', attempts, activatedAt: FieldValue.serverTimestamp() });
+    return { companyId, expiresAtMs: Number(value.expiresAtMs), companyName: String(value.companyName || '') };
+  }).catch(error => ({ error: error instanceof Error ? error.message : 'INVALID_SESSION' }));
+  if ('error' in result) {
+    const messages: Record<string, string> = { EXPIRED: 'انتهت صلاحية الكود. اطلب كودًا جديدًا.', BLOCKED: 'تم إيقاف الطلب لكثرة المحاولات.', INVALID_CODE: 'كود الموافقة غير صحيح.', MEMBERSHIP_CONFLICT: 'تعذر بدء الجلسة بسبب تعارض حسابي.' };
+    return { success: false, message: messages[result.error] || 'تعذر التحقق من جلسة الدعم.' };
+  }
+  await supportAudit(sessionId, { action: 'support_session_started', actorUid: platformUid, detail: 'تم التحقق من كود الموافقة وبدء جلسة دعم قابلة للتعديل.' });
+  const customToken = await auth.createCustomToken(platformUid, { companyId: result.companyId, role: 'company_super_admin', supportSessionId: sessionId, supportSessionExpiresAt: result.expiresAtMs });
+  return { success: true, customToken, expiresAtMs: result.expiresAtMs, companyName: result.companyName };
+});
+
+export const endSupportImpersonationSession = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request) => {
+  const sessionId = typeof request.auth?.token.supportSessionId === 'string' ? request.auth.token.supportSessionId : '';
+  const platformUid = request.auth?.uid || '';
+  if (!sessionId || !platformUid) return { success: false, message: 'جلسة الدعم غير صالحة.' };
+  const sessionRef = db.doc(`supportImpersonationSessions/${sessionId}`);
+  const session = await sessionRef.get();
+  if (!session.exists || session.data()?.platformUid !== platformUid) return { success: false, message: 'جلسة الدعم غير صالحة.' };
+  const companyId = String(session.data()?.companyId || '');
+  const profile = await db.doc(`platformUsers/${platformUid}`).get();
+  const role = String(profile.data()?.role || '');
+  if (!profile.exists || profile.data()?.status !== 'active' || !platformRolePermissionDefaults[role]) return { success: false, message: 'تعذر استعادة حساب المنصة.' };
+  const memberRef = db.doc(`companies/${companyId}/members/${platformUid}`);
+  const member = await memberRef.get();
+  if (member.exists && member.data()?.supportSession === true && member.data()?.supportSessionId === sessionId) await memberRef.delete();
+  await Promise.all([db.doc(`supportImpersonationActive/${platformUid}`).delete().catch(() => undefined), sessionRef.set({ status: 'ended', endedAt: FieldValue.serverTimestamp() }, { merge: true })]);
+  await supportAudit(sessionId, { action: 'support_session_ended', actorUid: platformUid, detail: 'تم إنهاء جلسة الدعم واستعادة حساب المنصة.' });
+  const customToken = await auth.createCustomToken(platformUid, role === 'platform_owner' ? { platform_owner: true, platformRole: role } : { platformRole: role });
+  return { success: true, customToken };
+});
+
+/** Recover a verified session when the browser failed to switch its Auth token. */
+export const resolveStuckSupportImpersonationSession = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  try {
+    const platformUid = await isActivePlatformUserFor(request, 'platform:support:impersonate');
+    const data = (request.data || {}) as Record<string, unknown>;
+    const action = data.action === 'end' ? 'end' : 'resume';
+    if (!platformUid) return { success: false, message: 'غير مصرح لك بإدارة جلسة الدعم.' };
+    const pointerRef = db.doc(`supportImpersonationActive/${platformUid}`);
+    const pointer = await pointerRef.get();
+    if (!pointer.exists) return { success: false, message: 'لا توجد جلسة دعم معلقة.' };
+    const sessionId = String(pointer.data()?.sessionId || '');
+    if (!sessionId) { await pointerRef.delete(); return { success: false, message: 'الجلسة لم تعد صالحة.' }; }
+    const sessionRef = db.doc(`supportImpersonationSessions/${sessionId}`);
+    const session = await sessionRef.get();
+    const value = session.data() || {};
+    if (!session.exists || value.platformUid !== platformUid) { await pointerRef.delete(); return { success: false, message: 'الجلسة لم تعد صالحة.' }; }
+    const companyId = String(value.companyId || '');
+    if (action === 'end') {
+      const memberRef = db.doc(`companies/${companyId}/members/${platformUid}`); const member = await memberRef.get();
+      if (member.exists && member.data()?.supportSession === true && member.data()?.supportSessionId === session.id) await memberRef.delete();
+      await Promise.all([pointerRef.delete(), sessionRef.set({ status: 'ended', endedAt: FieldValue.serverTimestamp() }, { merge: true })]);
+      await supportAudit(session.id, { action: 'support_session_cancelled', actorUid: platformUid, detail: 'تم إنهاء الجلسة المعلقة من شاشة الدعم.' });
+      return { success: true, message: 'تم إنهاء جلسة الدعم.' };
+    }
+    const phone = normalizePhone(data.phone);
+    if (!phone || phone !== String(value.recipientPhone || value.ownerPhone || '')) return { success: false, message: 'رقم الهاتف لا يطابق الرقم الذي بدأ به طلب الجلسة.' };
+    if (value.status !== 'active' || Number(value.expiresAtMs || 0) <= Date.now()) return { success: false, message: 'انتهت الجلسة؛ أرسل كود موافقة جديدًا.' };
+    const customToken = await auth.createCustomToken(platformUid, { companyId, role: 'company_super_admin', supportSessionId: session.id, supportSessionExpiresAt: Number(value.expiresAtMs) });
+    await supportAudit(session.id, { action: 'support_session_resumed', actorUid: platformUid, detail: 'تمت استعادة الجلسة بعد إعادة مطابقة رقم الهاتف.' });
+    return { success: true, customToken, expiresAtMs: Number(value.expiresAtMs) };
+  } catch (error) {
+    logger.error('Failed to resolve a stuck support impersonation session.', {
+      uid: request.auth?.uid || null,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { success: false, message: 'تعذر إتمام جلسة الدعم الآن. أعد المحاولة بعد لحظات.' };
+  }
+});
+
+// This trigger makes each direct Firestore edit made during a support session
+// append-only. Clients have no Firestore permissions for these records.
+export const auditSupportSessionOperationalWrite = onDocumentWrittenWithAuthContext({ document: 'companies/{companyId}/{collectionId}/{documentId}', region: 'us-central1' }, async event => {
+  if (!event.authId || event.authType === 'service_account' || event.authType === 'system') return;
+  const pointer = await db.doc(`supportImpersonationActive/${event.authId}`).get();
+  const active = pointer.data();
+  if (!pointer.exists || active?.companyId !== event.params.companyId || Number(active.expiresAtMs || 0) <= Date.now()) return;
+  const sessionRef = db.doc(`supportImpersonationSessions/${String(active.sessionId)}`);
+  const session = await sessionRef.get();
+  if (!session.exists || session.data()?.status !== 'active') return;
+  const before = event.data?.before.exists ? event.data.before.data() || {} : {};
+  const after = event.data?.after.exists ? event.data.after.data() || {} : {};
+  const operation = !event.data?.before.exists ? 'create' : !event.data?.after.exists ? 'delete' : 'update';
+  const changedFields = [...new Set([...Object.keys(before), ...Object.keys(after)].filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key])))].slice(0, 100);
+  const source = Object.keys(after).length ? after : before;
+  const asAuditValue = (value: unknown): string => {
+    if (value === undefined || value === null || value === '') return 'فارغ';
+    if (typeof value === 'string') return value.length > 180 ? `${value.slice(0, 177)}…` : value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) return `${value.length} عنصر`;
+    if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') return ((value as { toDate: () => Date }).toDate()).toLocaleString('ar-EG');
+    return 'تم تحديث بيانات مركبة';
+  };
+  const entityLabel = event.params.collectionId === 'orders'
+    ? `الطلب ${String(source.orderNumber || event.params.documentId)}${source.customerName ? ` — ${String(source.customerName)}` : ''}`
+    : event.params.collectionId === 'customers'
+      ? `العميل ${String(source.name || source.customerName || event.params.documentId)}`
+      : event.params.collectionId === 'workers' || event.params.collectionId === 'members'
+        ? `الحساب ${String(source.name || source.displayName || event.params.documentId)}`
+        : `${event.params.collectionId}/${event.params.documentId}`;
+  const changes = changedFields.filter(field => !['updatedAt', 'createdAt'].includes(field)).slice(0, 30).map(field => ({ field, before: asAuditValue(before[field]), after: asAuditValue(after[field]) }));
+  await supportAudit(String(active.sessionId), { action: `firestore_${operation}`, actorUid: event.authId, companyId: event.params.companyId, collection: event.params.collectionId, documentId: event.params.documentId, entityLabel, changedFields, changes });
+});
 
 /** Irreversibly removes a tenant and every record/account owned by it. Platform owner only. */
 export const deletePlatformCompany = onCall({ region: 'us-central1', timeoutSeconds: 540, enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
@@ -756,6 +1052,208 @@ const timestampIso = (value: unknown): string | undefined => {
   return undefined;
 };
 
+type PlatformOrderAnalyticsRecord = {
+  id: string; month: string; orderNumber: string; customerName: string; customerPhone: string;
+  bookingDate: string; eventDate: string; deliveryDate: string; returnDate: string; eventLocation: string;
+  totalPrice: number; deposit: number; totalPaid: number; remainingBalance: number;
+  workerCost: number; transportationCost: number; otherExpenses: number; orderStatus: string; notes: string;
+};
+const platformNumber = (value: unknown) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+};
+const platformDate = (value: unknown) => {
+  const iso = timestampIso(value) || '';
+  const match = iso.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : '';
+};
+const platformOrderMonth = (data: Record<string, unknown>) => {
+  const date = platformDate(data.eventDate) || platformDate(data.weddingDate) || platformDate(data.bookingDate) || platformDate(data.createdAt);
+  return date.slice(0, 7);
+};
+const platformOrderRecord = (id: string, data: Record<string, unknown>): PlatformOrderAnalyticsRecord => {
+  const totalPrice = platformNumber(data.totalPrice);
+  const totalPaid = platformNumber(data.totalPaid);
+  return {
+    id,
+    month: platformOrderMonth(data),
+    orderNumber: String(data.orderNumber || id),
+    customerName: String(data.customerName || 'بدون اسم'),
+    customerPhone: String(data.customerPhone || ''),
+    bookingDate: platformDate(data.bookingDate),
+    eventDate: platformDate(data.eventDate) || platformDate(data.weddingDate),
+    deliveryDate: platformDate(data.deliveryDate),
+    returnDate: platformDate(data.returnDate),
+    eventLocation: String(data.eventLocation || ''),
+    totalPrice,
+    deposit: platformNumber(data.deposit),
+    totalPaid,
+    remainingBalance: Math.max(0, totalPrice - totalPaid),
+    workerCost: platformNumber(data.workerCost),
+    transportationCost: platformNumber(data.transportationCost),
+    otherExpenses: platformNumber(data.otherExpenses),
+    orderStatus: String(data.orderStatus || 'new'),
+    notes: String(data.notes || ''),
+  };
+};
+type PlatformCashOrder = {
+  id: string; orderNumber: string; customerName: string; orderStatus: string; totalPrice: number; deposit: number; totalPaid: number;
+  bookingDate: string; eventDate: string; weddingDate: string; createdAt: string; workerCost: number; transportationCost: number; otherExpenses: number;
+  paymentMethod: string; paymentHistory: Array<Record<string, unknown>>;
+};
+const platformCashOrder = (id: string, data: Record<string, unknown>): PlatformCashOrder => ({
+  id, orderNumber: String(data.orderNumber || id), customerName: String(data.customerName || 'بدون اسم'), orderStatus: String(data.orderStatus || 'new'),
+  totalPrice: platformNumber(data.totalPrice), deposit: platformNumber(data.deposit), totalPaid: platformNumber(data.totalPaid),
+  bookingDate: platformDate(data.bookingDate), eventDate: platformDate(data.eventDate), weddingDate: platformDate(data.weddingDate), createdAt: platformDate(data.createdAt),
+  workerCost: platformNumber(data.workerCost), transportationCost: platformNumber(data.transportationCost), otherExpenses: platformNumber(data.otherExpenses),
+  paymentMethod: String(data.paymentMethod || 'other'), paymentHistory: Array.isArray(data.paymentHistory) ? data.paymentHistory.filter((payment): payment is Record<string, unknown> => Boolean(payment && typeof payment === 'object')) : [],
+});
+const platformMonthMatches = (value: string, month: string) => value.startsWith(`${month}-`);
+const platformCashCollections = (order: PlatformCashOrder) => {
+  const history = order.paymentHistory.filter(payment => platformNumber(payment.amount) > 0);
+  const historyTotal = history.reduce((sum, payment) => sum + platformNumber(payment.amount), 0);
+  const actualPaid = order.totalPaid > 0 ? order.totalPaid : Math.max(order.deposit, historyTotal);
+  const fallbackDate = order.bookingDate || order.createdAt;
+  const entries = history.map((payment, index) => {
+    const amount = platformNumber(payment.amount);
+    const date = platformDate(payment.date) || fallbackDate;
+    const explicitType = payment.type === 'deposit' || payment.type === 'settlement' ? payment.type : '';
+    const paymentType = explicitType || (index === 0 && (date === fallbackDate || amount <= order.deposit) ? 'deposit' : 'settlement');
+    return { orderId: order.id, amount, date, paymentType, retained: order.orderStatus === 'cancelled_deposit_retained' };
+  });
+  if (actualPaid > historyTotal) entries.push({ orderId: order.id, amount: actualPaid - historyTotal, date: order.orderStatus === 'completed' ? (order.eventDate || order.weddingDate || fallbackDate) : fallbackDate, paymentType: history.length === 0 && order.deposit > 0 ? 'deposit' : 'settlement', retained: order.orderStatus === 'cancelled_deposit_retained' });
+  return entries;
+};
+const platformMonthlyAccounts = (orders: PlatformCashOrder[], expenses: Array<Record<string, unknown>>, month: string) => {
+  const monthEnd = `${month}-31`;
+  const eventDate = (order: PlatformCashOrder) => order.eventDate || order.weddingDate;
+  const completedInMonth = (order: PlatformCashOrder) => order.orderStatus === 'completed' && platformMonthMatches(eventDate(order), month);
+  const upcoming = (order: PlatformCashOrder) => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && !completedInMonth(order);
+  const allCollections = orders.filter(order => order.orderStatus !== 'cancelled').flatMap(platformCashCollections);
+  const collections = allCollections.filter(collection => platformMonthMatches(collection.date, month));
+  const sum = (items: Array<{ amount: number }>) => items.reduce((total, item) => total + item.amount, 0);
+  const byId = new Map(orders.map(order => [order.id, order]));
+  const collectedFromCompletedOrders = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && completedInMonth(order)); }));
+  const retainedCancelledDeposits = sum(collections.filter(collection => collection.retained));
+  const advancesFromUpcomingOrders = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && upcoming(order) && !collection.retained); }));
+  const standardCollections = collections.filter(collection => !collection.retained);
+  const totalDepositsPaid = sum(standardCollections.filter(collection => collection.paymentType === 'deposit')) + retainedCancelledDeposits;
+  const totalSettlementPayments = sum(standardCollections.filter(collection => collection.paymentType === 'settlement'));
+  const grossMonthlyIncome = totalDepositsPaid + totalSettlementPayments;
+  const expectedSettlementPayments = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + Math.max(0, order.totalPrice - (order.totalPaid > 0 ? order.totalPaid : order.deposit)), 0);
+  const upcomingOrderDeposits = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && upcoming(order) && !collection.retained && collection.paymentType === 'deposit'); }));
+  const operatingExpenses = expenses.filter(expense => platformMonthMatches(platformDate(expense.date), month) && expense.type !== 'capital' && String(expense.category || '') !== 'رأس مال' && !expense.deletedAt).reduce((total, expense) => total + platformNumber(expense.amount), 0);
+  const completedOrderCosts = orders.filter(completedInMonth).reduce((total, order) => total + order.workerCost + order.transportationCost + order.otherExpenses, 0);
+  const upcomingOrderOtherExpenses = orders.filter(order => upcoming(order) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + order.otherExpenses, 0);
+  const completedOrdersNetProfit = collectedFromCompletedOrders - completedOrderCosts;
+  const netMonthlyCash = completedOrdersNetProfit + advancesFromUpcomingOrders + retainedCancelledDeposits - upcomingOrderOtherExpenses;
+  const executedOrdersNetProfit = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + order.totalPrice - order.otherExpenses - order.workerCost - order.transportationCost, 0);
+  const futureExecutionBookingDeposits = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(order.bookingDate || order.createdAt, month) && eventDate(order) > monthEnd).flatMap(platformCashCollections).filter(collection => platformMonthMatches(collection.date, month) && collection.paymentType === 'deposit').reduce((total, collection) => total + collection.amount, 0);
+  return { month, netMonthlyCash, grossMonthlyIncome, completedOrdersNetProfit, retainedCancelledDeposits, upcomingOrderDepositsNet: upcomingOrderDeposits - upcomingOrderOtherExpenses, upcomingOrderOtherExpenses, netMonthlyOrderProfit: executedOrdersNetProfit + retainedCancelledDeposits + futureExecutionBookingDeposits, expectedSettlementPayments, operatingExpenses };
+};
+
+/** Owner-only directory of company owners; this cross-tenant contact data is never exposed through Firestore rules. */
+export const getPlatformCompanyContacts = onCall({ region: 'us-central1', timeoutSeconds: 120, enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  if (!actorUid) return { success: false, message: 'غير مصرح بعرض جهات التواصل.' };
+  const companies = await db.collection('companies').get();
+  const contacts = (await Promise.all(companies.docs.map(async company => {
+    const data = company.data();
+    const companyName = String(data.name || 'شركة بدون اسم');
+    const owners = await company.ref.collection('members').where('role', '==', 'company_super_admin').get();
+    if (owners.empty) return [{
+      companyId: company.id, companyName, name: String(data.ownerName || 'غير مسجل'), email: String(data.ownerEmail || ''), phone: '', status: 'unknown',
+    }];
+    return owners.docs.map(owner => {
+      const member = owner.data();
+      return {
+        companyId: company.id, companyName,
+        name: String(member.name || data.ownerName || 'غير مسجل'),
+        email: String(member.email || data.ownerEmail || ''),
+        phone: String(member.phone || ''),
+        status: String(member.status || 'unknown'),
+      };
+    });
+  }))).flat().sort((a, b) => a.companyName.localeCompare(b.companyName, 'ar') || a.name.localeCompare(b.name, 'ar'));
+  await db.collection('platformAuditLogs').add({ action: 'platform_company_contacts_viewed', createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
+  return { success: true, message: 'تم تحميل جهات التواصل.', contacts };
+});
+
+/** Cross-company orders are deliberately exposed only to the platform owner. */
+export const getPlatformCompanyOrderAnalytics = onCall({ region: 'us-central1', timeoutSeconds: 120, memory: '512MiB', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  const companyId = typeof (request.data as Record<string, unknown> | undefined)?.companyId === 'string' ? String((request.data as Record<string, unknown>).companyId).trim() : '';
+  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId)) return { success: false, message: 'غير مصرح بعرض تحليل طلبات الشركة.' };
+  const companyRef = db.doc(`companies/${companyId}`);
+  const [company, ordersSnapshot, expensesSnapshot] = await Promise.all([
+    companyRef.get(),
+    companyRef.collection('orders').get(),
+    companyRef.collection('expenses').get(),
+  ]);
+  if (!company.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const rawOrders = ordersSnapshot.docs.filter(order => !order.data()?.deletedAt).map(order => ({ id: order.id, data: order.data() }));
+  const orders = rawOrders.map(order => platformOrderRecord(order.id, order.data));
+  const cashOrders = rawOrders.map(order => platformCashOrder(order.id, order.data));
+  const expenseRecords = expensesSnapshot.docs.map(expense => expense.data());
+  const monthly = [...new Set(orders.map(order => order.month).filter(Boolean))]
+    .map(month => ({ month, orderCount: orders.filter(order => order.month === month).length }))
+    .sort((a, b) => b.month.localeCompare(a.month));
+  const latest = monthly[0];
+  const previous = monthly[1];
+  const growthRate = latest && previous && previous.orderCount > 0 ? ((latest.orderCount - previous.orderCount) / previous.orderCount) * 100 : null;
+  const monthlyAccounts = monthly.map(month => platformMonthlyAccounts(cashOrders, expenseRecords, month.month));
+  await db.collection('platformAuditLogs').add({ action: 'platform_company_orders_analytics_viewed', companyId, createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
+  return {
+    success: true,
+    message: 'تم تحميل تحليل الطلبات.',
+    analytics: {
+      totalOrders: orders.length,
+      totalNetProfit: monthlyAccounts.reduce((sum, month) => sum + month.netMonthlyCash, 0),
+      growthRate,
+      growthMonth: latest?.month || null,
+      months: monthly,
+      monthlyAccounts,
+      orders: orders.sort((a, b) => (b.eventDate || b.bookingDate).localeCompare(a.eventDate || a.bookingDate)),
+    },
+  };
+});
+
+/** The platform owner can correct an order without receiving general tenant write access. */
+export const updatePlatformCompanyOrder = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const orderId = typeof data.orderId === 'string' ? data.orderId.trim() : '';
+  const clean = (key: string, max = 1000) => typeof data[key] === 'string' ? data[key].trim().slice(0, max) : '';
+  const date = (key: string, optional = true) => {
+    const value = clean(key, 10);
+    return (optional && !value) || /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  };
+  const number = (key: string) => {
+    const value = Number(data[key]);
+    return Number.isFinite(value) && value >= 0 && value <= 1000000000 ? value : null;
+  };
+  const orderStatus = clean('orderStatus', 40);
+  const statuses = new Set(['new', 'confirmed', 'preparing', 'out_for_delivery', 'completed', 'returned', 'cancelled', 'cancelled_deposit_retained', 'pending', 'in_progress']);
+  const bookingDate = date('bookingDate'); const eventDate = date('eventDate', false); const deliveryDate = date('deliveryDate'); const returnDate = date('returnDate');
+  const totalPrice = number('totalPrice'); const deposit = number('deposit'); const requestedPaid = number('totalPaid'); const workerCost = number('workerCost'); const transportationCost = number('transportationCost'); const otherExpenses = number('otherExpenses');
+  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !/^[A-Za-z0-9_-]{1,128}$/.test(orderId) || !clean('orderNumber', 120) || !clean('customerName', 200) || !eventDate || !statuses.has(orderStatus) || [totalPrice, deposit, requestedPaid, workerCost, transportationCost, otherExpenses].some(value => value === null)) return { success: false, message: 'بيانات الأوردر غير صالحة.' };
+  const orderRef = db.doc(`companies/${companyId}/orders/${orderId}`);
+  const current = await orderRef.get();
+  if (!current.exists || current.data()?.deletedAt) return { success: false, message: 'الأوردر غير موجود.' };
+  const historyTotal = Array.isArray(current.data()?.paymentHistory) ? current.data()!.paymentHistory.reduce((sum: number, payment: unknown) => sum + platformNumber((payment as Record<string, unknown>)?.amount), 0) : 0;
+  const totalPaid = Math.max(deposit!, requestedPaid!, historyTotal);
+  const paymentStatus = totalPaid >= totalPrice! && totalPrice! > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid';
+  await orderRef.update({
+    orderNumber: clean('orderNumber', 120), customerName: clean('customerName', 200), customerPhone: clean('customerPhone', 60),
+    bookingDate, eventDate, weddingDate: eventDate, deliveryDate, returnDate, eventLocation: clean('eventLocation', 500),
+    totalPrice, deposit, totalPaid, remainingBalance: Math.max(0, totalPrice! - totalPaid), workerCost, transportationCost, otherExpenses,
+    orderStatus, paymentStatus, notes: clean('notes', 4000), updatedAt: FieldValue.serverTimestamp(), updatedByPlatformOwner: actorUid,
+  });
+  await db.collection('platformAuditLogs').add({ action: 'platform_company_order_updated', companyId, orderId, createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
+  return { success: true, message: 'تم تحديث الأوردر بنجاح.' };
+});
+
 /** Central, owner-only console data. Browser clients never write these paths directly. */
 export const getPlatformConsoleState = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const uid = await isActivePlatformUserFor(request, 'platform:console:read');
@@ -771,8 +1269,9 @@ export const getPlatformConsoleState = onCall({ region: 'us-central1', enforceAp
     compactMode: stored.compactMode === true,
     dailyDigest: stored.dailyDigest !== false,
   };
-  const supportTickets = ticketsSnapshot.docs.map(ticket => {
+  const supportTickets = (await Promise.all(ticketsSnapshot.docs.map(async ticket => {
     const data = ticket.data();
+    const activitySnapshot = await ticket.ref.collection('activity').orderBy('createdAt', 'desc').limit(12).get();
     return {
       id: ticket.id,
       companyId: String(data.companyId || ''),
@@ -781,11 +1280,23 @@ export const getPlatformConsoleState = onCall({ region: 'us-central1', enforceAp
       status: ['open', 'in_progress', 'resolved'].includes(String(data.status)) ? String(data.status) : 'open',
       priority: ['low', 'normal', 'high', 'urgent'].includes(String(data.priority)) ? String(data.priority) : 'normal',
       assignedTo: typeof data.assignedTo === 'string' ? data.assignedTo : null,
+      source: data.source === 'company_user' ? 'company_user' : 'platform_support',
+      requesterName: typeof data.requesterName === 'string' ? data.requesterName : '',
+      requesterEmail: typeof data.requesterEmail === 'string' ? data.requesterEmail : '',
+      requesterRole: typeof data.requesterRole === 'string' ? data.requesterRole : '',
+      lastAction: typeof data.lastAction === 'string' ? data.lastAction : '',
+      lastActionByName: typeof data.lastActionByName === 'string' ? data.lastActionByName : '',
+      lastActionByEmail: typeof data.lastActionByEmail === 'string' ? data.lastActionByEmail : '',
+      lastActionAt: timestampIso(data.lastActionAt),
+      activity: activitySnapshot.docs.map(activity => {
+        const value = activity.data();
+        return { id: activity.id, action: String(value.action || 'إجراء على طلب الدعم'), actorName: String(value.actorName || ''), actorEmail: String(value.actorEmail || ''), createdAt: timestampIso(value.createdAt) };
+      }),
       commentCount: Math.max(0, Number(data.commentCount || 0)),
       createdAt: timestampIso(data.createdAt),
       updatedAt: timestampIso(data.updatedAt),
     };
-  }).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  }))).sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
   const notifications = notificationsSnapshot.docs.map(notification => {
     const data = notification.data();
     return {
@@ -821,9 +1332,64 @@ export const createPlatformSupportTicket = onCall({ region: 'us-central1', enfor
   const company = await db.doc(`companies/${companyId}`).get();
   if (!company.exists) return { success: false, message: 'الشركة غير موجودة.' };
   const timestamp = FieldValue.serverTimestamp();
-  const ticket = await db.collection('platformSupportTickets').add({ companyId, companyName: String(company.data()?.name || 'شركة'), subject, status: 'open', priority: 'normal', commentCount: 0, createdAt: timestamp, updatedAt: timestamp, createdBy: uid });
+  const actor = await platformActorIdentity(uid);
+  const ticket = await db.collection('platformSupportTickets').add({ companyId, companyName: String(company.data()?.name || 'شركة'), subject, source: 'platform_support', status: 'open', priority: 'normal', commentCount: 0, lastAction: 'سجّل طلب الدعم', lastActionByName: actor.name, lastActionByEmail: actor.email, lastActionAt: timestamp, createdAt: timestamp, updatedAt: timestamp, createdBy: uid });
+  await ticket.collection('activity').add({ action: 'سجّل طلب الدعم', actorUid: uid, actorName: actor.name, actorEmail: actor.email, createdAt: FieldValue.serverTimestamp() });
   await db.collection('platformAuditLogs').add({ action: 'platform_support_ticket_created', companyId, ticketId: ticket.id, createdBy: uid, timestamp });
   return { success: true, message: 'تم تسجيل طلب الدعم.' };
+});
+
+/** A company member can submit a ticket only from their own tenant and only
+ * when the company owner granted the support-request permission. */
+export const createCompanySupportTicket = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request) => {
+  const uid = request.auth?.uid || '';
+  const token = (request.auth?.token || {}) as Record<string, unknown>;
+  const companyId = typeof token.companyId === 'string' ? token.companyId : '';
+  const role = typeof token.role === 'string' ? token.role : '';
+  const data = (request.data || {}) as Record<string, unknown>;
+  const issue = typeof data.issue === 'string' ? data.issue.trim() : '';
+  if (!uid || !companyId || !role || typeof token.supportSessionId === 'string') return { success: false, message: 'يجب تسجيل الدخول بحساب شركة نشط لإرسال طلب الدعم.' };
+  if (issue.length < 5 || issue.length > 2000) return { success: false, message: 'اكتب وصفًا للمشكلة بين 5 و2000 حرف.' };
+
+  const [company, member] = await Promise.all([
+    db.doc(`companies/${companyId}`).get(),
+    db.doc(`companies/${companyId}/members/${uid}`).get(),
+  ]);
+  if (!company.exists || company.data()?.status === 'archived') return { success: false, message: 'بيانات الشركة غير متاحة لإرسال الطلب.' };
+  if (!member.exists || member.data()?.status !== 'active' || String(member.data()?.role || '') !== role) return { success: false, message: 'حسابك غير مصرح له بإرسال طلبات الدعم.' };
+
+  const savedPermissions = Array.isArray(member.data()?.permissions)
+    ? member.data()?.permissions.filter((value: unknown): value is string => typeof value === 'string')
+    : null;
+  const canRequestSupport = savedPermissions
+    ? savedPermissions.includes('company:support:request')
+    : ['company_super_admin', 'manager', 'employee', 'worker'].includes(role);
+  if (!canRequestSupport) return { success: false, message: 'صاحب الشركة لم يمنح هذا الحساب صلاحية إرسال طلبات الدعم الفني.' };
+
+  const timestamp = FieldValue.serverTimestamp();
+  const ticket = await db.collection('platformSupportTickets').add({
+    companyId,
+    companyName: String(company.data()?.name || 'شركة'),
+    subject: issue,
+    source: 'company_user',
+    requesterUid: uid,
+    requesterName: String(member.data()?.name || ''),
+    requesterEmail: String(member.data()?.email || token.email || ''),
+    requesterRole: role,
+    status: 'open',
+    priority: 'normal',
+    commentCount: 0,
+    lastAction: 'أرسل طلب الدعم',
+    lastActionByName: String(member.data()?.name || member.data()?.email || 'مستخدم الشركة'),
+    lastActionByEmail: String(member.data()?.email || token.email || ''),
+    lastActionAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    createdBy: uid,
+  });
+  await ticket.collection('activity').add({ action: 'أرسل طلب الدعم', actorUid: uid, actorName: String(member.data()?.name || member.data()?.email || 'مستخدم الشركة'), actorEmail: String(member.data()?.email || token.email || ''), createdAt: FieldValue.serverTimestamp() });
+  await db.collection('platformAuditLogs').add({ action: 'company_user_support_ticket_created', companyId, ticketId: ticket.id, createdBy: uid, timestamp, metadata: { requesterRole: role } });
+  return { success: true, message: 'تم إرسال طلبك إلى فريق الدعم الفني.' };
 });
 
 export const updatePlatformSupportTicket = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
@@ -838,7 +1404,13 @@ export const updatePlatformSupportTicket = onCall({ region: 'us-central1', enfor
   const current = await ticket.get();
   if (!current.exists) return { success: false, message: 'طلب الدعم غير موجود.' };
   const timestamp = FieldValue.serverTimestamp();
-  await ticket.update({ status, ...(priority !== undefined ? { priority } : {}), ...(assignedTo !== undefined ? { assignedTo } : {}), updatedAt: timestamp, updatedBy: uid });
+  const actor = await platformActorIdentity(uid);
+  const previousStatus = String(current.data()?.status || 'open');
+  const action = previousStatus !== status ? `نقل الطلب إلى ${supportTicketStatusLabel[status]}` : priority !== undefined ? 'غيّر أولوية الطلب' : assignedTo !== undefined ? 'حدّث المسؤول عن الطلب' : 'حدّث طلب الدعم';
+  await Promise.all([
+    ticket.update({ status, ...(priority !== undefined ? { priority } : {}), ...(assignedTo !== undefined ? { assignedTo } : {}), lastAction: action, lastActionByName: actor.name, lastActionByEmail: actor.email, lastActionAt: timestamp, updatedAt: timestamp, updatedBy: uid }),
+    ticket.collection('activity').add({ action, actorUid: uid, actorName: actor.name, actorEmail: actor.email, createdAt: FieldValue.serverTimestamp() }),
+  ]);
   await db.collection('platformAuditLogs').add({ action: 'platform_support_ticket_updated', companyId: current.data()?.companyId || null, ticketId, createdBy: uid, timestamp, metadata: { status, priority: priority || null, assignedTo: assignedTo || null } });
   return { success: true, message: 'تم تحديث طلب الدعم.' };
 });
@@ -853,12 +1425,14 @@ export const addPlatformSupportComment = onCall({ region: 'us-central1', enforce
   const current = await ticket.get();
   if (!current.exists) return { success: false, message: 'طلب الدعم غير موجود.' };
   const timestamp = FieldValue.serverTimestamp();
+  const actor = await platformActorIdentity(uid);
   await db.runTransaction(async tx => {
     const fresh = await tx.get(ticket);
     if (!fresh.exists) throw new Error('TICKET_NOT_FOUND');
     tx.create(ticket.collection('comments').doc(), { body, createdBy: uid, createdAt: timestamp });
-    tx.update(ticket, { commentCount: FieldValue.increment(1), updatedAt: timestamp, updatedBy: uid });
+    tx.update(ticket, { commentCount: FieldValue.increment(1), lastAction: 'أضاف تعليقًا', lastActionByName: actor.name, lastActionByEmail: actor.email, lastActionAt: timestamp, updatedAt: timestamp, updatedBy: uid });
   });
+  await ticket.collection('activity').add({ action: 'أضاف تعليقًا', actorUid: uid, actorName: actor.name, actorEmail: actor.email, createdAt: FieldValue.serverTimestamp() });
   await db.collection('platformAuditLogs').add({ action: 'platform_support_comment_added', companyId: current.data()?.companyId || null, ticketId, createdBy: uid, timestamp });
   return { success: true, message: 'تمت إضافة التعليق.' };
 });

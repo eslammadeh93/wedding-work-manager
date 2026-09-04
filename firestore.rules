@@ -22,9 +22,22 @@ service cloud.firestore {
     function companyMember(companyId) {
       return get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
     }
+    // A support token is useful only while its server-side session is active,
+    // unexpired, and tied to this exact company.  This makes the five-minute
+    // limit authoritative even if a browser keeps an old Firebase token.
+    function activeSupportSession(companyId) {
+      return isSignedIn()
+        && request.auth.token.supportSessionId is string
+        && exists(/databases/$(database)/documents/supportImpersonationSessions/$(request.auth.token.supportSessionId))
+        && get(/databases/$(database)/documents/supportImpersonationSessions/$(request.auth.token.supportSessionId)).data.status == 'active'
+        && get(/databases/$(database)/documents/supportImpersonationSessions/$(request.auth.token.supportSessionId)).data.companyId == companyId
+        && get(/databases/$(database)/documents/supportImpersonationSessions/$(request.auth.token.supportSessionId)).data.platformUid == request.auth.uid
+        && get(/databases/$(database)/documents/supportImpersonationSessions/$(request.auth.token.supportSessionId)).data.expiresAtMs > request.time.toMillis();
+    }
     function isCompanyMember(companyId) {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid))
+        && (!('supportSessionId' in request.auth.token) || activeSupportSession(companyId));
     }
     function memberIsActive(companyId) { return isCompanyMember(companyId) && companyMember(companyId).data.status == 'active'; }
     function memberRole(companyId) { return companyMember(companyId).data.role; }
@@ -169,6 +182,10 @@ service cloud.firestore {
     match /platformAggregates/{documentId} { allow read, write: if false; }
     match /platformAggregateEvents/{eventId} { allow read, write: if false; }
     match /platformRebuildRuns/{runId} { allow read, write: if false; }
+    // Session and per-session audit data are append-only from trusted backend
+    // code. No client, including platform owners, can change or erase them.
+    match /supportImpersonationSessions/{sessionId} { allow read, write: if false; }
+    match /supportImpersonationActive/{uid} { allow read, write: if false; }
 
     match /companies/{companyId} {
       allow read: if isPlatformUser() || memberIsActive(companyId);

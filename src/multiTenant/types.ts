@@ -69,4 +69,7 @@ export interface AuthSession {
   memberStatus?: AccountStatus;
   companyStatus?: CompanyStatus;
   permissions: readonly string[];
+  /** Present only while a platform support account is temporarily in a company workspace. */
+  supportSessionId?: string;
+  supportSessionExpiresAt?: number;
 }

@@ -18,6 +18,7 @@ import {
   ArchiveRestore,
   History,
   Calculator,
+  Headphones,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useData } from '../context/DataContext';
@@ -44,7 +45,8 @@ export type ActiveTab =
   | 'settings'
   | 'members'
   | 'profile'
-  | 'recycleBin';
+  | 'recycleBin'
+  | 'companySupport';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -99,6 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'members', group: 'administration', label: 'إدارة الموظفين', icon: UsersRound, roles: ['super_admin', 'manager'], permission: 'company:members:read' },
     { id: 'recycleBin', group: 'administration', label: language === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin', icon: ArchiveRestore, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
     { id: 'settings', group: 'administration', labelKey: 'settings', icon: SettingsIcon, roles: ['super_admin', 'admin', 'manager'], permission: 'company:settings:read' },
+    { id: 'companySupport', group: 'account', label: language === 'ar' ? 'الدعم الفني' : 'Technical Support', icon: Headphones, roles: ['super_admin', 'admin', 'manager', 'employee', 'worker'], permission: 'company:support:request' },
     { id: 'profile', group: 'account', label: 'الملف الشخصي', icon: UserRound, roles: ['super_admin', 'manager'] },
   ];
 

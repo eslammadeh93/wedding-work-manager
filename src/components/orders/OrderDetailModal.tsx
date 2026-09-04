@@ -27,6 +27,8 @@ import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { functions } from '../../firebase/config';
+import { httpsCallable } from 'firebase/functions';
 import { OrderSourceBadge } from './OrderSourceBadge';
 import { OrderAttachmentsSection, OrderCustomerSection, OrderExecutionLog, OrderFinancialSummary, OrderInventorySection, OrderPaymentHistory } from './OrderDetailSections';
 import { OrderImagePreviewModal } from './OrderImagePreviewModal';
@@ -87,6 +89,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       }).catch(console.error);
     }
   }, [isWorker, order, profile, addActivityLog]);
+
+  React.useEffect(() => {
+    if (!authSession?.supportSessionId || !order || hasLoggedOpenRef.current === `support:${order.id}`) return;
+    hasLoggedOpenRef.current = `support:${order.id}`;
+    const record = httpsCallable<{ event: 'order_opened'; orderNumber: string; customerName: string }, { success: boolean }>(functions, 'recordSupportImpersonationActivity');
+    void record({ event: 'order_opened', orderNumber: order.orderNumber, customerName: order.customerName }).catch(error => console.warn('Support order-open audit failed:', error));
+  }, [authSession?.supportSessionId, order?.id, order?.orderNumber, order?.customerName]);
 
   React.useEffect(() => {
     if (isDemo || !order || !authSession) { setWorkerMovements([]); return; }

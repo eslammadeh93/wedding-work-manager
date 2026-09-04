@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   User,
   signInWithEmailAndPassword,
@@ -23,7 +23,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import firebaseConfigJson from '../../firebase-applet-config.json';
-import { auth, db, functions } from '../firebase/config';
+import { auth, db, functions, isSupportSessionFrame } from '../firebase/config';
 import { UserProfile, UserRole, Worker } from '../types';
 import { sanitizeData, sanitizeText } from '../utils/security';
 import { USE_MULTI_TENANT_DATA, getPostLoginPath, requestWorkerCustomToken, resolveMultiTenantSession, type AuthSession } from '../multiTenant';
@@ -59,6 +59,8 @@ interface AuthContextType {
   loginWorker: (username: string, loginCode: string) => Promise<boolean>;
   loginMultiTenantEmail: (email: string, pass: string) => Promise<void>;
   loginMultiTenantWorker: (companyCode: string, username: string, loginCode: string) => Promise<boolean>;
+  enterSupportSession: (customToken: string) => Promise<void>;
+  endSupportSession: () => Promise<void>;
   provisionWorkerAccount: (worker: Worker) => Promise<string>;
   createFirstSuperAdmin: (data: CreateFirstSuperAdminData) => Promise<void>;
   logout: (reason?: string) => Promise<void>;
@@ -149,6 +151,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [usersInitialized, setUsersInitialized] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+  // The child iframe may restore an old platform Auth record before receiving
+  // the short-lived company token from its parent. Keep that state dormant.
+  const supportTokenPendingRef = useRef(isSupportSessionFrame);
+  const supportTokenSigningRef = useRef(false);
 
   const activateDemo = () => {
     setIsDemo(true);
@@ -269,6 +275,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthSession(null);
   };
 
+  const enterSupportSession = async (customToken: string) => {
+    setAuthError(null);
+    await signInWithCustomToken(auth, customToken);
+  };
+
+  const endSupportSession = async () => {
+    setAuthError(null);
+    if (isSupportSessionFrame) {
+      // The parent owns the platform identity. It removes this iframe first,
+      // then ends the server session using that still-valid platform account.
+      // This order is what eliminates the brief permission-denied message.
+      window.parent.postMessage({ type: 'wwm_support_session_ending' }, window.location.origin);
+      return;
+    }
+    const callable = httpsCallable<undefined, { success: boolean; message?: string; customToken?: string }>(functions, 'endSupportImpersonationSession');
+    const result = (await callable()).data;
+    if (!result.success || !result.customToken) throw new Error(result.message || 'تعذر إنهاء جلسة الدعم.');
+    await signInWithCustomToken(auth, result.customToken);
+  };
+
+  useEffect(() => {
+    if (!isSupportSessionFrame) return;
+    let readyTimer: number | undefined;
+    const announceReady = () => window.parent.postMessage({ type: 'wwm_support_frame_ready' }, window.location.origin);
+    const receiveSupportToken = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.data?.type !== 'wwm_support_session_token' || typeof event.data?.token !== 'string') return;
+      if (supportTokenSigningRef.current) return;
+      supportTokenPendingRef.current = false;
+      supportTokenSigningRef.current = true;
+      setAuthError(null);
+      void signInWithCustomToken(auth, event.data.token)
+        .catch(error => {
+          supportTokenPendingRef.current = true;
+          setAuthError(error instanceof Error ? error.message : 'تعذر فتح جلسة الدعم.');
+        })
+        .finally(() => { supportTokenSigningRef.current = false; });
+    };
+    window.addEventListener('message', receiveSupportToken);
+    announceReady();
+    // postMessage is not buffered. Repeating readiness makes token delivery
+    // reliable even when either side loads quickly or a browser is busy.
+    readyTimer = window.setInterval(() => {
+      if (supportTokenPendingRef.current && !supportTokenSigningRef.current) announceReady();
+    }, 300);
+    return () => {
+      window.removeEventListener('message', receiveSupportToken);
+      if (readyTimer !== undefined) window.clearInterval(readyTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authSession?.supportSessionId || !authSession.supportSessionExpiresAt) return;
+    const delay = Math.max(0, authSession.supportSessionExpiresAt - Date.now());
+    const timeout = window.setTimeout(() => { void endSupportSession().catch(error => setAuthError(error instanceof Error ? error.message : 'انتهت جلسة الدعم.')); }, delay + 250);
+    return () => window.clearTimeout(timeout);
+  }, [authSession?.supportSessionId, authSession?.supportSessionExpiresAt]);
+
   const loginWorker = async (usernameInput: string, loginCodeInput: string): Promise<boolean> => {
     setAuthError(null);
     const username = sanitizeText(usernameInput).trim().toLowerCase();
@@ -330,6 +393,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const version = ++resolutionVersion;
       const isCurrent = () => !disposed && version === resolutionVersion;
       if (!isCurrent()) return;
+      if (isSupportSessionFrame && supportTokenPendingRef.current) {
+        setUser(null);
+        setProfile(null);
+        setAuthSession(null);
+        setLoading(false);
+        return;
+      }
       // The demo account is a client-only session. It intentionally has no
       // Firebase identity, so no Firestore rule can ever grant it access.
       if (hasDemoSession()) {
@@ -347,6 +417,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (!isCurrent()) return;
             console.info('[auth-context] session resolved', { userType: session.userType, role: session.role, companyId: session.companyId || null });
             setAuthSession(session);
+            if (isSupportSessionFrame && session.supportSessionId) {
+              window.parent.postMessage({ type: 'wwm_support_session_active' }, window.location.origin);
+            }
             // Compatibility shape for legacy UI only; authorization remains AuthSession.
             const compatibleRole: UserRole = session.role === 'company_super_admin' || session.userType === 'platform' ? 'super_admin' : session.role as UserRole;
             const tokenResult = session.role === 'worker' ? await currentUser.getIdTokenResult() : null;
@@ -355,9 +428,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const currentPath = `${window.location.pathname}${window.location.search}`;
             // A platform route is represented in the URL, so retain it during
             // refresh instead of returning the owner to the overview page.
-            const postLoginPath = session.userType === 'platform' && window.location.pathname.startsWith('/platform')
-              ? currentPath
-              : getPostLoginPath(session);
+            const postLoginPath = isSupportSessionFrame
+              ? '/?support-session=1'
+              : session.userType === 'platform' && window.location.pathname.startsWith('/platform')
+                ? currentPath
+                : getPostLoginPath(session);
             if (currentPath !== postLoginPath) window.history.replaceState({}, '', postLoginPath);
             console.info('[auth-context] navigation completed', { destination: postLoginPath });
           } catch (error) {
@@ -679,6 +754,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWorker,
         loginMultiTenantEmail,
         loginMultiTenantWorker,
+        enterSupportSession,
+        endSupportSession,
         provisionWorkerAccount,
         createFirstSuperAdmin,
         logout,

@@ -17,7 +17,8 @@ import {
   Users,
 } from "lucide-react";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../../../../firebase/config";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../../../../firebase/config";
 import { useAuth } from "../../../../context/AuthContext";
 import { PLATFORM_PERMISSION_LABELS, PLATFORM_PERMISSION_MATRIX, PLATFORM_PERMISSIONS, PLATFORM_ROLES, type PlatformPermission, type PlatformRole } from "../../permissions/platformPermissions";
 import { daysUntil, formatPlatformDate, listPlatformCompanies, listPlatformCompanyMembers } from "../../platformService";
@@ -46,6 +47,11 @@ import {
   type PlatformConsoleSettings,
   type PlatformSupportTicket,
   type PlatformNotification,
+  startSupportImpersonationRequest,
+  verifySupportImpersonationCode,
+  resolveStuckSupportImpersonationSession,
+  listSupportImpersonationAuditLogs,
+  type SupportSessionAudit,
 } from "../../platformConsoleService";
 import type { PlatformCompany } from "../../types";
 import { DataTable, type DataTableColumn } from "../../shared/DataTable";
@@ -69,6 +75,66 @@ export type ManagementPageId =
   | "support"
   | "settings"
   | "admins";
+
+/**
+ * Keeps the platform Firebase session in the parent page and opens the
+ * temporary company session in a separately authenticated iframe above it.
+ * The custom token is sent with postMessage only; it is never put in a URL.
+ */
+function openSupportSessionOverlay(customToken: string) {
+  document.getElementById('wwm-support-session-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'wwm-support-session-overlay';
+  overlay.dir = 'rtl';
+  overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-3 sm:p-6';
+  const panel = document.createElement('div');
+  panel.className = 'flex h-[94vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-950';
+  panel.innerHTML = '<div class="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 text-sm font-black dark:border-slate-800"><span>جلسة دعم مؤقتة — حساب الشركة</span><span class="text-xs font-medium text-slate-500">استخدم زر إنهاء جلسة الدعم من داخل الحساب للعودة الآمنة</span></div>';
+  const frame = document.createElement('iframe');
+  frame.title = 'جلسة دعم الشركة';
+  frame.className = 'min-h-0 w-full flex-1 border-0 bg-white';
+  frame.src = `${window.location.origin}/?support-session=1`;
+  panel.appendChild(frame);
+  overlay.appendChild(panel);
+  let removed = false;
+  let fallbackTimer: number | undefined;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    window.removeEventListener('message', receive);
+    if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
+    overlay.remove();
+  };
+  const deliverToken = () => {
+    // A child iframe has no message queue. It asks repeatedly until this token
+    // can be received, avoiding a lost first postMessage on fast loads.
+    frame.contentWindow?.postMessage({ type: 'wwm_support_session_token', token: customToken }, window.location.origin);
+  };
+  const receive = (event: MessageEvent) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data?.type === 'wwm_support_frame_ready') {
+      deliverToken();
+    }
+    if (event.data?.type === 'wwm_support_session_active' && fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
+    if (event.data?.type === 'wwm_support_session_ending') {
+      // Remove the company surface before the server deletes its temporary
+      // membership. This prevents its Firestore listeners from ever seeing a
+      // permission-denied snapshot or producing a red toast.
+      remove();
+      void httpsCallable<{ action: 'end' }, { success: boolean; message?: string }>(functions, 'resolveStuckSupportImpersonationSession')({ action: 'end' })
+        .then(result => { if (!result.data.success) console.error('Support session cleanup failed:', result.data.message); })
+        .catch(error => console.error('Support session cleanup failed:', error));
+      return;
+    }
+    if (event.data?.type === 'wwm_support_session_ended') remove();
+  };
+  // Listen before attaching the iframe: it can announce readiness as soon as
+  // the first React effect runs.
+  window.addEventListener('message', receive);
+  document.body.appendChild(overlay);
+  frame.addEventListener('load', deliverToken);
+  fallbackTimer = window.setTimeout(() => { fallbackTimer = undefined; }, 20_000);
+}
 
 type Member = { uid: string; companyId: string; companyName: string; name: string; email: string; role: string; status: string; createdAt?: unknown };
 type Audit = { id: string; action: string; companyId: string; actorUid: string; timestamp?: unknown };
@@ -343,11 +409,71 @@ function ActivityPage({ audits, companies, navigate }: DataProps) {
   return <section><PlatformPageHeader title="سجل النشاط" description="سجل الإجراءات الموثوقة التي تمت على مستوى المنصة." /><FilterBar><div className="relative flex-1"><Search className="absolute right-3 top-2.5 text-slate-400" size={17} /><input className={`${fieldClass} pr-9`} value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث في الإجراء أو الشركة أو المنفّذ" /></div></FilterBar>{rows.length ? <DataTable rows={rows} columns={columns} rowKey={row => row.id} minWidthClass="min-w-[720px]" /> : <EmptyState text="لا توجد إجراءات مسجلة أو لا توجد نتائج مطابقة." />}</section>;
 }
 
+function SupportImpersonationPanel({ companies, disabled }: { companies: PlatformCompany[]; disabled: boolean }) {
+  // Do not sign the parent page into the company token. The iframe keeps both
+  // accounts isolated while still presenting the company workspace as a modal.
+  const enterSupportSession = async (customToken: string) => { openSupportSessionOverlay(customToken); };
+  const [companyId, setCompanyId] = useState(''); const [recipientPhone, setRecipientPhone] = useState(''); const [code, setCode] = useState('');
+  const [request, setRequest] = useState<{ sessionId: string; expiresAtMs: number } | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [stuck, setStuck] = useState(false); const [resumePhone, setResumePhone] = useState(''); const [resumeOpen, setResumeOpen] = useState(false);
+  const send = async () => { setBusy(true); setError(''); try { const result = await startSupportImpersonationRequest({ companyId, recipientPhone }); setRequest({ sessionId: result.sessionId, expiresAtMs: result.expiresAtMs }); } catch (cause) { const message = cause instanceof Error ? cause.message : 'تعذر إرسال كود الموافقة.'; setStuck(message.includes('جلسة دعم فعّالة')); setError(message); } finally { setBusy(false); } };
+  const verify = async () => { if (!request) return; setBusy(true); setError(''); try { const result = await verifySupportImpersonationCode({ sessionId: request.sessionId, code }); await enterSupportSession(result.customToken); } catch (cause) { setError(cause instanceof Error ? cause.message : 'تعذر بدء جلسة الدعم.'); } finally { setBusy(false); } };
+  const resolveStuck = async (action: 'resume' | 'end') => { setBusy(true); setError(''); try { const result = await resolveStuckSupportImpersonationSession({ action, phone: resumePhone }); if (action === 'resume' && result.customToken) await enterSupportSession(result.customToken); if (action === 'end') { setStuck(false); setResumePhone(''); setResumeOpen(false); } } catch (cause) { setError(cause instanceof Error ? cause.message : 'تعذر إتمام العملية.'); } finally { setBusy(false); } };
+  return <PlatformCard className="mb-5 p-5"><h2 className="font-black">الدخول كصاحب شركة</h2><p className="mt-1 text-sm text-slate-500">جلسة دعم قابلة للتعديل لمدة 5 دقائق فقط. يصل الكود للحساب المصرح له، مع إشعار حساب صاحب الشركة.</p><div className="mt-4 grid gap-3 md:grid-cols-3"><select disabled={busy || disabled} className={fieldClass} value={companyId} onChange={e => { setCompanyId(e.target.value); setRequest(null); }}><option value="">اختر الشركة</option>{companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}</select><input type="tel" dir="ltr" disabled={busy || disabled} className={fieldClass} value={recipientPhone} onChange={e => setRecipientPhone(e.target.value)} placeholder="رقم الحساب المصرح له باستلام الكود"/><PlatformButton disabled={busy || disabled || !companyId || !recipientPhone.trim()} onClick={() => void send()}>{busy ? 'جارٍ الإرسال…' : 'إرسال كود الموافقة'}</PlatformButton></div>{request && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 p-3 dark:bg-amber-950/30"><span className="text-sm font-bold">تم الإرسال — ينتهي {new Date(request.expiresAtMs).toLocaleTimeString('ar-EG')}</span><input inputMode="numeric" maxLength={6} dir="ltr" className={`${fieldClass} w-36`} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="000000"/><PlatformButton disabled={busy || !/^\d{6}$/.test(code)} onClick={() => void verify()}>{busy ? 'جارٍ التحقق…' : 'دخول مؤقت'}</PlatformButton></div>}{stuck && <div className="mt-4 rounded-xl bg-amber-50 p-4 dark:bg-amber-950/30"><p className="font-bold">لديك جلسة دعم فعّالة بالفعل.</p><div className="mt-3 flex flex-wrap gap-2"><PlatformButton variant="secondary" disabled={busy} onClick={() => { setResumePhone(''); setResumeOpen(true); }}>إكمال الجلسة</PlatformButton><PlatformButton variant="danger" disabled={busy} onClick={() => void resolveStuck('end')}>إنهاء الجلسة</PlatformButton></div>{resumeOpen && <div className="mt-3 flex flex-wrap gap-2"><input type="tel" dir="ltr" className={`${fieldClass} max-w-sm`} value={resumePhone} onChange={e => setResumePhone(e.target.value)} placeholder="أدخل رقم الحساب مرة أخرى"/><PlatformButton disabled={busy || !resumePhone.trim()} onClick={() => void resolveStuck('resume')}>تأكيد وإكمال الدخول</PlatformButton></div>}</div>}{error && <p className="mt-3 rounded-xl bg-rose-100 p-3 text-sm font-bold text-rose-800 dark:bg-rose-950 dark:text-rose-100">{error}</p>}</PlatformCard>;
+}
+
+function SupportSessionAuditPanel() {
+  const [sessions, setSessions] = useState<SupportSessionAudit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const loadAudit = async () => {
+    setLoading(true); setError('');
+    try { setSessions(await listSupportImpersonationAuditLogs()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'تعذر تحميل سجل جلسات الدعم.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void loadAudit(); }, []);
+  return <PlatformCard className="mb-5 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black">سجل جلسات الدعم</h2><p className="mt-1 text-sm text-slate-500">سجل غير قابل للتعديل لكل خطوة تم تنفيذها أثناء جلسة الدعم.</p></div><PlatformButton variant="secondary" disabled={loading} onClick={() => void loadAudit()}>{loading ? 'جارٍ التحميل…' : 'تحديث السجل'}</PlatformButton></div>{error && <p className="mt-3 rounded-xl bg-rose-100 p-3 text-sm font-bold text-rose-800">{error}</p>}<div className="mt-4 space-y-2">{sessions.length ? sessions.map(session => <div key={session.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold">{session.companyName || session.companyId}</p><p className="mt-1 text-xs text-slate-500">{session.status} · {session.requestedAt ? new Date(session.requestedAt).toLocaleString('ar-EG') : 'وقت غير متاح'} · {session.auditLogs.length} إجراء</p></div><PlatformButton variant="secondary" onClick={() => setOpenId(openId === session.id ? null : session.id)}>{openId === session.id ? 'إخفاء السجل' : 'عرض السجل'}</PlatformButton></div>{openId === session.id && <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm dark:border-slate-800">{session.auditLogs.length ? session.auditLogs.map(item => <div key={item.id} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800"><p className="font-bold">{item.action.replaceAll('_', ' ')}</p><p className="mt-1 text-xs text-slate-500">{item.createdAt ? new Date(item.createdAt).toLocaleString('ar-EG') : 'وقت غير متاح'}{item.collection ? ` · ${item.collection}/${item.documentId}` : ''}</p>{item.detail && <p className="mt-1">{item.detail}</p>}{item.changedFields.length > 0 && <p className="mt-1 text-xs text-slate-500">الحقول المتأثرة: {item.changedFields.join('، ')}</p>}</div>) : <p className="text-sm text-slate-500">لا توجد خطوات مسجلة بعد لهذه الجلسة.</p>}</div>}</div>) : !loading && <EmptyState text="لا توجد جلسات دعم مسجلة بعد." />}</div></PlatformCard>;
+}
+
+const auditFieldLabels: Record<string, string> = { notes: 'الملاحظات', updatedAt: 'تاريخ التحديث', status: 'الحالة', total: 'الإجمالي', customerName: 'اسم العميل', customerPhone: 'هاتف العميل', deliveryDate: 'موعد التسليم', items: 'بنود الطلب', payments: 'الدفعات', paidAmount: 'المبلغ المدفوع', name: 'الاسم', phone: 'رقم الهاتف', email: 'البريد الإلكتروني' };
+const auditCollectionLabels: Record<string, string> = { orders: 'طلبًا', customers: 'عميلًا', workers: 'موظفًا', expenses: 'مصروفًا', inventory: 'صنف مخزون', suppliers: 'موردًا', settings: 'إعدادات الشركة', companySettings: 'إعدادات الشركة' };
+function readableAuditAction(item: SupportSessionAudit['auditLogs'][number]) {
+  if (item.action === 'support_session_requested') return 'طلب إرسال كود موافقة جلسة الدعم';
+  if (item.action === 'support_session_started') return 'بدأ جلسة الدعم';
+  if (item.action === 'support_session_ended' || item.action === 'support_session_cancelled') return 'أنهى جلسة الدعم';
+  if (item.action === 'support_session_resumed') return 'استكمل جلسة الدعم';
+  if (item.action === 'page_opened') return item.detail || 'فتح قسمًا من حساب الشركة';
+  if (item.action === 'order_opened') return item.detail || `فتح تفاصيل ${item.entityLabel || 'طلب'}`;
+  if (item.action === 'firestore_update') return `عدّل ${item.entityLabel || auditCollectionLabels[item.collection] || 'بيانات'}${item.changes.length ? ` — ${item.changes.map(change => `${auditFieldLabels[change.field] || change.field}: «${change.before}» إلى «${change.after}»`).join('، ')}` : ''}`;
+  if (item.action === 'firestore_create') return `أضاف ${item.entityLabel || auditCollectionLabels[item.collection] || 'بيانات جديدة'}`;
+  if (item.action === 'firestore_delete') return `حذف ${item.entityLabel || auditCollectionLabels[item.collection] || 'بيانات'}`;
+  return item.detail || 'نفّذ إجراءً داخل جلسة الدعم';
+}
+
+function SupportSessionAuditPanelV2() {
+  const [sessions, setSessions] = useState<SupportSessionAudit[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const loadAudit = async () => { setLoading(true); setError(''); try { setSessions(await listSupportImpersonationAuditLogs()); } catch (cause) { setError(cause instanceof Error ? cause.message : 'تعذر تحميل سجل جلسات الدعم.'); } finally { setLoading(false); } };
+  useEffect(() => { void loadAudit(); }, []);
+  return <PlatformCard className="mb-5 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black">سجل جلسات الدعم</h2><p className="mt-1 text-sm text-slate-500">سجل ثابت وغير قابل للتعديل لكل ما تم فتحه أو تعديله أثناء الجلسة.</p></div><PlatformButton variant="secondary" disabled={loading} onClick={() => void loadAudit()}>{loading ? 'جارٍ التحميل…' : 'تحديث السجل'}</PlatformButton></div>{error && <p className="mt-3 rounded-xl bg-rose-100 p-3 text-sm font-bold text-rose-800">{error}</p>}<div className="mt-4 space-y-3">{sessions.length ? sessions.map(session => <div key={session.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-black">{session.companyName || session.companyId}</p><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">دخل الجلسة: <b>{session.platformActorName || 'حساب دعم المنصة'}</b>{session.platformActorEmail ? ` — ${session.platformActorEmail}` : ''}</p><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">الموافقة من: <b>{session.recipientName || 'حساب الشركة المصرح له'}</b>{session.recipientEmail ? ` — ${session.recipientEmail}` : ''}</p><p className="mt-1 text-xs text-slate-500">الحالة: {session.status} · {session.requestedAt ? new Date(session.requestedAt).toLocaleString('ar-EG') : 'وقت غير متاح'} · {session.auditLogs.length} خطوة</p></div><PlatformButton variant="secondary" onClick={() => setOpenId(openId === session.id ? null : session.id)}>{openId === session.id ? 'إخفاء السجل' : 'عرض السجل'}</PlatformButton></div>{openId === session.id && <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">{session.auditLogs.map(item => <div key={item.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800"><p className="font-bold">{readableAuditAction(item)}</p><p className="mt-1 text-xs text-slate-500">{item.createdAt ? new Date(item.createdAt).toLocaleString('ar-EG') : 'وقت غير متاح'}{item.documentId ? ` · رقم السجل: ${item.documentId}` : ''}</p>{item.detail && item.action.startsWith('firestore_') && <p className="mt-1 text-slate-600 dark:text-slate-300">{item.detail}</p>}</div>)}</div>}</div>) : !loading && <EmptyState text="لا توجد جلسات دعم مسجلة بعد." />}</div></PlatformCard>;
+}
+
 function SupportPage({ companies, supportTickets, consoleError, load }: DataProps) {
+  const { authSession } = useAuth();
   const canManageSupport = usePlatformCapability("platform:support:manage");
+  const canImpersonate = usePlatformCapability("platform:support:impersonate");
   const [companyId, setCompanyId] = useState(""); const [subject, setSubject] = useState("");
   const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [auditOpen, setAuditOpen] = useState(false);
   const [commentFor, setCommentFor] = useState<string | null>(null); const [comment, setComment] = useState("");
+  const [supportStatusPage, setSupportStatusPage] = useState<PlatformSupportTicket["status"]>("open");
+  const [activityOpenFor, setActivityOpenFor] = useState<string | null>(null);
+  const supportStatusPages: { key: PlatformSupportTicket["status"]; label: string }[] = [{ key: "open", label: "جديد" }, { key: "in_progress", label: "قيد المتابعة" }, { key: "resolved", label: "تم الحل" }];
+  const visibleSupportTickets = supportTickets.filter(item => item.status === supportStatusPage);
   const add = async () => {
     if (!companyId || subject.trim().length < 4) return;
     setSaving(true); setError("");
@@ -374,11 +500,14 @@ function SupportPage({ companies, supportTickets, consoleError, load }: DataProp
     catch { setError("تعذر إضافة تعليق الدعم."); }
     finally { setSaving(false); }
   };
-  return <section><PlatformPageHeader title="الدعم الفني" description="سجّل وتابع طلبات الدعم من شاشة المنصة؛ تُحفظ وتُشارك مركزيًا مع فريق الإدارة." />
+  return <section><PlatformPageHeader title="الدعم الفني" description="سجّل وتابع طلبات الدعم من شاشة المنصة؛ تُحفظ وتُشارك مركزيًا مع فريق الإدارة." actions={authSession?.role === 'platform_owner' ? <PlatformButton variant="secondary" onClick={() => setAuditOpen(true)}>سجل الجلسات</PlatformButton> : undefined} />
     {consoleError && <p className="mb-4 rounded-xl bg-amber-100 p-3 text-sm font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-100">{consoleError}</p>}
+    {canImpersonate && <SupportImpersonationPanel companies={companies} disabled={Boolean(consoleError)} />}
+    {auditOpen && <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-950/60 p-3 sm:p-6"><div className="mx-auto min-h-full max-w-5xl rounded-2xl bg-white p-4 shadow-2xl dark:bg-slate-950"><div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="font-black">سجل جلسات الدعم</h2><p className="text-sm text-slate-500">اختر أي جلسة ثم افتح سجلها بالتفصيل.</p></div><PlatformButton variant="secondary" onClick={() => setAuditOpen(false)}>إغلاق</PlatformButton></div><SupportSessionAuditPanelV2 /></div></div>}
     <PlatformCard className="mb-5 p-5"><h2 className="font-black">تسجيل طلب دعم</h2><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><select disabled={!canManageSupport || Boolean(consoleError)} className={fieldClass} value={companyId} onChange={e => setCompanyId(e.target.value)}><option value="">اختر الشركة</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><input disabled={!canManageSupport || Boolean(consoleError)} className={fieldClass} value={subject} onChange={e => setSubject(e.target.value)} placeholder="موضوع أو ملخص المشكلة" /><PlatformButton onClick={add} disabled={!canManageSupport || Boolean(consoleError) || !companyId || subject.trim().length < 4 || saving}><Headphones size={17} />{saving ? "جارٍ الحفظ…" : "إضافة طلب"}</PlatformButton></div></PlatformCard>
     {error && <p className="mb-4 rounded-xl bg-rose-100 p-3 text-sm font-bold text-rose-800 dark:bg-rose-950 dark:text-rose-100">{error}</p>}
-    <div className="space-y-3">{supportTickets.length ? supportTickets.map(item => <PlatformCard key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-black">{item.subject}</p><p className="mt-1 text-sm text-slate-500">{item.companyName} · {formatPlatformDate(item.createdAt)} · {item.commentCount || 0} تعليق</p></div><div className="flex flex-wrap items-center gap-2"><PlatformButton variant="secondary" disabled={!canManageSupport || Boolean(consoleError)} onClick={() => setCommentFor(item.id)}>تعليق</PlatformButton><select aria-label="أولوية الطلب" disabled={!canManageSupport || saving || Boolean(consoleError)} className={`${fieldClass} w-auto`} value={item.priority} onChange={e => void changePriority(item.id, e.target.value as PlatformSupportTicket["priority"])}><option value="low">منخفضة</option><option value="normal">عادية</option><option value="high">عالية</option><option value="urgent">عاجلة</option></select><select aria-label="حالة الطلب" disabled={!canManageSupport || saving || Boolean(consoleError)} className={`${fieldClass} w-auto`} value={item.status} onChange={e => void changeStatus(item.id, e.target.value as PlatformSupportTicket["status"])}><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="resolved">تم الحل</option></select>{status(item.status)}</div></PlatformCard>) : <EmptyState text="لا توجد طلبات دعم مسجلة بعد." />}</div>
+    <div className="mb-4 grid gap-3 sm:grid-cols-3">{supportStatusPages.map(page => { const count = supportTickets.filter(item => item.status === page.key).length; const active = supportStatusPage === page.key; return <button key={page.key} type="button" onClick={() => setSupportStatusPage(page.key)} className={`rounded-2xl border p-4 text-right transition ${active ? "border-amber-700 bg-amber-700 text-white shadow-sm" : "border-slate-200 bg-white text-slate-800 hover:border-amber-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"}`}><span className="block text-base font-black">{page.label}</span><span className={`mt-1 block text-sm ${active ? "text-amber-100" : "text-slate-500"}`}>{count} طلب</span></button>; })}</div>
+    <div className="space-y-3">{visibleSupportTickets.length ? visibleSupportTickets.map(item => <PlatformCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="font-black">{item.subject}</p><PlatformBadge tone={item.source === 'company_user' ? 'warning' : 'neutral'}>{item.source === 'company_user' ? 'مرسل من مستخدم الشركة' : 'مسجل من فريق الدعم'}</PlatformBadge></div><p className="mt-1 text-sm text-slate-500">{item.companyName} · {formatPlatformDate(item.createdAt)} · {item.commentCount || 0} تعليق{item.source === 'company_user' && item.requesterName ? ` · المرسل: ${item.requesterName}` : ''}</p>{item.lastAction && <p className="mt-2 text-sm font-bold text-slate-700 dark:text-slate-200">آخر إجراء: {item.lastAction} <span className="font-normal text-slate-500">بواسطة {item.lastActionByName || 'حساب منصة'}{item.lastActionAt ? ` · ${formatPlatformDate(item.lastActionAt)}` : ''}</span></p>}</div><div className="flex flex-wrap items-center gap-2"><PlatformButton variant="secondary" disabled={!canManageSupport || Boolean(consoleError)} onClick={() => setCommentFor(item.id)}>تعليق</PlatformButton><select aria-label="أولوية الطلب" disabled={!canManageSupport || saving || Boolean(consoleError)} className={`${fieldClass} w-auto`} value={item.priority} onChange={e => void changePriority(item.id, e.target.value as PlatformSupportTicket["priority"])}><option value="low">منخفضة</option><option value="normal">عادية</option><option value="high">عالية</option><option value="urgent">عاجلة</option></select><select aria-label="حالة الطلب" disabled={!canManageSupport || saving || Boolean(consoleError)} className={`${fieldClass} w-auto`} value={item.status} onChange={e => void changeStatus(item.id, e.target.value as PlatformSupportTicket["status"])}><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="resolved">تم الحل</option></select>{status(item.status)}</div></div><div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800"><PlatformButton variant="secondary" onClick={() => setActivityOpenFor(activityOpenFor === item.id ? null : item.id)}>{activityOpenFor === item.id ? 'إخفاء الإجراءات' : 'عرض الإجراءات'}</PlatformButton>{activityOpenFor === item.id && <div className="mt-3 space-y-2">{item.activity?.length ? item.activity.map(activity => <div key={activity.id} className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800"><b>{activity.action}</b><span className="mr-2 text-slate-500">بواسطة {activity.actorName || 'حساب منصة'}{activity.createdAt ? ` · ${formatPlatformDate(activity.createdAt)}` : ''}</span></div>) : <p className="text-sm text-slate-500">لا توجد إجراءات مسجلة قبل تفعيل السجل.</p>}</div>}</div></PlatformCard>) : <EmptyState text={`لا توجد طلبات ${supportStatusPages.find(page => page.key === supportStatusPage)?.label || ''} حاليًا.`} />}</div>
     {commentFor && <div className="fixed inset-0 z-50 bg-slate-950/50 p-4"><div className="mx-auto mt-24 max-w-lg rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900"><h2 className="font-black">إضافة تعليق للدعم</h2><textarea className={`${fieldClass} mt-4 min-h-28`} value={comment} onChange={e => setComment(e.target.value)} placeholder="اكتب تفاصيل المتابعة أو الحل…" /><div className="mt-4 flex gap-2"><PlatformButton disabled={saving || !comment.trim()} onClick={() => void addComment()}>{saving ? "جارٍ الحفظ…" : "إضافة تعليق"}</PlatformButton><PlatformButton variant="secondary" onClick={() => setCommentFor(null)}>إلغاء</PlatformButton></div></div></div>}</section>;
 }
 

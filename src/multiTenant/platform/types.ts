@@ -25,6 +25,67 @@ export interface PlatformCompanyMember {
   createdAt?: RecordTimestamp;
 }
 
+export interface PlatformCompanyContact {
+  companyId: string;
+  companyName: string;
+  name: string;
+  email: string;
+  phone: string;
+  status: string;
+}
+
+/** Owner-only read model returned by the trusted platform analytics endpoint. */
+export interface PlatformCompanyOrder {
+  id: string;
+  month: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  bookingDate: string;
+  eventDate: string;
+  deliveryDate: string;
+  returnDate: string;
+  eventLocation: string;
+  totalPrice: number;
+  deposit: number;
+  totalPaid: number;
+  remainingBalance: number;
+  workerCost: number;
+  transportationCost: number;
+  otherExpenses: number;
+  orderStatus: string;
+  notes: string;
+}
+
+export interface PlatformCompanyOrderMonth {
+  month: string;
+  orderCount: number;
+}
+
+/** Mirrors the company's monthly safe/collections report, not a new estimate. */
+export interface PlatformCompanyMonthlyAccounts {
+  month: string;
+  netMonthlyCash: number;
+  grossMonthlyIncome: number;
+  completedOrdersNetProfit: number;
+  retainedCancelledDeposits: number;
+  upcomingOrderDepositsNet: number;
+  upcomingOrderOtherExpenses: number;
+  netMonthlyOrderProfit: number;
+  expectedSettlementPayments: number;
+  operatingExpenses: number;
+}
+
+export interface PlatformCompanyOrderAnalytics {
+  totalOrders: number;
+  totalNetProfit: number;
+  growthRate: number | null;
+  growthMonth: string | null;
+  months: PlatformCompanyOrderMonth[];
+  monthlyAccounts: PlatformCompanyMonthlyAccounts[];
+  orders: PlatformCompanyOrder[];
+}
+
 export interface PlatformOverview {
   totalCompanies: number;
   activeCompanies: number;
@@ -53,6 +114,26 @@ export interface CreateCompanyRequest {
 
 export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: CompanyStatus; subscriptionStart: string; subscriptionEnd: string; maxUsers: number | null; features: string[]; }
 export interface CreateAdditionalCompanyOwnerRequest { companyId: string; name: string; email: string; temporaryPassword: string; }
+export interface UpdatePlatformCompanyOrderRequest {
+  companyId: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  bookingDate: string;
+  eventDate: string;
+  deliveryDate: string;
+  returnDate: string;
+  eventLocation: string;
+  totalPrice: number;
+  deposit: number;
+  totalPaid: number;
+  workerCost: number;
+  transportationCost: number;
+  otherExpenses: number;
+  orderStatus: string;
+  notes: string;
+}
 
 export interface CompanyManagementRequest {
   companyId: string;

@@ -15,8 +15,17 @@ const emulatorProjectId = isDevelopment && environment?.VITE_USE_FIREBASE_EMULAT
   : undefined;
 const firebaseConfig = emulatorProjectId ? { ...firebaseConfigJson, projectId: emulatorProjectId } : firebaseConfigJson;
 
-// Initialize Firebase using applet config
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+// A support session runs inside an iframe so the platform account stays signed
+// in behind it.  A separately named Firebase app gives that iframe its own
+// Auth persistence and prevents the temporary company token from replacing the
+// platform token in the parent page.
+export const isSupportSessionFrame = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('support-session') === '1'
+  && window.self !== window.top;
+const supportFrameAppName = 'SupportImpersonationFrame';
+const app = isSupportSessionFrame
+  ? (getApps().find(item => item.name === supportFrameAppName) || initializeApp(firebaseConfig, supportFrameAppName))
+  : (getApps().length === 0 ? initializeApp(firebaseConfig) : getApp());
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

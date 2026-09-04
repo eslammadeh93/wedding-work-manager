@@ -15,6 +15,15 @@ export type PlatformSupportTicket = {
   status: "open" | "in_progress" | "resolved";
   priority: "low" | "normal" | "high" | "urgent";
   assignedTo?: string | null;
+  source?: "company_user" | "platform_support";
+  requesterName?: string;
+  requesterEmail?: string;
+  requesterRole?: string;
+  lastAction?: string;
+  lastActionByName?: string;
+  lastActionByEmail?: string;
+  lastActionAt?: string;
+  activity?: { id: string; action: string; actorName: string; actorEmail: string; createdAt?: string }[];
   commentCount?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -38,6 +47,38 @@ export type PlatformConsoleSettings = {
 
 type Result = { success: boolean; message: string };
 type PermissionConfigurationResult = Result & { rolePermissions?: Record<string, string[]> };
+
+export type SupportApprovalRequest = { sessionId: string; expiresAtMs: number; message: string };
+export type SupportSessionAuditLog = { id: string; action: string; actorUid: string; detail: string; companyId: string; collection: string; documentId: string; operation: string; changedFields: string[]; entityLabel: string; changes: { field: string; before: string; after: string }[]; createdAt: string | null };
+export type SupportSessionAudit = { id: string; companyId: string; companyName: string; status: string; platformActorName: string; platformActorEmail: string; recipientName: string; recipientEmail: string; recipientPhone: string; requestedAt: string | null; activatedAt: string | null; endedAt: string | null; expiresAtMs: number; auditLogs: SupportSessionAuditLog[] };
+
+export async function listSupportImpersonationAuditLogs(): Promise<SupportSessionAudit[]> {
+  const call = httpsCallable<undefined, Result & { sessions?: SupportSessionAudit[] }>(functions, 'listSupportImpersonationAuditLogs');
+  const result = (await call()).data;
+  if (!result.success || !result.sessions) throw new Error(result.message);
+  return result.sessions;
+}
+
+export async function startSupportImpersonationRequest(data: { companyId: string; recipientPhone: string }): Promise<SupportApprovalRequest> {
+  const call = httpsCallable<typeof data, Result & Partial<SupportApprovalRequest>>(functions, 'startSupportImpersonationRequest');
+  const result = (await call(data)).data;
+  if (!result.success || !result.sessionId || !result.expiresAtMs) throw new Error(result.message);
+  return { sessionId: result.sessionId, expiresAtMs: result.expiresAtMs, message: result.message };
+}
+
+export async function verifySupportImpersonationCode(data: { sessionId: string; code: string }): Promise<{ customToken: string; expiresAtMs: number; companyName: string }> {
+  const call = httpsCallable<typeof data, Result & { customToken?: string; expiresAtMs?: number; companyName?: string }>(functions, 'verifySupportImpersonationCode');
+  const result = (await call(data)).data;
+  if (!result.success || !result.customToken || !result.expiresAtMs) throw new Error(result.message);
+  return { customToken: result.customToken, expiresAtMs: result.expiresAtMs, companyName: result.companyName || '' };
+}
+
+export async function resolveStuckSupportImpersonationSession(data: { action: 'resume' | 'end'; phone?: string }): Promise<{ customToken?: string; message: string }> {
+  const call = httpsCallable<typeof data, Result & { customToken?: string }>(functions, 'resolveStuckSupportImpersonationSession');
+  const result = (await call(data)).data;
+  if (!result.success) throw new Error(result.message);
+  return { customToken: result.customToken, message: result.message };
+}
 
 export async function getPlatformConsoleState(): Promise<{
   settings: PlatformConsoleSettings;

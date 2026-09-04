@@ -7,6 +7,8 @@ import { USE_MULTI_TENANT_DATA } from './multiTenant/featureFlags';
 import { CompanySessionRouteGuard, PlatformRouteGuard } from './multiTenant/RouteGuards';
 import type { Permission } from './multiTenant/permissions';
 import { PlatformErrorBoundary } from './multiTenant/platform/PlatformErrorBoundary';
+import { functions, isSupportSessionFrame } from './firebase/config';
+import { httpsCallable } from 'firebase/functions';
 
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -38,6 +40,7 @@ const SettingsModule = lazy(() => import('./components/settings/SettingsModule')
 const PlatformModule = lazy(() => import('./multiTenant/platform/PlatformModule').then(({ PlatformModule }) => ({ default: PlatformModule })));
 const CompanyMembersModule = lazy(() => import('./components/company/CompanyMembersModule').then(({ CompanyMembersModule }) => ({ default: CompanyMembersModule })));
 const ProfileModule = lazy(() => import('./components/profile/ProfileModule').then(({ ProfileModule }) => ({ default: ProfileModule })));
+const CompanySupportModule = lazy(() => import('./components/support/CompanySupportModule').then(({ CompanySupportModule }) => ({ default: CompanySupportModule })));
 const RecycleBinModule = lazy(() => import('./components/recycleBin/RecycleBinModule').then(({ RecycleBinModule }) => ({ default: RecycleBinModule })));
 const GlobalSearchModal = lazy(() => import('./components/GlobalSearchModal').then(({ GlobalSearchModal }) => ({ default: GlobalSearchModal })));
 const NotificationDrawer = lazy(() => import('./components/NotificationDrawer').then(({ NotificationDrawer }) => ({ default: NotificationDrawer })));
@@ -59,8 +62,9 @@ const tabPermission: Partial<Record<ActiveTab, Permission>> = {
   workerMovements: 'company:worker_performance:read',
   settings: 'company:settings:read', members: 'company:members:read',
   recycleBin: 'company:settings:read',
+  companySupport: 'company:support:request',
 };
-const activeTabs: readonly ActiveTab[] = ['dashboard', 'calculator', 'calculatorSettings', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin'];
+const activeTabs: readonly ActiveTab[] = ['dashboard', 'calculator', 'calculatorSettings', 'orders', 'workers', 'workerPerformance', 'workerMovements', 'customers', 'suppliers', 'inventory', 'expenses', 'calendar', 'reports', 'activityLog', 'settings', 'members', 'profile', 'recycleBin', 'companySupport'];
 const activeTabStorageKey = (uid: string) => `wedding_manager_active_tab:${uid}`;
 const isActiveTab = (value: string | null): value is ActiveTab => value !== null && activeTabs.includes(value as ActiveTab);
 
@@ -84,6 +88,7 @@ const legacyTabRoles: Partial<Record<ActiveTab, readonly NonNullable<ReturnType<
   activityLog: ['super_admin', 'admin', 'manager'],
   settings: ['super_admin', 'admin', 'manager'],
   recycleBin: ['super_admin', 'admin', 'manager'],
+  companySupport: ['super_admin', 'admin', 'manager', 'employee', 'worker'],
 };
 
 function CompanyTabGuard({ tab, children }: { tab: ActiveTab; children: React.ReactNode }) {
@@ -151,6 +156,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'الملف الشخصي';
       case 'recycleBin':
         return 'سلة المحذوفات';
+      case 'companySupport':
+        return 'الدعم الفني';
       default:
         return 'لوحة التحكم';
     }
@@ -192,6 +199,8 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
         return 'Profile';
       case 'recycleBin':
         return 'Recycle Bin';
+      case 'companySupport':
+        return 'Technical Support';
       default:
         return 'Dashboard';
     }
@@ -199,7 +208,7 @@ const getPageTitle = (tab: ActiveTab, lang: string): string => {
 };
 
 function AppContent() {
-  const { user, profile, authSession, loading, usersInitialized, isDemo } = useAuth();
+  const { user, profile, authSession, loading, usersInitialized, isDemo, endSupportSession } = useAuth();
   const { language } = useLanguage();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -217,7 +226,7 @@ function AppContent() {
   // UI can render. This also covers platform URLs such as /platform/...
   // restored through the browser Back button.
   useEffect(() => {
-    if (loading || !usersInitialized || (user && profile)) return;
+    if (isSupportSessionFrame || loading || !usersInitialized || (user && profile)) return;
 
     const forcePublicLoginUrl = () => {
       if (window.location.pathname !== '/') {
@@ -255,6 +264,15 @@ function AppContent() {
     if (activeTab !== 'orders') setCreateOrderRequest(0);
   }, [activeTab]);
 
+  // The server records the exact company section opened during a temporary
+  // support session. This is separate from Firestore write auditing so reading
+  // and navigation are visible in the immutable session history as well.
+  useEffect(() => {
+    if (!authSession?.supportSessionId || !user || restoredTabForUid !== user.uid) return;
+    const record = httpsCallable<{ section: ActiveTab }, { success: boolean }>(functions, 'recordSupportImpersonationActivity');
+    void record({ section: activeTab }).catch(error => console.warn('Support navigation audit failed:', error));
+  }, [authSession?.supportSessionId, user?.uid, restoredTabForUid, activeTab]);
+
   // Role guard for current active tab
   useEffect(() => {
     if (USE_MULTI_TENANT_DATA && authSession?.userType === 'company') {
@@ -270,7 +288,7 @@ function AppContent() {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
-      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'suppliers', 'calendar'];
+      const allowedEmployeeTabs: ActiveTab[] = ['orders', 'customers', 'suppliers', 'calendar', 'companySupport'];
       if (!allowedEmployeeTabs.includes(activeTab)) {
         setActiveTab('orders');
       }
@@ -334,6 +352,12 @@ function AppContent() {
 
   // With the flag off this branch is never selected: no platform module,
   // routes, navigation, or queries are activated in the legacy application.
+  // The iframe is only for the temporary company session. A stale restored
+  // platform identity must never mount PlatformModule in this surface.
+  if (isSupportSessionFrame && authSession?.userType === 'platform') {
+    return <div dir="rtl" className="min-h-screen flex items-center justify-center bg-slate-50 p-6 text-center"><div><Loader2 className="mx-auto h-7 w-7 animate-spin text-amber-600" /><p className="mt-3 font-bold text-slate-600">جارٍ تأمين جلسة الدعم…</p></div></div>;
+  }
+
   if (USE_MULTI_TENANT_DATA && authSession?.userType === 'platform') {
     return <PlatformEntry />;
   }
@@ -372,12 +396,16 @@ function AppContent() {
 
   // 2. Strict Authentication Protection: If not authenticated, open on Login page
   if (!user || !profile) {
+    if (isSupportSessionFrame) {
+      return <div dir="rtl" className="min-h-screen flex items-center justify-center bg-slate-50 p-6 text-center"><div><Loader2 className="mx-auto h-7 w-7 animate-spin text-amber-600" /><p className="mt-3 font-bold text-slate-600">جارٍ فتح حساب الشركة بشكل آمن…</p></div></div>;
+    }
     return <LoginPage />;
   }
 
   // 3. Authenticated Application Main Layout
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans antialiased transition-colors duration-200">
+      {authSession?.supportSessionId && <div className="flex flex-wrap items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-sm font-black text-slate-950"><span>جلسة دعم مؤقتة قابلة للتعديل — تنتهي تلقائيًا خلال 5 دقائق.</span><button onClick={() => void endSupportSession()} className="rounded-lg border border-slate-900 px-3 py-1">إنهاء جلسة الدعم</button></div>}
       {/* Top Navbar */}
       <Navbar
         onOpenSearch={() => setIsSearchOpen(true)}
@@ -436,6 +464,7 @@ function AppContent() {
             {activeTab === 'settings' && <CompanyTabGuard tab="settings"><SettingsModule /></CompanyTabGuard>}
             {USE_MULTI_TENANT_DATA && !isDemo && activeTab === 'members' && <CompanyTabGuard tab="members"><CompanyMembersModule /></CompanyTabGuard>}
             {USE_MULTI_TENANT_DATA && !isDemo && activeTab === 'profile' && <ProfileModule />}
+            {USE_MULTI_TENANT_DATA && !isDemo && activeTab === 'companySupport' && <CompanyTabGuard tab="companySupport"><CompanySupportModule /></CompanyTabGuard>}
           </Suspense>
         </main>
       </div>

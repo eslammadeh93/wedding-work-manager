@@ -25,12 +25,24 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
   const debug = (step: string, details: Record<string, unknown>) => console.info(`[auth-resolution] ${step}`, details);
   try {
   debug('start', { authenticated: true });
-  const token = await user.getIdTokenResult(true);
+  // Do not force-refresh here: support impersonation uses a short-lived
+  // custom token whose temporary tenant claims must remain intact until its
+  // explicit five-minute expiry. Firebase still refreshes normal sessions.
+  const token = await user.getIdTokenResult();
   const tokenRole = typeof token.claims.role === 'string' ? token.claims.role : null;
   const tokenCompanyId = typeof token.claims.companyId === 'string' ? token.claims.companyId : null;
+  const supportSessionId = typeof token.claims.supportSessionId === 'string' ? token.claims.supportSessionId : undefined;
+  const supportSessionExpiresAt = typeof token.claims.supportSessionExpiresAt === 'number' ? token.claims.supportSessionExpiresAt : undefined;
   const hasOwnerClaim = token.claims.platform_owner === true;
   const platformRoleClaim = typeof token.claims.platformRole === 'string' ? token.claims.platformRole : null;
-  const isPlatformLogin = hasOwnerClaim || platformRoleClaim !== null;
+  // Firebase custom claims that are permanently attached to a platform user
+  // (such as `platform_owner`) are kept when that same user signs in with a
+  // temporary custom token.  A support token therefore contains both the
+  // platform identity and the temporary company identity.  The session marker
+  // is authoritative here: without this priority the UI immediately resolves
+  // back to the platform and the company workspace never opens.
+  const isSupportSession = Boolean(supportSessionId && tokenCompanyId && tokenRole);
+  const isPlatformLogin = !isSupportSession && (hasOwnerClaim || platformRoleClaim !== null);
   debug('getIdTokenResult', { platformOwner: hasOwnerClaim, platformRole: platformRoleClaim, hasRole: Boolean(tokenRole), role: tokenRole, hasCompanyId: Boolean(tokenCompanyId), companyId: tokenCompanyId });
   if (isPlatformLogin) {
     const platformSnapshot = await getDoc(doc(db, firestorePaths.platformUser(user.uid)));
@@ -59,7 +71,7 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
   const savedPermissions = Array.isArray(member.permissions)
     ? member.permissions.filter((permission): permission is Permission => typeof permission === 'string')
     : undefined;
-  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: effectivePermissions(member.role, savedPermissions) };
+  return { uid: user.uid, email: user.email || member.email, displayName: member.name, userType: 'company', role: member.role, companyId: tokenCompanyId, memberStatus: member.status, companyStatus: company.status, permissions: effectivePermissions(member.role, savedPermissions), supportSessionId, supportSessionExpiresAt };
   } catch (error) {
     console.error('[auth-resolution] exception at resolveMultiTenantSession', { source: 'src/multiTenant/auth.ts', name: error instanceof Error ? error.name : 'unknown', code: (error as { code?: unknown })?.code ?? null, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : null });
     throw error;
