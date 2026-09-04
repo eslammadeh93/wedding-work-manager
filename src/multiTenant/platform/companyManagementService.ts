@@ -23,6 +23,11 @@ export const companyManagementService = {
     const result = await call(request);
     if (!result.data.success) throw new Error(result.data.message);
   },
+  async deleteCompany(data: { companyId: string; confirmation: string }): Promise<void> {
+    const call = httpsCallable<typeof data, { success: boolean; message: string }>(functions, 'deletePlatformCompany');
+    const result = await call(data);
+    if (!result.data.success) throw new Error(result.data.message);
+  },
   async createAdditionalOwner(request: CreateAdditionalCompanyOwnerRequest): Promise<void> {
     const call = httpsCallable<CreateAdditionalCompanyOwnerRequest, { success: boolean; message: string }>(functions, 'createAdditionalCompanyOwner');
     const result = await call(request);

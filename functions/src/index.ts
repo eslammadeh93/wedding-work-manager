@@ -568,7 +568,14 @@ export const createCompanyWithOwner = onCall({ region: 'us-central1', enforceApp
   const uid = await isActivePlatformUserFor(request, 'platform:companies:create');
   if (!uid) return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
   try {
-    return await new CompanyProvisioningService({ db, auth }).create(request.data, uid);
+    const data = (request.data || {}) as Record<string, unknown>;
+    const planId = typeof data.planId === 'string' ? data.planId.trim() : '';
+    if (!planIdIsValid(planId)) return { success: false, code: 'INVALID_INPUT', message: 'اختر باقة صالحة للشركة.' };
+    const planSnapshot = await db.doc(`platformPlans/${planId}`).get();
+    const planName = typeof planSnapshot.data()?.name === 'string' ? planSnapshot.data()!.name.trim() : '';
+    const maxUsers = planSnapshot.data()?.maxUsers;
+    if (!planSnapshot.exists || planName.length < 2 || !validPlanLimit(maxUsers)) return { success: false, code: 'INVALID_INPUT', message: 'الباقة المختارة غير موجودة أو غير صالحة.' };
+    return await new CompanyProvisioningService({ db, auth }).create({ ...data, planId, plan: planName, maxUsers }, uid);
   } catch (error) {
     logger.error('Company provisioning authorization failed', { uid, reason: error instanceof Error ? error.message : 'unknown' });
     return { success: false, code: 'UNAUTHORIZED', message: 'غير مصرح بهذه العملية.' };
@@ -590,13 +597,13 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
   const subscriptionStart = typeof data.subscriptionStart === 'string' ? data.subscriptionStart : '';
   const subscriptionEnd = typeof data.subscriptionEnd === 'string' ? data.subscriptionEnd : '';
   const startTime = Date.parse(subscriptionStart), endTime = Date.parse(subscriptionEnd);
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !name || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || !/^\d{6}$/.test(companyCode) || !ownerName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail) || !plan || !['trial','active','past_due','expired','suspended'].includes(String(status)) || !Number.isInteger(data.maxUsers) || Number(data.maxUsers) < 1 || !Array.isArray(data.features) || data.features.some(value => typeof value !== 'string' || !value.trim()) || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return { success: false, code: 'INVALID_INPUT', message: 'بيانات تحديث الشركة غير صالحة.' };
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !name || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) || !/^\d{6}$/.test(companyCode) || !ownerName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail) || !plan || !['trial','active','past_due','expired','suspended'].includes(String(status)) || (data.maxUsers !== null && (!Number.isInteger(data.maxUsers) || Number(data.maxUsers) < 1)) || !Array.isArray(data.features) || data.features.some(value => typeof value !== 'string' || !value.trim()) || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return { success: false, code: 'INVALID_INPUT', message: 'بيانات تحديث الشركة غير صالحة.' };
   const companyRef = db.doc(`companies/${companyId}`);
   try {
     await db.runTransaction(async tx => {
       const company = await tx.get(companyRef);
       if (!company.exists) throw new Error('COMPANY_NOT_FOUND');
-      if (Number(data.maxUsers) < Number(company.data()?.memberCount || 0)) throw new Error('MAX_USERS_TOO_LOW');
+      if (data.maxUsers !== null && Number(data.maxUsers) < Number(company.data()?.memberCount || 0)) throw new Error('MAX_USERS_TOO_LOW');
       const oldSlug = String(company.data()?.slug || '');
       const oldCode = String(company.data()?.companyCode || '');
       let newCodeRef: FirebaseFirestore.DocumentReference | undefined;
@@ -634,15 +641,15 @@ export const updateCompany = onCall({ region: 'us-central1', enforceAppCheck: fa
 
 type PlatformOwnerRequest = { auth?: { uid: string; token?: Record<string, unknown> }; data: unknown };
 const defaultPlatformConsoleSettings = { expiryDays: 30, compactMode: false, dailyDigest: true };
-type PlatformCapability = 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:settings:manage' | 'platform:admins:manage';
-const platformPermissionValues = ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:create', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:developer_tools:manage', 'platform:support:impersonate', 'platform:admins:manage', 'platform:dangerous_delete'] as const;
+type PlatformCapability = 'platform:companies:create' | 'platform:companies:update' | 'platform:users:manage' | 'platform:subscriptions:read' | 'platform:subscriptions:manage' | 'platform:plans:read' | 'platform:plans:manage' | 'platform:console:read' | 'platform:notifications:manage' | 'platform:support:manage' | 'platform:settings:manage' | 'platform:admins:manage';
+const platformPermissionValues = ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:create', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:plans:manage', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:developer_tools:manage', 'platform:support:impersonate', 'platform:admins:manage', 'platform:dangerous_delete'] as const;
 type ManagedPlatformPermission = typeof platformPermissionValues[number];
 const platformRolePermissionDefaults: Record<string, readonly ManagedPlatformPermission[]> = {
   platform_owner: platformPermissionValues,
-  platform_admin: ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
+  platform_admin: ['platform:dashboard:read', 'platform:companies:read', 'platform:companies:update', 'platform:companies:suspend', 'platform:companies:archive', 'platform:users:read', 'platform:users:manage', 'platform:subscriptions:read', 'platform:plans:read', 'platform:audit_logs:read', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
   platform_support: ['platform:dashboard:read', 'platform:companies:read', 'platform:users:read', 'platform:audit_logs:read', 'platform:console:read', 'platform:support:manage', 'platform:support:impersonate'],
-  platform_billing: ['platform:dashboard:read', 'platform:companies:read', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:audit_logs:read'],
-  platform_read_only: ['platform:dashboard:read', 'platform:companies:read', 'platform:users:read', 'platform:subscriptions:read', 'platform:audit_logs:read'],
+  platform_billing: ['platform:dashboard:read', 'platform:companies:read', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:audit_logs:read'],
+  platform_read_only: ['platform:dashboard:read', 'platform:companies:read', 'platform:users:read', 'platform:subscriptions:read', 'platform:plans:read', 'platform:audit_logs:read'],
 };
 const validPlatformPermissions = (value: unknown): ManagedPlatformPermission[] | null => Array.isArray(value) && value.every(permission => typeof permission === 'string' && (platformPermissionValues as readonly string[]).includes(permission)) ? [...new Set(value)] as ManagedPlatformPermission[] : null;
 const rolePermissionRef = (role: string) => db.doc(`platformPermissionProfiles/${role}`);
@@ -652,10 +659,10 @@ const rolePermissions = async (role: string): Promise<ManagedPlatformPermission[
   return permissions || [...(platformRolePermissionDefaults[role] || [])];
 };
 const platformRoleCapabilities: Record<string, readonly PlatformCapability[]> = {
-  platform_owner: ['platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
+  platform_owner: ['platform:companies:create', 'platform:companies:update', 'platform:users:manage', 'platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read', 'platform:plans:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage', 'platform:settings:manage', 'platform:admins:manage'],
   platform_admin: ['platform:companies:update', 'platform:users:manage', 'platform:console:read', 'platform:notifications:manage', 'platform:support:manage'],
   platform_support: ['platform:console:read', 'platform:support:manage'],
-  platform_billing: ['platform:subscriptions:manage'],
+  platform_billing: ['platform:subscriptions:read', 'platform:subscriptions:manage', 'platform:plans:read'],
   platform_read_only: [],
 };
 const isActivePlatformUserFor = async (request: PlatformOwnerRequest, capability: PlatformCapability): Promise<string | null> => {
@@ -675,6 +682,74 @@ const isActivePlatformOwner = async (request: PlatformOwnerRequest): Promise<str
   const profile = await db.doc(`platformUsers/${uid}`).get();
   return profile.exists && profile.data()?.role === 'platform_owner' && profile.data()?.status === 'active' ? uid : null;
 };
+
+/** Irreversibly removes a tenant and every record/account owned by it. Platform owner only. */
+export const deletePlatformCompany = onCall({ region: 'us-central1', timeoutSeconds: 540, enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  const data = (request.data || {}) as Record<string, unknown>;
+  const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
+  const confirmation = typeof data.confirmation === 'string' ? data.confirmation.trim() : '';
+  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId)) return { success: false, message: 'غير مصرح بحذف الشركة.' };
+
+  const companyRef = db.doc(`companies/${companyId}`);
+  const companySnapshot = await companyRef.get();
+  if (!companySnapshot.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  const company = companySnapshot.data() || {};
+  const companyName = typeof company.name === 'string' ? company.name.trim() : '';
+  if (!companyName || confirmation !== companyName) return { success: false, message: 'اكتب اسم الشركة كاملًا لتأكيد الحذف النهائي.' };
+
+  const [members, workers] = await Promise.all([
+    companyRef.collection('members').get(),
+    companyRef.collection('workers').get(),
+  ]);
+  const authUids = new Set<string>();
+  members.docs.forEach(member => {
+    const uid = typeof member.data()?.uid === 'string' ? member.data()!.uid.trim() : member.id;
+    if (uid) authUids.add(uid);
+  });
+  workers.docs.forEach(worker => {
+    const uid = typeof worker.data()?.authUid === 'string' ? worker.data()!.authUid.trim() : '';
+    if (uid) authUids.add(uid);
+  });
+
+  // Delete authentication accounts first. If this step fails, the company data
+  // remains so the owner can safely retry the operation instead of leaving a
+  // partially deleted tenant behind.
+  try {
+    for (const uid of authUids) {
+      await auth.deleteUser(uid).catch(error => {
+        if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
+      });
+    }
+  } catch (error) {
+    logger.error('Platform company deletion could not remove all Auth accounts', { companyId, actorUid, reason: error instanceof Error ? error.message : 'unknown' });
+    return { success: false, message: 'تعذر حذف أحد حسابات الشركة. لم يتم حذف بيانات الشركة؛ أعد المحاولة.' };
+  }
+
+  const slug = typeof company.slug === 'string' ? company.slug.trim() : '';
+  const companyCode = typeof company.companyCode === 'string' ? company.companyCode.trim() : '';
+  const [supportTickets, notifications, auditLogs] = await Promise.all([
+    db.collection('platformSupportTickets').where('companyId', '==', companyId).get(),
+    db.collection('platformNotifications').where('companyId', '==', companyId).get(),
+    db.collection('platformAuditLogs').where('companyId', '==', companyId).get(),
+  ]);
+  try {
+    await db.recursiveDelete(companyRef);
+    await db.recursiveDelete(db.doc(`companyDriveConnections/${companyId}`));
+    for (const document of [...supportTickets.docs, ...notifications.docs, ...auditLogs.docs]) await db.recursiveDelete(document.ref);
+    for (const uid of authUids) await db.doc(`users/${uid}`).delete().catch(() => undefined);
+    for (const indexRef of [slug ? db.doc(`companyIndexes/slug_${slug}`) : null, /^\d{6}$/.test(companyCode) ? db.doc(`companyIndexes/code_${companyCode}`) : null]) {
+      if (!indexRef) continue;
+      const index = await indexRef.get();
+      if (index.exists && index.data()?.companyId === companyId) await indexRef.delete();
+    }
+    await db.collection('platformAuditLogs').add({ action: 'platform_company_permanently_deleted', deletedCompanyId: companyId, deletedCompanyName: companyName, deletedAuthAccounts: authUids.size, createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
+    return { success: true, message: 'تم حذف الشركة وكل بياناتها وحساباتها نهائيًا.' };
+  } catch (error) {
+    logger.error('Platform company deletion failed during data cleanup', { companyId, actorUid, reason: error instanceof Error ? error.message : 'unknown' });
+    return { success: false, message: 'تم حذف حسابات الشركة، لكن تعذر إكمال حذف البيانات. تواصل مع الدعم لإكمال التنظيف.' };
+  }
+});
 const timestampIso = (value: unknown): string | undefined => {
   if (typeof value === 'string') return value;
   if (value && typeof (value as { toDate?: unknown }).toDate === 'function') return (value as { toDate: () => Date }).toDate().toISOString();
@@ -897,20 +972,71 @@ export const setPlatformMemberTemporaryPassword = onCall({ region: 'us-central1'
   return { success: true, message: 'تم تعيين كلمة المرور المؤقتة وتفعيل الحساب.' };
 });
 
+const validPlanLimit = (value: unknown): value is number | null => value === null || (Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 1_000_000);
+const planIdIsValid = (value: string) => /^[A-Za-z0-9_-]{1,128}$/.test(value);
+
+export const listPlatformPlans = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:plans:read') || await isActivePlatformUserFor(request, 'platform:plans:manage');
+  if (!uid) return { success: false, message: 'غير مصرح بعرض الباقات.' };
+  const snapshot = await db.collection('platformPlans').get();
+  const plans = snapshot.docs.map(doc => {
+    const data = doc.data();
+    return { id: doc.id, name: String(data.name || ''), maxUsers: validPlanLimit(data.maxUsers) ? data.maxUsers : null };
+  }).filter(plan => plan.name.length > 0).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  return { success: true, message: 'تم تحميل الباقات.', plans };
+});
+
+export const createPlatformPlan = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:plans:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const maxUsers = data.maxUsers;
+  if (!uid || name.length < 2 || name.length > 80 || !validPlanLimit(maxUsers)) return { success: false, message: 'بيانات الباقة غير صالحة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  const plan = db.collection('platformPlans').doc();
+  await plan.create({ name, maxUsers, createdAt: timestamp, createdBy: uid, updatedAt: timestamp, updatedBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_plan_created', targetPlanId: plan.id, createdBy: uid, timestamp, metadata: { name, maxUsers } });
+  return { success: true, message: 'تم إنشاء الباقة.' };
+});
+
+export const updatePlatformPlan = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const uid = await isActivePlatformUserFor(request, 'platform:plans:manage');
+  const data = (request.data || {}) as Record<string, unknown>;
+  const planId = typeof data.planId === 'string' ? data.planId.trim() : '';
+  const name = typeof data.name === 'string' ? data.name.trim() : '';
+  const maxUsers = data.maxUsers;
+  if (!uid || !planIdIsValid(planId) || name.length < 2 || name.length > 80 || !validPlanLimit(maxUsers)) return { success: false, message: 'بيانات الباقة غير صالحة.' };
+  const plan = db.doc(`platformPlans/${planId}`);
+  if (!(await plan.get()).exists) return { success: false, message: 'الباقة غير موجودة.' };
+  const timestamp = FieldValue.serverTimestamp();
+  await plan.update({ name, maxUsers, updatedAt: timestamp, updatedBy: uid });
+  const subscribedCompanies = await db.collection('companies').where('planId', '==', planId).get();
+  for (let index = 0; index < subscribedCompanies.docs.length; index += 450) {
+    const batch = db.batch();
+    subscribedCompanies.docs.slice(index, index + 450).forEach(company => batch.update(company.ref, { plan: name, maxUsers, updatedAt: timestamp, updatedBy: uid }));
+    await batch.commit();
+  }
+  await db.collection('platformAuditLogs').add({ action: 'platform_plan_updated', targetPlanId: planId, createdBy: uid, timestamp, metadata: { name, maxUsers } });
+  return { success: true, message: 'تم تحديث الباقة.' };
+});
+
 export const managePlatformSubscription = onCall({ region: 'us-central1', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const uid = await isActivePlatformUserFor(request, 'platform:subscriptions:manage');
   const data = (request.data || {}) as Record<string, unknown>;
   const companyId = typeof data.companyId === 'string' ? data.companyId.trim() : '';
-  const plan = typeof data.plan === 'string' ? data.plan.trim() : '';
+  const planId = typeof data.planId === 'string' ? data.planId.trim() : '';
   const status = typeof data.status === 'string' ? data.status : '';
   const subscriptionEnd = typeof data.subscriptionEnd === 'string' ? data.subscriptionEnd : '';
-  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || plan.length < 2 || plan.length > 80 || !['trial', 'active', 'past_due', 'expired', 'suspended'].includes(status) || !Number.isFinite(Date.parse(subscriptionEnd))) return { success: false, message: 'بيانات الاشتراك غير صالحة.' };
-  const company = db.doc(`companies/${companyId}`);
-  const current = await company.get();
-  if (!current.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !planIdIsValid(planId) || !['trial', 'active', 'past_due', 'expired', 'suspended'].includes(status) || !Number.isFinite(Date.parse(subscriptionEnd))) return { success: false, message: 'بيانات الاشتراك غير صالحة.' };
+  const [companySnapshot, planSnapshot] = await Promise.all([db.doc(`companies/${companyId}`).get(), db.doc(`platformPlans/${planId}`).get()]);
+  if (!companySnapshot.exists) return { success: false, message: 'الشركة غير موجودة.' };
+  if (!planSnapshot.exists) return { success: false, message: 'الباقة غير موجودة.' };
+  const planName = typeof planSnapshot.data()?.name === 'string' ? planSnapshot.data()!.name.trim() : '';
+  const maxUsers = planSnapshot.data()?.maxUsers;
+  if (planName.length < 2 || !validPlanLimit(maxUsers)) return { success: false, message: 'بيانات الباقة غير صالحة.' };
   const timestamp = FieldValue.serverTimestamp();
-  await company.update({ plan, status, subscriptionEnd, updatedAt: timestamp, updatedBy: uid });
-  await db.collection('platformAuditLogs').add({ action: 'platform_subscription_updated', companyId, createdBy: uid, timestamp, metadata: { plan, status, subscriptionEnd } });
+  await db.doc(`companies/${companyId}`).update({ plan: planName, planId, maxUsers, status, subscriptionEnd, updatedAt: timestamp, updatedBy: uid });
+  await db.collection('platformAuditLogs').add({ action: 'platform_subscription_updated', companyId, createdBy: uid, timestamp, metadata: { planId, plan: planName, maxUsers, status, subscriptionEnd } });
   return { success: true, message: 'تم تحديث الاشتراك.' };
 });
 
@@ -953,14 +1079,18 @@ export const createPlatformAdmin = onCall({ region: 'us-central1', enforceAppChe
   const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : '';
   const password = typeof data.password === 'string' ? data.password : '';
   const role = data.role;
-  if (!actorUid || name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 12 || password.length > 128 || !validPlatformRole(role)) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  const useRolePermissions = data.useRolePermissions !== false;
+  const customPermissions = data.permissions === undefined ? undefined : validPlatformPermissions(data.permissions);
+  if (!actorUid || name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 12 || password.length > 128 || !validPlatformRole(role) || customPermissions === null || (!useRolePermissions && !customPermissions)) return { success: false, message: 'بيانات المشرف غير صالحة.' };
+  const permissions = useRolePermissions ? await rolePermissions(role) : customPermissions || [];
+  if (role === 'platform_owner' && (!permissions.includes('platform:dashboard:read') || !permissions.includes('platform:admins:manage'))) return { success: false, message: 'لا يمكن إزالة صلاحيات الإدارة الأساسية من حساب صاحب المنصة.' };
   try {
     const user = await auth.createUser({ displayName: name, email, password, emailVerified: false });
     try {
       await auth.setCustomUserClaims(user.uid, claimsForPlatformRole(role));
       const timestamp = FieldValue.serverTimestamp();
-      await db.doc(`platformUsers/${user.uid}`).create({ uid: user.uid, name, email, role, status: 'active', permissions: await rolePermissions(role), permissionsCustomized: false, createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
-      await db.collection('platformAuditLogs').add({ action: 'platform_admin_created', targetUid: user.uid, createdBy: actorUid, timestamp, metadata: { role } });
+      await db.doc(`platformUsers/${user.uid}`).create({ uid: user.uid, name, email, role, status: 'active', permissions, permissionsCustomized: !useRolePermissions, createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
+      await db.collection('platformAuditLogs').add({ action: 'platform_admin_created', targetUid: user.uid, createdBy: actorUid, timestamp, metadata: { role, permissionsCustomized: !useRolePermissions } });
       return { success: true, message: 'تم إنشاء حساب المشرف.' };
     } catch (error) {
       await auth.deleteUser(user.uid).catch(() => undefined);
@@ -1041,7 +1171,7 @@ export const createAdditionalCompanyOwner = onCall({ region: 'us-central1', enfo
   const companyRef = db.doc(`companies/${companyId}`);
   const company = await companyRef.get();
   if (!company.exists) return { success: false, code: 'COMPANY_NOT_FOUND', message: 'الشركة غير موجودة.' };
-  if (Number(company.data()?.memberCount || 0) >= Number(company.data()?.maxUsers || 0)) return { success: false, code: 'MAX_USERS_REACHED', message: 'تم الوصول للحد الأقصى لمستخدمي الشركة.' };
+  if (company.data()?.maxUsers !== null && Number(company.data()?.memberCount || 0) >= Number(company.data()?.maxUsers || 0)) return { success: false, code: 'MAX_USERS_REACHED', message: 'تم الوصول للحد الأقصى لمستخدمي الشركة.' };
   try {
     await auth.getUserByEmail(email);
     return { success: false, code: 'EMAIL_EXISTS', message: 'البريد الإلكتروني مستخدم بالفعل.' };
@@ -1056,7 +1186,7 @@ export const createAdditionalCompanyOwner = onCall({ region: 'us-central1', enfo
     await db.runTransaction(async tx => {
       const freshCompany = await tx.get(companyRef);
       if (!freshCompany.exists) throw new Error('COMPANY_NOT_FOUND');
-      if (Number(freshCompany.data()?.memberCount || 0) >= Number(freshCompany.data()?.maxUsers || 0)) throw new Error('MAX_USERS_REACHED');
+      if (freshCompany.data()?.maxUsers !== null && Number(freshCompany.data()?.memberCount || 0) >= Number(freshCompany.data()?.maxUsers || 0)) throw new Error('MAX_USERS_REACHED');
       const timestamp = FieldValue.serverTimestamp();
       tx.create(companyRef.collection('members').doc(newUid), { uid: newUid, companyId, companyCode: freshCompany.data()?.companyCode || null, name, email, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp, createdBy: actorUid });
       tx.update(companyRef, { memberCount: FieldValue.increment(1), activeMemberCount: FieldValue.increment(1), updatedAt: timestamp });

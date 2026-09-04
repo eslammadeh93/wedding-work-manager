@@ -1,6 +1,12 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../firebase/config";
 
+export type PlatformPlan = {
+  id: string;
+  name: string;
+  maxUsers: number | null;
+};
+
 export type PlatformSupportTicket = {
   id: string;
   companyId: string;
@@ -142,11 +148,30 @@ export async function setPlatformMemberTemporaryPassword(data: {
 
 export async function managePlatformSubscription(data: {
   companyId: string;
-  plan: string;
+  planId: string;
   status: "trial" | "active" | "past_due" | "expired" | "suspended";
   subscriptionEnd: string;
 }): Promise<void> {
   const call = httpsCallable<typeof data, Result>(functions, "managePlatformSubscription");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
+export async function listPlatformPlans(): Promise<PlatformPlan[]> {
+  const call = httpsCallable<undefined, Result & { plans?: PlatformPlan[] }>(functions, "listPlatformPlans");
+  const result = await call();
+  if (!result.data.success || !result.data.plans) throw new Error(result.data.message);
+  return result.data.plans;
+}
+
+export async function createPlatformPlan(data: { name: string; maxUsers: number | null }): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "createPlatformPlan");
+  const result = await call(data);
+  if (!result.data.success) throw new Error(result.data.message);
+}
+
+export async function updatePlatformPlan(data: { planId: string; name: string; maxUsers: number | null }): Promise<void> {
+  const call = httpsCallable<typeof data, Result>(functions, "updatePlatformPlan");
   const result = await call(data);
   if (!result.data.success) throw new Error(result.data.message);
 }
@@ -156,6 +181,9 @@ export async function createPlatformAdmin(data: {
   email: string;
   password: string;
   role: "platform_owner" | "platform_admin" | "platform_support" | "platform_billing" | "platform_read_only";
+  /** When false, permissions contains a per-account override for the selected role. */
+  useRolePermissions?: boolean;
+  permissions?: string[];
 }): Promise<void> {
   const call = httpsCallable<typeof data, Result>(functions, "createPlatformAdmin");
   const result = await call(data);

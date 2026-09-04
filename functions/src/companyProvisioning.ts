@@ -24,15 +24,15 @@ const failure = (code: CreateCompanyError, message: string): CreateCompanyRespon
 export function validateCreateCompanyRequest(input: unknown): CreateCompanyRequest | CreateCompanyResponse {
   if (!input || typeof input !== 'object') return failure('INVALID_INPUT', 'بيانات الطلب غير صحيحة.');
   const value = input as Partial<CreateCompanyRequest>;
-  const strings = ['companyName', 'slug', 'ownerName', 'ownerEmail', 'ownerPassword', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
+  const strings = ['companyName', 'slug', 'ownerName', 'ownerEmail', 'ownerPassword', 'planId', 'plan', 'subscriptionStart', 'subscriptionEnd'] as const;
   if (strings.some(key => typeof value[key] !== 'string' || !value[key]?.trim())) return failure('INVALID_INPUT', 'جميع الحقول النصية المطلوبة يجب أن تكون موجودة.');
-  const normalized = { ...value, companyName: value.companyName!.trim(), ownerName: value.ownerName!.trim(), ownerEmail: value.ownerEmail!.trim().toLowerCase(), slug: value.slug!.trim().toLowerCase(), plan: value.plan!.trim() } as CreateCompanyRequest;
+  const normalized = { ...value, companyName: value.companyName!.trim(), ownerName: value.ownerName!.trim(), ownerEmail: value.ownerEmail!.trim().toLowerCase(), slug: value.slug!.trim().toLowerCase(), planId: value.planId!.trim(), plan: value.plan!.trim() } as CreateCompanyRequest;
   if (!emailPattern.test(normalized.ownerEmail) || normalized.ownerPassword.length < 12 || !validKey(normalized.slug)) return failure('INVALID_INPUT', 'بيانات المالك أو slug غير صالحة.');
-  if (!Number.isInteger(value.maxUsers) || value.maxUsers! <= 0 || !Array.isArray(value.features) || value.features.some(feature => typeof feature !== 'string' || !feature.trim())) return failure('INVALID_INPUT', 'maxUsers أو features غير صالح.');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(normalized.planId) || (value.maxUsers !== null && (!Number.isInteger(value.maxUsers) || Number(value.maxUsers) <= 0)) || !Array.isArray(value.features) || value.features.some(feature => typeof feature !== 'string' || !feature.trim())) return failure('INVALID_INPUT', 'maxUsers أو features غير صالح.');
   const start = Date.parse(normalized.subscriptionStart), end = Date.parse(normalized.subscriptionEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return failure('INVALID_INPUT', 'تواريخ الاشتراك غير صالحة.');
   normalized.features = [...new Set(value.features.map(feature => feature.trim()))];
-  normalized.maxUsers = value.maxUsers!;
+  normalized.maxUsers = value.maxUsers ?? null;
   normalized.status = value.status === 'trial' ? 'trial' : 'active';
   return normalized;
 }
@@ -95,7 +95,7 @@ export class CompanyProvisioningService {
         transaction.create(slugRef, { companyId: companyRef.id, value: request.slug, createdAt: timestamp });
         transaction.create(codeRef, { companyId: companyRef.id, value: generatedCompanyCode, createdAt: timestamp });
         transaction.set(counterRef, { lastCode: nextCode, updatedAt: timestamp });
-        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: generatedCompanyCode, ownerName: request.ownerName, ownerEmail: request.ownerEmail, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: request.status, memberCount: 1, activeMemberCount: 1, orderCount: 0, createdAt: timestamp, updatedAt: timestamp });
+        transaction.create(companyRef, { name: request.companyName, slug: request.slug, companyCode: generatedCompanyCode, ownerName: request.ownerName, ownerEmail: request.ownerEmail, planId: request.planId, plan: request.plan, subscriptionStart: request.subscriptionStart, subscriptionEnd: request.subscriptionEnd, maxUsers: request.maxUsers, features: request.features, status: request.status, memberCount: 1, activeMemberCount: 1, orderCount: 0, createdAt: timestamp, updatedAt: timestamp });
         transaction.create(memberRef, { uid: ownerUid, companyId: companyRef.id, companyCode: generatedCompanyCode, name: request.ownerName, email: request.ownerEmail, role: 'company_super_admin', status: 'active', createdAt: timestamp, updatedAt: timestamp });
         transaction.create(auditRef, { companyId: companyRef.id, ownerUid, createdBy, timestamp, action: 'company_created_with_owner' });
       });

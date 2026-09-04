@@ -6,6 +6,7 @@ import {
   CircleGauge,
   ClipboardList,
   CreditCard,
+  Package,
   Headphones,
   Settings,
   ShieldCheck,
@@ -19,6 +20,7 @@ export type PlatformRouteId =
   | "companies"
   | "users"
   | "subscriptions"
+  | "plans"
   | "analytics"
   | "notifications"
   | "activity"
@@ -67,6 +69,14 @@ export const PLATFORM_ROUTES: readonly PlatformRouteDefinition[] = [
     label: "الاشتراكات",
     icon: CreditCard,
     permission: "platform:subscriptions:read",
+    implemented: true,
+  },
+  {
+    id: "plans",
+    path: "/platform/plans",
+    label: "الباقات",
+    icon: Package,
+    permission: "platform:plans:read",
     implemented: true,
   },
   {

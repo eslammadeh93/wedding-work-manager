@@ -44,9 +44,9 @@ export type MarkCompanyNotificationsReadResponse = CompanyMemberResponse;
 export type UpdateOwnCompanyProfileResponse = CompanyMemberResponse;
 
 export type CreateCompanyError = 'OK' | 'UNAUTHORIZED' | 'INVALID_INPUT' | 'COMPANY_EXISTS' | 'SLUG_EXISTS' | 'COMPANY_CODE_EXISTS' | 'EMAIL_EXISTS' | 'AUTH_CREATION_FAILED' | 'COMPANY_CREATION_FAILED' | 'MEMBER_CREATION_FAILED' | 'AUDIT_LOG_FAILED' | 'ROLLBACK_FAILED' | 'UNKNOWN_ERROR';
-export interface CreateCompanyRequest { companyName: string; slug: string; ownerName: string; ownerEmail: string; ownerPassword: string; plan: string; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; status?: 'trial' | 'active'; }
+export interface CreateCompanyRequest { companyName: string; slug: string; ownerName: string; ownerEmail: string; ownerPassword: string; planId: string; plan: string; subscriptionStart: string; subscriptionEnd: string; maxUsers: number | null; features: string[]; status?: 'trial' | 'active'; }
 export interface CreateCompanyResponse { success: boolean; code: CreateCompanyError; message: string; companyId?: string; ownerUid?: string; }
-export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: 'trial' | 'active' | 'past_due' | 'expired' | 'suspended'; subscriptionStart: string; subscriptionEnd: string; maxUsers: number; features: string[]; }
+export interface UpdateCompanyRequest { companyId: string; name: string; slug: string; companyCode: string; ownerName: string; ownerEmail: string; plan: string; status: 'trial' | 'active' | 'past_due' | 'expired' | 'suspended'; subscriptionStart: string; subscriptionEnd: string; maxUsers: number | null; features: string[]; }
 export interface CreateAdditionalCompanyOwnerRequest { companyId: string; name: string; email: string; temporaryPassword: string; }
 export interface CreateAdditionalCompanyOwnerResponse { success: boolean; code: 'OK' | 'INVALID_INPUT' | 'UNAUTHORIZED' | 'EMAIL_EXISTS' | 'COMPANY_NOT_FOUND' | 'MAX_USERS_REACHED' | 'UNKNOWN_ERROR'; message: string; }
 export interface UpdateCompanyResponse { success: boolean; code: CreateCompanyError; message: string; }

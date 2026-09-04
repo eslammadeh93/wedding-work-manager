@@ -40,7 +40,7 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
     if (!platformRole || !['platform_owner', 'platform_admin', 'platform_support', 'platform_billing', 'platform_read_only'].includes(platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if ((hasOwnerClaim && platformRole !== 'platform_owner') || (platformRoleClaim && platformRoleClaim !== platformRole)) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات حساب المنصة.');
     if (platformProfile.status !== 'active') throw new MultiTenantAuthError('الحساب معطّل.');
-    const savedPlatformPermissions = Array.isArray(platformProfile.permissions)
+    const savedPlatformPermissions = platformProfile.permissionsCustomized === true && Array.isArray(platformProfile.permissions)
       ? platformProfile.permissions.filter((permission): permission is PlatformPermission => typeof permission === 'string' && (PLATFORM_PERMISSIONS as readonly string[]).includes(permission))
       : undefined;
     return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: platformRole, permissions: savedPlatformPermissions || PLATFORM_PERMISSION_MATRIX[platformRole] };

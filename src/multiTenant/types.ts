@@ -34,7 +34,10 @@ export interface Company {
   subscriptionStart: RecordTimestamp;
   subscriptionEnd: RecordTimestamp;
   gracePeriodEnd?: RecordTimestamp;
-  maxUsers: number;
+  /** Null means the selected platform plan allows unlimited members. */
+  maxUsers: number | null;
+  /** The managed platform plan that determines the member allowance. */
+  planId?: string;
   features: string[];
   createdAt: RecordTimestamp;
   createdBy: string;

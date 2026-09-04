@@ -5,7 +5,7 @@ import { PlatformBadge } from "./shared/PlatformBadge";
 
 const navigationGroups = [
   ["dashboard", "companies", "users"],
-  ["subscriptions", "analytics", "activity"],
+  ["subscriptions", "plans", "analytics", "activity"],
   ["notifications", "support"],
   ["settings", "admins"],
   ["developerTools"],

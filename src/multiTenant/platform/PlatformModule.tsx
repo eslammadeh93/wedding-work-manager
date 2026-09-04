@@ -3,6 +3,7 @@ import {
   Crown,
   Mail,
   Pencil,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -11,6 +12,7 @@ import {
   companyManagementService,
   PlatformProvisioningUnavailableError,
 } from "./companyManagementService";
+import { listPlatformPlans, type PlatformPlan } from "./platformConsoleService";
 import {
   daysUntil,
   formatPlatformDate,
@@ -95,25 +97,51 @@ function Status({ status }: { status: string }) {
   );
 }
 
-function CreateCompanyForm({ close }: { close: () => void }) {
+function CreateCompanyForm({ close, onCreated }: { close: () => void; onCreated: () => Promise<void> }) {
   const [data, setData] = useState<CreateCompanyRequest>({
     companyName: "",
     slug: "",
     ownerName: "",
     ownerEmail: "",
     ownerPassword: "",
-    plan: "basic",
+    planId: "",
+    plan: "",
     subscriptionStart: "",
     subscriptionEnd: "",
-    maxUsers: 1,
+    maxUsers: null,
     features: [],
     status: "trial",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const update = (key: keyof CreateCompanyRequest, value: string | number) =>
+  const [plans, setPlans] = useState<PlatformPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const availablePlans = await listPlatformPlans();
+        setPlans(availablePlans);
+        setData((current) => {
+          if (current.planId || !availablePlans.length) return current;
+          const firstPlan = availablePlans[0];
+          return { ...current, planId: firstPlan.id, plan: firstPlan.name, maxUsers: firstPlan.maxUsers };
+        });
+      } catch {
+        setPlansError("تعذر تحميل الباقات. حاول تحديث الصفحة.");
+      } finally {
+        setPlansLoading(false);
+      }
+    })();
+  }, []);
+  const update = (key: keyof CreateCompanyRequest, value: string | number | null) =>
     setData((previous) => ({ ...previous, [key]: value }));
+  const selectPlan = (planId: string) => {
+    const plan = plans.find((item) => item.id === planId);
+    if (!plan) return;
+    setData((current) => ({ ...current, planId: plan.id, plan: plan.name, maxUsers: plan.maxUsers }));
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const next: Record<string, string> = {};
@@ -125,8 +153,7 @@ function CreateCompanyForm({ close }: { close: () => void }) {
       next.ownerPassword = "كلمة مرور المالك يجب أن تكون 12 حرفاً على الأقل.";
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.slug))
       next.slug = "استخدم حروفًا إنجليزية صغيرة وأرقامًا وشرطة فقط.";
-    if (!Number.isInteger(data.maxUsers) || data.maxUsers < 1)
-      next.maxUsers = "يجب أن يكون رقمًا صحيحًا أكبر من صفر.";
+    if (!data.planId) next.plan = "اختر باقة للشركة.";
     if (
       !data.subscriptionStart ||
       !data.subscriptionEnd ||
@@ -139,7 +166,8 @@ function CreateCompanyForm({ close }: { close: () => void }) {
     setMessage(null);
     try {
       await companyManagementService.createCompanyWithOwner(data);
-      setMessage("تم إنشاء الشركة بنجاح.");
+      await onCreated();
+      close();
     } catch (error) {
       setMessage(
         error instanceof PlatformProvisioningUnavailableError
@@ -190,13 +218,18 @@ function CreateCompanyForm({ close }: { close: () => void }) {
           الباقة
           <select
             className={fieldClass}
-            value={data.plan}
-            onChange={(e) => update("plan", e.target.value)}
+            value={data.planId}
+            onChange={(e) => selectPlan(e.target.value)}
+            disabled={plansLoading || !plans.length}
           >
-            <option value="basic">Basic</option>
-            <option value="pro">Pro</option>
-            <option value="enterprise">Enterprise</option>
+            <option value="">{plansLoading ? "جارٍ تحميل الباقات…" : "اختر باقة"}</option>
+            {plans.map((plan) => (
+              <option key={plan.id} value={plan.id}>{plan.name}</option>
+            ))}
           </select>
+          {data.planId && <small className="mt-1 block text-xs font-normal text-slate-500">الحد: {data.maxUsers === null ? "غير محدود" : `${data.maxUsers} حساب`}</small>}
+          {plansError && <small className="text-rose-600">{plansError}</small>}
+          {errors.plan && <small className="text-rose-600">{errors.plan}</small>}
         </label>
         <label className="text-sm font-bold">
           الحالة
@@ -230,34 +263,6 @@ function CreateCompanyForm({ close }: { close: () => void }) {
             <small className="text-rose-600">{errors.subscriptionEnd}</small>
           )}
         </label>
-        <label className="text-sm font-bold">
-          الحد الأقصى للمستخدمين
-          <input
-            className={fieldClass}
-            type="number"
-            min="1"
-            value={data.maxUsers}
-            onChange={(e) => update("maxUsers", Number(e.target.value))}
-          />
-          {errors.maxUsers && (
-            <small className="text-rose-600">{errors.maxUsers}</small>
-          )}
-        </label>
-        <label className="text-sm font-bold">
-          المزايا (مفصولة بفاصلة)
-          <input
-            className={fieldClass}
-            onChange={(e) =>
-              setData((p) => ({
-                ...p,
-                features: e.target.value
-                  .split(",")
-                  .map((x) => x.trim())
-                  .filter(Boolean),
-              }))
-            }
-          />
-        </label>
       </div>
       <p className="text-xs text-slate-500">
         سيتم توليد رمز شركة رقمي فريد من 6 أرقام تلقائيًا.
@@ -288,6 +293,7 @@ export function PlatformModule() {
   const canCreateCompanies = hasPlatformPermission("platform:companies:create");
   const canUpdateCompanies = hasPlatformPermission("platform:companies:update");
   const canAddCompanyOwners = platformRole === "platform_owner";
+  const canDeleteCompanies = platformRole === "platform_owner";
   const [path, setPath] = useState(() => window.location.pathname.startsWith("/platform") ? `${window.location.pathname}${window.location.search}` : "/platform");
   const [menu, setMenu] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -315,7 +321,7 @@ export function PlatformModule() {
   const companyId =
     view === "detail" ? decodeURIComponent(cleanPath.split("/").pop() || "") : "";
   const managementPage: ManagementPageId | null = (
-    ["users", "subscriptions", "analytics", "notifications", "activity", "support", "settings", "admins"] as const
+    ["users", "subscriptions", "plans", "analytics", "notifications", "activity", "support", "settings", "admins"] as const
   ).find((id) => cleanPath === `/platform/${id}`) || null;
   const { companies, loading, error, reload } = usePlatformCompanies(view === "companies" || view === "detail");
   const selected = companies.find((company) => company.id === companyId);
@@ -353,6 +359,7 @@ export function PlatformModule() {
                   go={go}
                   canCreate={canCreateCompanies}
                   canUpdate={canUpdateCompanies}
+                  canDelete={canDeleteCompanies}
                   openCreate={() => setCreating(true)}
                   initialStatus={new URLSearchParams(path.split("?")[1] || "").get("status") || ""}
                 />
@@ -390,7 +397,7 @@ export function PlatformModule() {
                 <X />
               </button>
             </div>
-            <CreateCompanyForm close={() => setCreating(false)} />
+            <CreateCompanyForm close={() => setCreating(false)} onCreated={async () => { await reload(); }} />
           </div>
         </div>
       )}
@@ -421,6 +428,7 @@ function Companies({
   openCreate,
   canCreate,
   canUpdate,
+  canDelete,
   initialStatus,
 }: {
   companies: PlatformCompany[];
@@ -428,6 +436,7 @@ function Companies({
   openCreate: () => void;
   canCreate: boolean;
   canUpdate: boolean;
+  canDelete: boolean;
   initialStatus: string;
 }) {
   const [search, setSearch] = useState("");
@@ -438,6 +447,8 @@ function Companies({
   const [editing, setEditing] = useState<PlatformCompany | null>(null);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 20;
@@ -485,6 +496,25 @@ function Companies({
       setSaving(false);
     }
   };
+  const deleteCompany = async (company: PlatformCompany) => {
+    const confirmation = window.prompt(`حذف نهائي: اكتب اسم الشركة «${company.name}» للتأكيد. سيُحذف كل ما يخصها ولا يمكن التراجع.`);
+    if (confirmation === null) return;
+    if (confirmation !== company.name) {
+      setDeleteError("اسم الشركة غير مطابق، لم يتم الحذف.");
+      return;
+    }
+    setDeletingId(company.id);
+    setDeleteError("");
+    try {
+      await companyManagementService.deleteCompany({ companyId: company.id, confirmation });
+      setLocalCompanies((current) => current.filter((item) => item.id !== company.id));
+      setMessage("تم حذف الشركة وكل حساباتها وبياناتها نهائيًا.");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "تعذر حذف الشركة.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
   const columns: readonly DataTableColumn<PlatformCompany>[] = [
     {
       key: "company",
@@ -528,8 +558,8 @@ function Companies({
     },
     {
       key: "maxUsers",
-      header: "maxUsers",
-      render: (company) => company.maxUsers,
+      header: "الموظفون",
+      render: (company) => company.maxUsers === null ? "غير محدود" : company.maxUsers,
     },
     {
       key: "members",
@@ -556,6 +586,14 @@ function Companies({
             <Pencil size={14} />
             تعديل
           </button>}
+          {canDelete && <button
+            disabled={deletingId === company.id}
+            onClick={() => void deleteCompany(company)}
+            className="flex items-center gap-1 font-bold text-rose-700 disabled:opacity-50"
+          >
+            <Trash2 size={14} />
+            {deletingId === company.id ? "جارٍ الحذف…" : "حذف نهائي"}
+          </button>}
           <button
             onClick={() => go(`/platform/companies/${company.id}`)}
             className="text-slate-600"
@@ -579,6 +617,7 @@ function Companies({
           {message}
         </p>
       )}
+      {deleteError && <p className="mb-4 rounded-xl bg-rose-100 p-3 text-rose-800">{deleteError}</p>}
       <FilterBar>
         <input
           className={fieldClass}
@@ -708,7 +747,7 @@ function CompanyDetail({
     ["الحالة", current.status],
     ["بداية الاشتراك", formatPlatformDate(current.subscriptionStart)],
     ["نهاية الاشتراك", formatPlatformDate(current.subscriptionEnd)],
-    ["maxUsers", current.maxUsers],
+    ["الموظفون", current.maxUsers === null ? "غير محدود" : current.maxUsers],
     ["عدد الأعضاء", current.memberCount ?? "غير متوفر"],
     ["تاريخ الإنشاء", formatPlatformDate(current.createdAt)],
     ["أنشأ بواسطة", current.createdBy || "غير متوفر"],
@@ -1108,15 +1147,8 @@ function CompanyEditModal({
           </label>
           <label>
             الباقة
-            <select
-              className={fieldClass}
-              value={form.plan}
-              onChange={(e) => update("plan", e.target.value)}
-            >
-              <option>basic</option>
-              <option>pro</option>
-              <option>enterprise</option>
-            </select>
+            <input className={`${fieldClass} cursor-not-allowed opacity-70`} value={form.plan} disabled />
+            <small className="mt-1 block text-xs text-slate-500">يتم تغيير الباقة وحد الموظفين من صفحة الاشتراكات.</small>
           </label>
           <label>
             الحالة
@@ -1155,33 +1187,6 @@ function CompanyEditModal({
               value={form.subscriptionEnd}
               onChange={(e) => update("subscriptionEnd", e.target.value)}
               required
-            />
-          </label>
-          <label>
-            الحد الأقصى
-            <input
-              type="number"
-              min="1"
-              className={fieldClass}
-              value={form.maxUsers}
-              onChange={(e) => update("maxUsers", Number(e.target.value))}
-              required
-            />
-          </label>
-          <label>
-            المزايا
-            <input
-              className={fieldClass}
-              value={form.features.join(", ")}
-              onChange={(e) =>
-                update(
-                  "features",
-                  e.target.value
-                    .split(",")
-                    .map((value) => value.trim())
-                    .filter(Boolean),
-                )
-              }
             />
           </label>
         </div>
