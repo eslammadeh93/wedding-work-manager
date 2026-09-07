@@ -30,6 +30,7 @@ import {
   RecycleBinItem,
 } from '../types';
 import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../utils/recycleBin';
+import { resolveOrderCustomers } from '../utils/orderCustomer';
 import {
   initialCompanySettings,
   initialInventory,
@@ -970,7 +971,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     else setInventory((current) => current.map((inventoryItem) => inventoryItem.id === item.id ? { ...inventoryItem, ...updates } : inventoryItem));
   };
 
-  const activeOrders = orders.filter((order) => !isSoftDeleted(order));
+  const activeOrders = resolveOrderCustomers(orders.filter((order) => !isSoftDeleted(order)), customers);
   const activeCustomers = customers.filter((customer) => !isSoftDeleted(customer));
   const activeInventory = inventory.filter((item) => !isSoftDeleted(item));
   const deletedItems = buildRecycleBinItems(orders, customers, inventory);

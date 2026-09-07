@@ -11,6 +11,7 @@ import { type Permission } from '../permissions';
 import { companyMembersService } from '../companyMembersService';
 import { calculateSafeBalanceToDate } from '../../utils/monthlyCash';
 import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../../utils/recycleBin';
+import { resolveOrderCustomers } from '../../utils/orderCustomer';
 
 const defaultCategories: CategoryItem[] = [];
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
@@ -249,7 +250,10 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const collection = item.type === 'customer' ? 'customers' : 'inventory';
     await write(collection, item.id, { deletedAt: null, purgeAt: null }, true);
   }, [company, write]);
-  const activeOrders = useMemo(() => orders.filter((order) => !isSoftDeleted(order)), [orders]);
+  const activeOrders = useMemo(
+    () => resolveOrderCustomers(orders.filter((order) => !isSoftDeleted(order)), customers),
+    [customers, orders],
+  );
   const activeCustomers = useMemo(() => customers.filter((customer) => !isSoftDeleted(customer)), [customers]);
   const activeInventory = useMemo(() => inventory.filter((item) => !isSoftDeleted(item)), [inventory]);
   const recycleBinOrders = useMemo(() => {

@@ -628,7 +628,7 @@ function Companies({
     <section>
       <PlatformPageHeader
         title="الشركات"
-        actions={<div className="flex flex-wrap gap-2">{canCreate && <PlatformButton onClick={openCreate}>إنشاء شركة</PlatformButton>}{canViewContacts && <button onClick={openContacts} className="rounded-xl border border-amber-600 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-50">جهات التواصل</button>}</div>}
+        actions={<div className="flex flex-wrap gap-2">{canCreate && <PlatformButton onClick={openCreate}>إنشاء شركة</PlatformButton>}{canViewContacts && <button onClick={openContacts} className="rounded-xl border border-amber-600 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-50">بيانات تواصل أصحاب الشركات</button>}</div>}
       />
       {message && (
         <p className="mb-4 rounded-xl bg-emerald-100 p-3 text-emerald-800">
@@ -723,7 +723,7 @@ function CompanyContactsModal({ close }: { close: () => void }) {
   useEffect(() => { void load(); }, []);
   const filtered = contacts.filter((contact) => !search || [contact.companyName, contact.name, contact.email, contact.phone].some((value) => value.toLowerCase().includes(search.toLowerCase())));
   return <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-950/55 p-4"><div className="mx-auto my-6 max-w-5xl rounded-2xl bg-slate-50 p-5 shadow-xl dark:bg-slate-950">
-    <div className="mb-5 flex items-start justify-between gap-4"><div><h2 className="text-xl font-black">جهات التواصل</h2><p className="mt-1 text-sm text-slate-500">أصحاب الشركات المسجلون على المنصة.</p></div><button onClick={close} aria-label="إغلاق"><X /></button></div>
+    <div className="mb-5 flex items-start justify-between gap-4"><div><h2 className="text-xl font-black">بيانات تواصل أصحاب الشركات</h2><p className="mt-1 text-sm text-slate-500">أصحاب الشركات المسجلون على المنصة.</p></div><button onClick={close} aria-label="إغلاق"><X /></button></div>
     <input className={`${fieldClass} mb-4`} placeholder="بحث باسم الشركة أو المالك أو الهاتف أو الإيميل" value={search} onChange={(event) => setSearch(event.target.value)} />
     {loading ? <LoadingState text="جارٍ تحميل جهات التواصل…" /> : error ? <div className="rounded-xl bg-rose-50 p-4 text-rose-700">{error}<button onClick={() => void load()} className="mr-3 font-bold underline">إعادة المحاولة</button></div> : filtered.length === 0 ? <EmptyState text="لا توجد جهات تواصل مطابقة." /> : <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-800"><table className="w-full min-w-[720px] text-right text-sm"><thead className="bg-slate-100 text-xs dark:bg-slate-800"><tr><th className="p-3">الشركة</th><th className="p-3">صاحب الشركة</th><th className="p-3">رقم الموبايل</th><th className="p-3">البريد الإلكتروني</th><th className="p-3">الحالة</th></tr></thead><tbody>{filtered.map((contact, index) => <tr key={`${contact.companyId}-${contact.email}-${index}`} className="border-t border-slate-100 dark:border-slate-800"><td className="p-3 font-bold">{contact.companyName}</td><td className="p-3">{contact.name}</td><td className="p-3" dir="ltr">{contact.phone || "غير مسجل"}</td><td className="p-3" dir="ltr">{contact.email || "غير مسجل"}</td><td className="p-3">{contact.status === 'active' ? 'نشط' : contact.status === 'unknown' ? 'غير متاح' : contact.status}</td></tr>)}</tbody></table></div>}
   </div></div>;
@@ -1024,12 +1024,13 @@ function CompanyOrderAnalytics({ companyId }: { companyId: string }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [openMonth, setOpenMonth] = useState<string | null>(null);
   const [openAccountsMonth, setOpenAccountsMonth] = useState<string | null>(null);
+  const [selectedProfitMonth, setSelectedProfitMonth] = useState("");
   useEffect(() => {
     let mounted = true;
     setLoading(true);
     setError("");
     void companyManagementService.getCompanyOrderAnalytics(companyId)
-      .then((data) => { if (mounted) setAnalytics(data); })
+      .then((data) => { if (mounted) { setAnalytics(data); setSelectedProfitMonth((current) => data.monthlyAccounts.some((item) => item.month === current) ? current : (data.monthlyAccounts[0]?.month || "")); } })
       .catch((failure) => { if (mounted) setError(failure instanceof Error ? failure.message : "تعذر تحميل تحليل الطلبات."); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
@@ -1037,8 +1038,12 @@ function CompanyOrderAnalytics({ companyId }: { companyId: string }) {
   if (loading) return <LoadingState text="جارٍ تحميل تحليل طلبات الشركة…" />;
   if (error) return <div className="rounded-2xl bg-rose-50 p-4 text-rose-700">{error}<button onClick={() => setReloadKey((value) => value + 1)} className="mr-3 font-bold underline">إعادة المحاولة</button></div>;
   if (!analytics) return <EmptyState text="لا توجد بيانات تحليل متاحة." />;
+  const selectedMonthlyAccounts = analytics.monthlyAccounts.find((item) => item.month === selectedProfitMonth);
   return <>
-    <div className="mb-4 rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900"><p className="text-xs text-slate-500">إجمالي أوردرات الشركة</p><p className="mt-1 text-3xl font-black">{analytics.totalOrders}</p></div>
+    <div className="mb-4 grid gap-3 md:grid-cols-2">
+      <div className="rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900"><p className="text-xs text-slate-500">إجمالي أوردرات الشركة</p><p className="mt-1 text-3xl font-black">{analytics.totalOrders}</p></div>
+      <div className="rounded-2xl bg-white p-5 shadow-sm dark:bg-slate-900"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs text-slate-500">إجمالي صافي الربح المتوقع</p><p className="mt-1 text-3xl font-black text-emerald-700">{platformMoney(selectedMonthlyAccounts?.netMonthlyOrderProfit || 0)}</p></div><label className="text-xs font-bold text-slate-600 dark:text-slate-300">الشهر<select className={`${fieldClass} mt-1 min-w-44 py-2 text-sm`} value={selectedProfitMonth} onChange={(event) => setSelectedProfitMonth(event.target.value)}>{analytics.monthlyAccounts.map((item) => <option key={item.month} value={item.month}>{platformMonthLabel(item.month)}</option>)}</select></label></div><p className="mt-2 text-xs text-slate-500">يعرض قيمة «الربح المتوقع خلال الشهر» من حسابات الشركة للشهر المختار.</p></div>
+    </div>
     <div className="mb-3 flex items-center gap-2"><BarChart3 size={18} className="text-amber-600" /><div><h2 className="font-black">أوردرات الشركة حسب الشهر</h2><p className="text-xs text-slate-500">اختر حسابات الشهر لمراجعة نفس أرقام الخزنة والتحصيلات، أو افتح قائمة أوردراته.</p></div></div>
     {analytics.months.length === 0 ? <EmptyState text="لا توجد أوردرات أو مصروفات مسجلة لهذه الشركة حتى الآن." /> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
       {analytics.months.map((month) => <div key={month.month} className="rounded-2xl bg-white p-4 text-right shadow-sm dark:bg-slate-900">

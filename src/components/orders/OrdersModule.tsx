@@ -38,6 +38,7 @@ import { getOrderSource, OrderSourceBadge } from './OrderSourceBadge';
 import { WorkTaskModal } from './WorkTaskModal';
 import { WorkTasksPanel } from './WorkTasksPanel';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
+import { resolveOrderCustomers } from '../../utils/orderCustomer';
 
 type QuickFilterType =
   | 'all'
@@ -96,7 +97,7 @@ const WorkerMovementIndicators: React.FC<{ companyId: string | null; order: Orde
 
 export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest = 0, todaysOrdersRequest = 0, openOrderId, onOrderOpened }) => {
   const { t, language } = useLanguage();
-  const { orders, workTasks, settings, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
+  const { orders, customers, workTasks, settings, deleteOrder, updateWorkTask, deleteWorkTask } = useData();
   const { profile, authSession, isDemo } = useAuth();
 
   const isWorker = profile?.role === 'worker';
@@ -221,7 +222,12 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     setIsLoadingPage(false);
   };
 
-  const sourceOrders = useServerPagination ? pagedOrders : orders;
+  // Paginated manager orders are fetched independently of the context, so
+  // resolve their customer snapshots here as well.
+  const sourceOrders = useMemo(
+    () => useServerPagination ? resolveOrderCustomers(pagedOrders, customers) : orders,
+    [customers, orders, pagedOrders, useServerPagination],
+  );
 
   // Keep an already-open worker modal synchronized with realtime redaction/grant updates.
   useEffect(() => {
