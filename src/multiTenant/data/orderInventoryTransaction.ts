@@ -5,6 +5,7 @@ import { firestorePaths } from '../firestorePaths';
 import { calculateReservationUpdates, normalizedReservations, OrderInventoryError } from './orderInventoryMath';
 import type { DataOperationResult } from './companyDataService';
 import { deletionMetadata } from '../../utils/recycleBin';
+import { orderVersionsMatch } from './orderVersion';
 
 type OrderMutationResult = DataOperationResult<{ id: string }>;
 const messageFor = (code: string) => ({
@@ -65,7 +66,7 @@ export const orderInventoryTransaction = {
         if (!currentSnapshot.exists()) throw new OrderInventoryError('ORDER_NOT_FOUND', messageFor('ORDER_NOT_FOUND'));
         const current = { id: currentSnapshot.id, ...currentSnapshot.data() } as Order;
         if (current.deletedAt) throw new OrderInventoryError('ORDER_ALREADY_DELETED', messageFor('ORDER_ALREADY_DELETED'));
-        if (expectedUpdatedAt && current.updatedAt !== expectedUpdatedAt) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
+        if (expectedUpdatedAt && !orderVersionsMatch(expectedUpdatedAt, current.updatedAt)) throw new OrderInventoryError('ORDER_STALE', messageFor('ORDER_STALE'));
         const reservedItems = normalizedReservations(patch.reservedItems ?? current.reservedItems);
         const refs = inventoryRefs(companyId, [...(current.reservedItems || []), ...reservedItems]);
         const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
