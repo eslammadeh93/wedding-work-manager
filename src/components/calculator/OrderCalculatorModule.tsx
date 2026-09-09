@@ -9,9 +9,9 @@ const km = (meters: number) => meters / 1_000;
 const currency = (value: number) => `${value.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م`;
 
 /** The use-only workspace: it deliberately contains no calculator configuration controls. */
-export const OrderCalculatorModule: React.FC<{ onOpenCalculator: () => void }> = ({ onOpenCalculator }) => {
+export const OrderCalculatorModule: React.FC<{ onOpenCalculator: () => void; initialView?: 'chooser' | 'transportation' }> = ({ onOpenCalculator, initialView = 'chooser' }) => {
   const { settings } = useData();
-  const [view, setView] = useState<'chooser' | 'transportation'>('chooser');
+  const [view, setView] = useState<'chooser' | 'transportation'>(initialView);
   const [savedLocations, setSavedLocations] = useState<TransportationSavedLocation[]>(settings.transportationSavedLocations || []);
   const [originUrl, setOriginUrl] = useState('');
   const [destinationUrl, setDestinationUrl] = useState('');
@@ -21,6 +21,7 @@ export const OrderCalculatorModule: React.FC<{ onOpenCalculator: () => void }> =
   const [transportError, setTransportError] = useState('');
 
   useEffect(() => setSavedLocations(settings.transportationSavedLocations || []), [settings.transportationSavedLocations]);
+  useEffect(() => setView(initialView), [initialView]);
 
   const calculate = async () => {
     setTransportError(''); setRoute(null);

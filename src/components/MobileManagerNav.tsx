@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BellOff, BellRing, Calculator, CalendarDays, Plus } from 'lucide-react';
+import { BellOff, BellRing, Calculator, CalendarDays, Plus, Route } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
@@ -10,15 +10,19 @@ interface MobileManagerNavProps {
   onOpenTodaysOrders: () => void;
   onOpenWorkerMovements: () => void;
   onOpenCalculator: () => void;
+  onOpenTransportationCalculator?: () => void;
+  onOpenCalendar?: () => void;
   variant?: 'mobile' | 'desktop';
 }
 
-/** Fast actions for managers plus the notification switch for office accounts. */
+/** Fast actions plus this device's notification switch for every company account. */
 export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   onCreateOrder,
   onOpenTodaysOrders,
   onOpenWorkerMovements,
   onOpenCalculator,
+  onOpenTransportationCalculator,
+  onOpenCalendar,
   variant = 'mobile',
 }) => {
   const { profile, authSession } = useAuth();
@@ -26,10 +30,11 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [showCalculatorMenu, setShowCalculatorMenu] = useState(false);
 
   const isWorker = profile?.role === 'worker';
   const isCompanyMember = Boolean(authSession?.companyId && authSession?.uid);
-  const canControlPush = isCompanyMember && !isWorker;
+  const canControlPush = isCompanyMember;
   const isDesktop = variant === 'desktop';
   // Notification permission is deliberately a handheld-only action. Desktop
   // users should not be interrupted or offered this setting in the dashboard.
@@ -38,6 +43,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
   const permissions = authSession?.permissions || [];
   const canCreateOrder = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:write');
   const canViewOrders = !USE_MULTI_TENANT_DATA || permissions.includes('company:orders:read');
+  const canViewCalendar = !USE_MULTI_TENANT_DATA || permissions.includes('company:calendar:read');
   const canViewNotifications = !USE_MULTI_TENANT_DATA || permissions.includes('company:notifications:read');
   const canUseCalculator = !USE_MULTI_TENANT_DATA || permissions.includes('company:calculator:use');
   const unreadMovements = notifications.filter(
@@ -63,12 +69,13 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
       setPushEnabled((enabled) => !enabled);
       if (pushEnabled) localStorage.removeItem(pushPreferenceKey);
       else localStorage.setItem(pushPreferenceKey, 'true');
+      window.dispatchEvent(new Event('wwm-push-preference-changed'));
     } catch {
       setPushMessage('تعذر تحديث الإشعارات. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.');
     } finally { setPushBusy(false); }
   };
 
-  if (!showPushControl && !canUseCalculator && !canCreateOrder && !canViewOrders && !canViewNotifications) return null;
+  if (!showPushControl && !canUseCalculator && !canCreateOrder && !canViewOrders && !canViewCalendar && !canViewNotifications) return null;
 
   const containerClass = isDesktop
     ? 'hidden lg:grid w-full lg:w-auto lg:min-w-[450px]'
@@ -100,7 +107,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
         {canUseCalculator && (
           <button
             type="button"
-            onClick={onOpenCalculator}
+            onClick={() => isDesktop ? onOpenCalculator() : setShowCalculatorMenu((open) => !open)}
             className={`flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-emerald-50 dark:text-slate-300 dark:hover:bg-emerald-950/30 active:scale-95 ${secondaryButtonClass}`}
           >
             <Calculator className="h-5 w-5 text-emerald-500" />
@@ -116,6 +123,17 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           >
             <CalendarDays className="h-5 w-5 text-amber-500" />
             <span className="text-[10px] font-bold">أوردرات اليوم</span>
+          </button>
+        )}
+
+        {isWorker && canViewCalendar && onOpenCalendar && (
+          <button
+            type="button"
+            onClick={onOpenCalendar}
+            className={`flex flex-col items-center justify-center gap-1 rounded-xl text-slate-600 transition-colors hover:bg-amber-50 dark:text-slate-300 dark:hover:bg-amber-950/30 active:scale-95 ${secondaryButtonClass}`}
+          >
+            <CalendarDays className="h-5 w-5 text-amber-500" />
+            <span className="text-[10px] font-bold">تقويم تركيباتي</span>
           </button>
         )}
 
@@ -148,6 +166,21 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           </button>
         )}
       </div>
+      {!isDesktop && showCalculatorMenu && (
+        <div className="absolute bottom-full inset-x-2 mx-auto mb-2 max-w-lg rounded-2xl border border-emerald-200 bg-white p-2 shadow-xl dark:border-emerald-900/70 dark:bg-slate-900" dir="rtl">
+          <p className="px-2 pb-2 pt-1 text-[11px] font-black text-slate-500 dark:text-slate-400">اختر الحاسبة</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => { setShowCalculatorMenu(false); onOpenCalculator(); }} className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl bg-emerald-50 text-emerald-800 transition-colors hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <Calculator className="h-5 w-5" />
+              <span className="text-[11px] font-black">حاسبة الأوردرات</span>
+            </button>
+            <button type="button" onClick={() => { setShowCalculatorMenu(false); onOpenTransportationCalculator?.(); }} className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl bg-sky-50 text-sky-800 transition-colors hover:bg-sky-100 dark:bg-sky-950/30 dark:text-sky-200">
+              <Route className="h-5 w-5" />
+              <span className="text-[11px] font-black">حاسبة الانتقالات</span>
+            </button>
+          </div>
+        </div>
+      )}
       {pushMessage && !isDesktop && <p role="alert" className="mx-auto max-w-lg px-3 pb-2 text-center text-[11px] font-bold text-rose-600">{pushMessage}</p>}
     </nav>
   );

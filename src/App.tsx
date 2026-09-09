@@ -18,7 +18,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { WorkerPushNotificationsPrompt } from './components/WorkerPushNotificationsPrompt';
 
-import { Menu, Crown, Loader2 } from 'lucide-react';
+import { Menu, Crown, Loader2, X } from 'lucide-react';
 
 // Load each workspace only when it is opened. This keeps PDF/Excel and other
 // heavy feature code out of the application's initial download.
@@ -215,6 +215,7 @@ function AppContent() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotifDrawerOpen, setIsNotifDrawerOpen] = useState(false);
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [isTransportationCalculatorOpen, setIsTransportationCalculatorOpen] = useState(false);
   const [createOrderRequest, setCreateOrderRequest] = useState(0);
   const [todaysOrdersRequest, setTodaysOrdersRequest] = useState(0);
   const [notificationOrderId, setNotificationOrderId] = useState<string | undefined>();
@@ -284,7 +285,7 @@ function AppContent() {
     }
     const role = profile?.role || 'employee';
     if (role === 'worker') {
-      if (!['orders', 'workerPerformance'].includes(activeTab)) {
+      if (!['orders', 'calendar', 'workerPerformance'].includes(activeTab)) {
         setActiveTab('orders');
       }
     } else if (role === 'employee') {
@@ -373,6 +374,7 @@ function AppContent() {
   };
 
   const handleOpenCalculator = () => setIsCalculatorOpen(true);
+  const handleOpenTransportationCalculator = () => setIsTransportationCalculatorOpen(true);
 
   const handleOpenTodaysOrders = () => {
     setActiveTab('orders');
@@ -382,6 +384,7 @@ function AppContent() {
   const handleOpenWorkerMovements = () => {
     setActiveTab('workerMovements');
   };
+  const handleOpenCalendar = () => setActiveTab('calendar');
 
   // 1. App Startup Loading State
   if (loading || !usersInitialized || (user && profile && authSession?.userType !== 'platform' && restoredTabForUid !== user.uid)) {
@@ -506,10 +509,21 @@ function AppContent() {
         onOpenTodaysOrders={handleOpenTodaysOrders}
         onOpenWorkerMovements={handleOpenWorkerMovements}
         onOpenCalculator={handleOpenCalculator}
+        onOpenCalendar={handleOpenCalendar}
+        onOpenTransportationCalculator={handleOpenTransportationCalculator}
       />
 
       {isCalculatorOpen && <Suspense fallback={null}>
         <OrderCalculatorModal isOpen onClose={() => setIsCalculatorOpen(false)} />
+      </Suspense>}
+
+      {isTransportationCalculatorOpen && <Suspense fallback={null}>
+        <div className="fixed inset-0 z-[80] overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm" onMouseDown={() => setIsTransportationCalculatorOpen(false)}>
+          <section role="dialog" aria-modal="true" aria-label="حاسبة الانتقالات" className="relative mx-auto my-4 max-w-5xl" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => setIsTransportationCalculatorOpen(false)} className="absolute left-3 top-3 z-10 rounded-xl bg-white/90 p-2 text-slate-500 shadow-sm hover:bg-white dark:bg-slate-800/90 dark:text-slate-300" aria-label="إغلاق حاسبة الانتقالات"><X className="h-5 w-5" /></button>
+            <OrderCalculatorModule initialView="transportation" onOpenCalculator={() => { setIsTransportationCalculatorOpen(false); setIsCalculatorOpen(true); }} />
+          </section>
+        </div>
       </Suspense>}
 
     </div>
