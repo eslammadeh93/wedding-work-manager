@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   Wallet,
   Plus,
@@ -16,10 +17,14 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { Expense, FinanceType } from '../../types';
 import { ExpenseModal } from './ExpenseModal';
 import { MoneyValue } from '../ui/MoneyValue';
 import { calculateMonthlyCash, calculateSafeBalanceToDate } from '../../utils/monthlyCash';
+import { companyDataService } from '../../multiTenant/data/companyDataService';
+import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
+import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
 interface CashBalanceDetailItem {
   id: string;
@@ -51,6 +56,7 @@ const CashBalanceDetailsModal: React.FC<{
 export const ExpensesModule: React.FC = () => {
   const { t, language } = useLanguage();
   const { orders, expenses, deleteExpense } = useData();
+  const { authSession, profile, isDemo } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'capital' | 'expense'>('all');
@@ -58,6 +64,11 @@ export const ExpensesModule: React.FC = () => {
   const [defaultModalType, setDefaultModalType] = useState<FinanceType>('expense');
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showCashBalanceDetails, setShowCashBalanceDetails] = useState(false);
+  // The live operational order list intentionally contains only recent orders.
+  // A carried safe balance, however, must include every historical collection
+  // and execution cost, so tenant companies load that history on demand here.
+  const [financeOrders, setFinanceOrders] = useState<typeof orders | null>(null);
+  const [isLoadingFinanceHistory, setIsLoadingFinanceHistory] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -67,6 +78,46 @@ export const ExpensesModule: React.FC = () => {
   const [periodEnd, setPeriodEnd] = useState(selectedMonth);
   const [periodYear, setPeriodYear] = useState(selectedMonth.slice(0, 4));
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const companyId = useMemo(() => {
+    if (isDemo || !authSession || profile?.role === 'worker') return null;
+    try { return trustedCompanyIdFromSession(authSession); } catch { return null; }
+  }, [authSession, isDemo, profile?.role]);
+  const usesFinanceHistory = USE_MULTI_TENANT_DATA && Boolean(companyId);
+
+  useEffect(() => {
+    if (!usesFinanceHistory || !companyId) {
+      setFinanceOrders(null);
+      setIsLoadingFinanceHistory(false);
+      return;
+    }
+    let cancelled = false;
+    setFinanceOrders(null);
+    setIsLoadingFinanceHistory(true);
+    void (async () => {
+      const collected: typeof orders = [];
+      let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
+      let completed = true;
+      // Unlike reports, the safe also includes deposits whose event is still
+      // in the future, so this deliberately has no event-date filter.
+      for (let page = 0; page < 50; page += 1) {
+        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, {
+          scope: 'all', pageSize: 100, cursor,
+        });
+        if (!result.success || !result.data) { completed = false; break; }
+        collected.push(...result.data.records);
+        if (!result.data.hasMore || !result.data.cursor) break;
+        cursor = result.data.cursor;
+        if (page === 49) completed = false;
+      }
+      if (!cancelled) {
+        // Keep the operational list as a safe fallback only if loading failed.
+        if (completed) setFinanceOrders(collected);
+        setIsLoadingFinanceHistory(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, usesFinanceHistory]);
+  const accountingOrders = usesFinanceHistory && financeOrders ? financeOrders : orders;
   const periodBounds = useMemo(() => {
     if (periodMode === 'all') return { start: '', end: '9999-12' };
     if (periodMode === 'year') return { start: `${periodYear}-01`, end: `${periodYear}-12` };
@@ -89,13 +140,13 @@ export const ExpensesModule: React.FC = () => {
     .filter((entry) => entry.type !== 'capital' && entry.category !== 'رأس مال')
     .reduce((sum, entry) => sum + (entry.amount || 0), 0), [monthExpenses]);
   const monthlyCashSummary = useMemo(
-    () => calculateMonthlyCash(orders, expenses, selectedYear, selectedMonthIndex - 1),
-    [expenses, orders, selectedMonthIndex, selectedYear],
+    () => calculateMonthlyCash(accountingOrders, expenses, selectedYear, selectedMonthIndex - 1),
+    [accountingOrders, expenses, selectedMonthIndex, selectedYear],
   );
   const openingSafeBalance = useMemo(() => {
     const previousMonthEnd = new Date(selectedYear, selectedMonthIndex - 1, 0);
-    return calculateSafeBalanceToDate(orders, expenses, previousMonthEnd);
-  }, [expenses, orders, selectedMonthIndex, selectedYear]);
+    return calculateSafeBalanceToDate(accountingOrders, expenses, previousMonthEnd);
+  }, [accountingOrders, expenses, selectedMonthIndex, selectedYear]);
   const carriedBalanceEntry = useMemo(() => periodMode === 'month' && openingSafeBalance > 0 ? {
     id: `carried-balance-${selectedMonth}`,
     type: 'capital' as const,
@@ -175,6 +226,7 @@ export const ExpensesModule: React.FC = () => {
               ? 'إدارة حسابات رأس المال والمصروفات العامة الخاصة بالشركة'
               : 'Management of company capital & general operating expenses'}
           </p>
+          {isLoadingFinanceHistory && <p className="mt-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">{language === 'ar' ? 'جارٍ تحميل سجل الأوردرات الكامل لحساب الرصيد المرحّل…' : 'Loading complete order history for the carried balance…'}</p>}
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto">
@@ -206,7 +258,13 @@ export const ExpensesModule: React.FC = () => {
             </div>
             <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                {language === 'ar' ? 'رأس المال المضاف للشهر' : 'Capital added this month'}
+                {periodMode === 'month'
+                  ? openingSafeBalance > 0
+                    ? (monthlyCapital > 0
+                      ? (language === 'ar' ? 'رصيد افتتاحي + رأس مال مضاف' : 'Opening balance + capital added')
+                      : (language === 'ar' ? 'رصيد افتتاحي مُرحّل' : 'Carried opening balance'))
+                    : (language === 'ar' ? 'رأس المال المضاف للشهر' : 'Capital added this month')
+                  : (language === 'ar' ? 'رأس المال المضاف للفترة' : 'Capital added in period')}
               </span>
               <MoneyValue amount={monthlyCapital + (periodMode === 'month' ? openingSafeBalance : 0)} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400" />
             </div>
@@ -384,7 +442,12 @@ export const ExpensesModule: React.FC = () => {
                     >
                       {/* Type Badge */}
                       <td className="p-3.5 whitespace-nowrap">
-                        {isCapital ? (
+                        {isCarriedBalance ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40">
+                            <Wallet className="w-3 h-3 text-amber-600" />
+                            <span>{language === 'ar' ? 'رصيد مُرحّل' : 'Carried balance'}</span>
+                          </span>
+                        ) : isCapital ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/40">
                             <Building2 className="w-3 h-3 text-emerald-600" />
                             <span>{t('capital')}</span>
@@ -405,7 +468,7 @@ export const ExpensesModule: React.FC = () => {
 
                       {/* Category */}
                       <td className="p-3.5 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                        {isCapital ? 'رأس مال' : exp.category || 'عام'}
+                        {isCarriedBalance ? (language === 'ar' ? 'رصيد افتتاحي' : 'Opening balance') : isCapital ? 'رأس مال' : exp.category || 'عام'}
                       </td>
 
                       {/* Amount */}
