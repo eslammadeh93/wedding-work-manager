@@ -74,7 +74,7 @@ export const PERMISSION_MATRIX: Readonly<Record<SaaSRole, readonly Permission[]>
   company_super_admin: companyAdminPermissions,
   manager: companyAdminPermissions.filter((permission) => !permission.startsWith('company:expenses:')),
   employee: ['company:dashboard:read', 'company:calculator:use', 'company:calendar:read', 'company:orders:read', 'company:orders:write', 'company:customers:read', 'company:customers:write', 'company:suppliers:read', 'company:suppliers:write', 'company:inventory:read', 'company:notifications:read', 'company:support:request'],
-  worker: ['company:orders:read', 'company:worker_performance:read', 'company:notifications:read', 'company:support:request'],
+  worker: ['company:calendar:read', 'company:orders:read', 'company:worker_performance:read', 'company:notifications:read', 'company:support:request'],
 };
 
 export const hasPermission = (role: SaaSRole, permission: Permission): boolean =>
@@ -85,6 +85,7 @@ export const effectivePermissions = (role: SaaSRole, permissions?: readonly Perm
   Array.from(new Set([
     ...(permissions && Array.isArray(permissions) ? permissions : PERMISSION_MATRIX[role]),
     ...(['company_super_admin', 'manager', 'worker'].includes(role) ? ['company:worker_performance:read' as Permission] : []),
+    ...(role === 'worker' ? ['company:calendar:read' as Permission] : []),
   ]));
 
 export const memberHasPermission = (role: SaaSRole, permissions: readonly Permission[] | null | undefined, permission: Permission): boolean =>

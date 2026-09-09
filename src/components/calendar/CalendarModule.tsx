@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -15,8 +15,16 @@ import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 
 export const CalendarModule: React.FC = () => {
   const { t, language } = useLanguage();
-  const { profile } = useAuth();
+  const { profile, authSession } = useAuth();
   const { orders } = useData();
+  const isWorker = profile?.role === 'worker' || authSession?.role === 'worker';
+  const ownWorkerId = profile?.workerId?.trim() || '';
+  // The provider's worker projection is already restricted by Firestore, and
+  // this client-side guard keeps the calendar private in every app mode.
+  const visibleOrders = useMemo(
+    () => isWorker ? orders.filter((order) => Boolean(ownWorkerId) && order.workerId === ownWorkerId) : orders,
+    [isWorker, orders, ownWorkerId],
+  );
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -60,7 +68,7 @@ export const CalendarModule: React.FC = () => {
 
   // The calendar is an installation schedule: only setup/delivery dates are shown.
   const getEventsForDate = (dateStr: string) => {
-    return orders.filter((o) => o.deliveryDate === dateStr);
+    return visibleOrders.filter((o) => o.deliveryDate === dateStr);
   };
 
   return (
@@ -70,8 +78,9 @@ export const CalendarModule: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <CalendarIcon className="w-6 h-6 text-amber-500" />
-            <span>{language === 'ar' ? 'تقويم التركيبات' : 'Installation Calendar'}</span>
+            <span>{isWorker ? (language === 'ar' ? 'تقويم تركيباتي' : 'My Installation Calendar') : (language === 'ar' ? 'تقويم التركيبات' : 'Installation Calendar')}</span>
           </h2>
+          {isWorker && <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{language === 'ar' ? 'تظهر لك التركيبات المسندة إليك فقط.' : 'Only installations assigned to you are shown.'}</p>}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
