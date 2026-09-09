@@ -137,7 +137,7 @@ export const MobileManagerNav: React.FC<MobileManagerNavProps> = ({
           </button>
         )}
 
-        {canViewNotifications && (
+        {!isWorker && canViewNotifications && (
           <button
             type="button"
             onClick={onOpenWorkerMovements}
