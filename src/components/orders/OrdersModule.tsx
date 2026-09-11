@@ -310,6 +310,16 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     setPrintingOrder((current) => current?.id === order.id ? null : current);
   };
 
+  const applyVisibleOrderChange = (nextOrder: Order) => {
+    // Manager lists are paginated separately from the provider's small live
+    // window. Patch that page immediately so a successful iPhone action is
+    // visible before the Firestore listener returns.
+    setViewingOrder(current => current?.id === nextOrder.id ? nextOrder : current);
+    if (useServerPagination) {
+      setPagedOrders(current => current.map(order => order.id === nextOrder.id ? { ...order, ...nextOrder } : order));
+    }
+  };
+
   const activeOrdersCount = useMemo(
     () => useServerPagination && orderScopeCounts ? orderScopeCounts.active : scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
     [orderScopeCounts, scopedOrders, useServerPagination],
@@ -1360,6 +1370,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
             setPrintingOrder(ord);
           }}
           onDelete={deleteVisibleOrder}
+          onOrderChanged={applyVisibleOrderChange}
         />
       )}
 

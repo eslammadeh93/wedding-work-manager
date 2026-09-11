@@ -89,7 +89,8 @@ export interface DataContextType {
   addOrder: (orderData: NewOrderData, newCustomer?: NewOrderCustomer) => Promise<string>;
   updateOrder: (id: string, orderData: Partial<Order>) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
-  addPaymentToOrder: (orderId: string, payment: Omit<PaymentEntry, 'id'>) => Promise<void>;
+  /** The optional id lets the UI safely retry the very same payment request. */
+  addPaymentToOrder: (orderId: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => Promise<void>;
   addWorkTask: (taskData: NewWorkTaskData) => Promise<string>;
   updateWorkTask: (id: string, taskData: Partial<WorkTask>) => Promise<void>;
   deleteWorkTask: (id: string) => Promise<void>;
@@ -565,15 +566,16 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await syncInventoryItemsToStore(updatedInventory);
   };
 
-  const addPaymentToOrder = async (orderId: string, payment: Omit<PaymentEntry, 'id'>) => {
+  const addPaymentToOrder = async (orderId: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => {
     const existing = orders.find((o) => o.id === orderId);
     if (!existing) return;
 
     const newPaymentEntry: PaymentEntry = {
       ...payment,
-      id: 'pay_' + Date.now(),
+      id: payment.id || createRecordId('pay'),
     };
 
+    if ((existing.paymentHistory || []).some((entry) => entry.id === newPaymentEntry.id)) return;
     const updatedHistory = [...(existing.paymentHistory || []), newPaymentEntry];
     await updateOrder(orderId, { paymentHistory: updatedHistory });
   };

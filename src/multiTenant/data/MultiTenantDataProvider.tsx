@@ -216,14 +216,18 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     await write('workTasks', id, { ...changes, updatedAt: new Date().toISOString() }, true);
   }, [authSession?.role, profile?.workerId, workTasks, write]);
   const deleteWorkTask = useCallback(async (id: string) => { if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بحذف المهمة.'); await remove('workTasks', id); }, [authSession?.role, remove]);
-  const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'>) => {
+  const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => {
     let order = orders.find((item) => item.id === id);
     if (!order) {
       const fetched = await companyDataService.get<Order>(company(), 'orders', id);
       if (fetched.success) order = fetched.data;
     }
     if (!order) throw new Error('لم يتم العثور على الطلب.');
-    await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: newId('pay') }] });
+    // Keep a caller-provided id. Retrying the same action cannot create a
+    // second settlement payment.
+    const paymentId = payment.id || newId('pay');
+    if ((order.paymentHistory || []).some((entry) => entry.id === paymentId)) return;
+    await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: paymentId }] });
   }, [company, orders, updateOrder]);
   const addRecord = useCallback(async <T extends object>(name: CompanyCollection, prefix: string, data: T) => { const id = newId(prefix); await write(name, id, { ...sanitizeData(data), id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); return id; }, [write]);
   const updateRecord = useCallback(async <T extends object>(name: CompanyCollection, id: string, data: T) => write(name, id, { ...sanitizeData(data), updatedAt: new Date().toISOString() }, true), [write]);

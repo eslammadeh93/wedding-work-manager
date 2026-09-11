@@ -39,6 +39,8 @@ interface OrderDetailModalProps {
   onEdit: (order: Order) => void;
   onPrint: (order: Order) => void;
   onDelete: (order: Order) => Promise<void>;
+  /** Keeps the open modal fresh before a paginated listener responds. */
+  onOrderChanged?: (order: Order) => void;
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
@@ -47,6 +49,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onEdit,
   onPrint,
   onDelete,
+  onOrderChanged,
 }) => {
   const { t, language } = useLanguage();
   const { updateOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
@@ -65,6 +68,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [isSavingPaymentEdit, setIsSavingPaymentEdit] = useState(false);
+  const [deletingSettlementPaymentId, setDeletingSettlementPaymentId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [logToast, setLogToast] = useState<string | null>(null);
   const [logToastIsError, setLogToastIsError] = useState(false);
@@ -72,6 +76,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const hasLoggedOpenRef = React.useRef<string | null>(null);
+  // React state is asynchronous; refs stop duplicated Safari submit/click events immediately.
+  const statusUpdateInFlightRef = React.useRef(false);
+  const paymentSaveInFlightRef = React.useRef(false);
+  const settlementDeleteInFlightRef = React.useRef(false);
+  const paymentRequestIdRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (isWorker && order && hasLoggedOpenRef.current !== order.id) {
@@ -117,25 +126,46 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   if (!order) return null;
 
+  const withPaymentHistory = (paymentHistory: PaymentEntry[]): Order => {
+    const totalPaid = Math.max(order.deposit || 0, paymentHistory.reduce((sum, payment) => sum + (payment.amount || 0), 0));
+    const remainingBalance = Math.max(0, (order.totalPrice || 0) - totalPaid);
+    return {
+      ...order,
+      paymentHistory,
+      totalPaid,
+      remainingBalance,
+      paymentStatus: totalPaid >= (order.totalPrice || 0) && order.totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid',
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
   const handleStatusChange = async (newStatus: OrderStatus) => {
-    if (isUpdatingStatus) return;
+    if (newStatus === order.orderStatus || statusUpdateInFlightRef.current) return;
     try {
+      statusUpdateInFlightRef.current = true;
       setIsUpdatingStatus(true);
       await updateOrder(order.id, { orderStatus: newStatus });
+      onOrderChanged?.({ ...order, orderStatus: newStatus, updatedAt: new Date().toISOString() });
+      setLogToastIsError(false);
+      setLogToast(language === 'ar' ? 'تم تحديث حالة الطلب بنجاح.' : 'Order status updated successfully.');
     } catch (error) {
+      setLogToastIsError(true);
       setLogToast(error instanceof Error ? error.message : 'تعذر تحديث الطلب.');
     } finally {
+      statusUpdateInFlightRef.current = false;
       setIsUpdatingStatus(false);
     }
   };
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (paymentAmount <= 0 || isSavingPayment) return;
+    if (paymentAmount <= 0 || paymentSaveInFlightRef.current) return;
 
     try {
+      paymentSaveInFlightRef.current = true;
       setIsSavingPayment(true);
-      await addPaymentToOrder(order.id, {
+      const payment: PaymentEntry = {
+        id: paymentRequestIdRef.current || `pay_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`,
         amount: Number(paymentAmount),
         // Settlement payments belong to the execution month, not the day the
         // record happens to be edited.
@@ -143,12 +173,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         method: paymentMethod,
         type: 'settlement',
         notes: paymentNotes || 'Settlement Payment',
-      });
+      };
+      paymentRequestIdRef.current = payment.id;
+      await addPaymentToOrder(order.id, payment);
 
+      onOrderChanged?.(withPaymentHistory([...(order.paymentHistory || []), payment]));
       setPaymentAmount(0);
       setPaymentNotes('');
       setShowAddPayment(false);
+      paymentRequestIdRef.current = null;
+      setLogToastIsError(false);
+      setLogToast(language === 'ar' ? 'تم تسجيل دفعة السداد وتحديث الرصيد.' : 'Settlement payment saved and balance updated.');
+    } catch (error) {
+      setLogToastIsError(true);
+      setLogToast(error instanceof Error ? error.message : (language === 'ar' ? 'تعذر حفظ دفعة السداد. أعد المحاولة.' : 'Could not save the settlement payment. Please retry.'));
     } finally {
+      paymentSaveInFlightRef.current = false;
       setIsSavingPayment(false);
     }
   };
@@ -197,6 +237,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           ? { ...payment, date: editedPaymentDate }
           : payment),
       });
+      onOrderChanged?.(withPaymentHistory((order.paymentHistory || []).map((payment) => payment.id === editingPayment.id
+        ? { ...payment, date: editedPaymentDate }
+        : payment)));
       setEditingPayment(null);
       setLogToastIsError(false);
       setLogToast(language === 'ar' ? 'تم تعديل تاريخ الدفعة وتحديث الحسابات.' : 'Payment date updated and financial reports refreshed.');
@@ -205,6 +248,30 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       setLogToast(error instanceof Error ? error.message : 'تعذر تعديل تاريخ الدفعة.');
     } finally {
       setIsSavingPaymentEdit(false);
+    }
+  };
+
+  const handleDeleteSettlementPayment = async (payment: PaymentEntry) => {
+    if (payment.type !== 'settlement' || settlementDeleteInFlightRef.current) return;
+    const question = language === 'ar'
+      ? `حذف دفعة السداد بقيمة $${payment.amount.toLocaleString()}؟ سيُعاد حساب الرصيد.`
+      : `Delete the $${payment.amount.toLocaleString()} settlement payment? The balance will be recalculated.`;
+    if (!window.confirm(question)) return;
+
+    try {
+      settlementDeleteInFlightRef.current = true;
+      setDeletingSettlementPaymentId(payment.id);
+      const paymentHistory = (order.paymentHistory || []).filter((entry) => entry.id !== payment.id);
+      await updateOrder(order.id, { paymentHistory });
+      onOrderChanged?.(withPaymentHistory(paymentHistory));
+      setLogToastIsError(false);
+      setLogToast(language === 'ar' ? 'تم حذف دفعة السداد وتحديث الرصيد.' : 'Settlement payment deleted and balance updated.');
+    } catch (error) {
+      setLogToastIsError(true);
+      setLogToast(error instanceof Error ? error.message : (language === 'ar' ? 'تعذر حذف دفعة السداد.' : 'Could not delete the settlement payment.'));
+    } finally {
+      settlementDeleteInFlightRef.current = false;
+      setDeletingSettlementPaymentId(null);
     }
   };
 
@@ -593,7 +660,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </form>
           )}
 
-          <OrderPaymentHistory order={order} isWorker={isWorker} onEditPayment={handlePaymentDateEdit} />
+          <OrderPaymentHistory
+            order={order}
+            isWorker={isWorker}
+            onEditPayment={handlePaymentDateEdit}
+            onDeleteSettlementPayment={handleDeleteSettlementPayment}
+            deletingPaymentId={deletingSettlementPaymentId}
+          />
           <OrderInventorySection order={order} isWorker={isWorker} />
 
           {/* Notes */}
