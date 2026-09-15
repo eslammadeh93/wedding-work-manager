@@ -18,6 +18,7 @@ import { createPlatformAggregationTriggers } from './platformAggregation.js';
 import { buildWorkerOrderContactProjection, buildWorkerOrderProjection, enforceAssignmentContactReset } from './workerOrderProjection.js';
 import { cairoDate, notifyMemberDevices, notifyWorkerAboutOrder, notifyWorkerAboutTask } from './pushNotifications.js';
 import { createGoogleDriveFunctions } from './googleDrive.js';
+export { googleDriveOAuthPages } from './googleDriveOAuthPages.js';
 import { createTransportationFunctions } from './transportation.js';
 
 initializeApp();
