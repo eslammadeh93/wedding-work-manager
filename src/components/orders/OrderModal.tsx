@@ -397,6 +397,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   }, [customers, customerPhone]);
 
   const googleDriveConnected = settings.googleDriveConnected === true;
+  const googleDriveReconnectRequired = settings.googleDriveReconnectRequired === true || settings.googleDriveConnectionStatus === 'reauth_required';
   // A reassignment must first revoke contact access from the previously
   // assigned worker. The Firestore rule enforces this too; keeping it in the
   // form prevents a user from turning the switch back on before saving.
@@ -1234,7 +1235,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
             </div>
 
             {!designUploadFolderUrl && <p className="text-[11px] text-amber-700 dark:text-amber-300">اضبط رابط مركز رفع الصور من الإعدادات أولًا.</p>}
-            {designUploadFolderUrl && !googleDriveConnected && <p className="text-[11px] text-slate-500">الرفع اليدوي مفعل: سيفتح فولدر Google Drive لتضيف الصورة بنفسك ثم تلصق رابطها هنا. يمكنك ربط Google Drive من الإعدادات لتفعيل الرفع التلقائي.</p>}
+            {designUploadFolderUrl && !googleDriveConnected && googleDriveReconnectRequired && <p className="text-[11px] font-bold text-amber-700 dark:text-amber-300">انتهت صلاحية Google Drive. أعد الربط من الإعدادات لاستعادة الرفع التلقائي. يمكنك استخدام الرفع اليدوي مؤقتًا.</p>}
+            {designUploadFolderUrl && !googleDriveConnected && !googleDriveReconnectRequired && <p className="text-[11px] text-slate-500">الرفع اليدوي مفعل: سيفتح فولدر Google Drive لتضيف الصورة بنفسك ثم تلصق رابطها هنا. يمكنك ربط Google Drive من الإعدادات لتفعيل الرفع التلقائي.</p>}
             {googleDriveConnected && <p className="text-[11px] text-emerald-700 dark:text-emerald-300">الرفع التلقائي مفعل: اختر الصورة وسيتم رفعها وحفظ رابطها في الأوردر تلقائيًا.</p>}
 
             {/* List of Design Image Links */}

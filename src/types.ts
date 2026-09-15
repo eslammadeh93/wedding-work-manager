@@ -378,6 +378,8 @@ export interface CompanySettings {
   logoUrl?: string;
   designUploadFolderUrl?: string;
   googleDriveConnected?: boolean;
+  googleDriveReconnectRequired?: boolean;
+  googleDriveConnectionStatus?: 'connected' | 'reauth_required' | 'disconnected';
   googleDriveFolderId?: string;
   termsEn?: string;
   termsAr?: string;

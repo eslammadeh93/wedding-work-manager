@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
+import { classifyGoogleDriveRefreshFailure, type GoogleOAuthTokenResponse } from './googleDriveOAuth.js';
 
 const googleDriveClientId = defineSecret('GOOGLE_DRIVE_CLIENT_ID');
 const googleDriveClientSecret = defineSecret('GOOGLE_DRIVE_CLIENT_SECRET');
@@ -20,7 +21,10 @@ type AuthContext = { uid: string; token?: Record<string, unknown> } | undefined;
 type Request = { auth?: AuthContext; data: unknown };
 type Member = { uid?: string; companyId?: string; status?: string; role?: string; permissions?: unknown };
 type OAuthState = { companyId: string; uid: string; folderId: string; expiresAt: number; nonce: string };
-type DriveConnection = { folderId?: string; refreshTokenEncrypted?: string };
+type DriveConnection = { folderId?: string; refreshTokenEncrypted?: string; status?: string };
+
+const reconnectMessage = 'انتهت صلاحية ربط Google Drive أو تم إلغاؤه. أعد الربط من الإعدادات.';
+const reconnectDetails = { reason: 'google-drive-reauth-required' };
 
 const requiredMemberPermission = (member: Member, permission: 'company:settings:write' | 'company:orders:write') =>
   member.role === 'company_super_admin' || (Array.isArray(member.permissions) && member.permissions.includes(permission));
@@ -106,18 +110,48 @@ export const createGoogleDriveFunctions = (db: FirebaseFirestore.Firestore) => {
 
   const authorizeState = async (state: OAuthState) => authorize({ uid: state.uid, token: { companyId: state.companyId } }, 'company:settings:write');
 
+  const markReauthorizationRequired = async (companyId: string, googleError: string) => {
+    await Promise.all([
+      db.collection(connectionCollection).doc(companyId).set({
+        status: 'reauth_required',
+        lastRefreshErrorCode: googleError || 'unknown',
+        lastRefreshErrorAt: FieldValue.serverTimestamp(),
+      }, { merge: true }),
+      db.doc(`companies/${companyId}/settings/main`).set({
+        googleDriveConnected: false,
+        googleDriveReconnectRequired: true,
+        googleDriveConnectionStatus: 'reauth_required',
+      }, { merge: true }),
+    ]);
+  };
+
   const refreshAccessToken = async (companyId: string) => {
     const { clientId, clientSecret, tokenKey } = configured();
     const snapshot = await db.collection(connectionCollection).doc(companyId).get();
     const connection = snapshot.data() as DriveConnection | undefined;
     if (!connection?.folderId || !connection.refreshTokenEncrypted) throw new HttpsError('failed-precondition', 'لم يتم ربط Google Drive لهذه الشركة بعد.');
-    const response = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: decrypt(connection.refreshTokenEncrypted, tokenKey), grant_type: 'refresh_token' }),
-    });
-    const data = await response.json() as { access_token?: string };
-    if (!response.ok || !data.access_token) throw new HttpsError('failed-precondition', 'انتهت صلاحية ربط Google Drive أو تم إلغاؤه. أعد الربط من الإعدادات.');
+    let response: Response;
+    try {
+      response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: decrypt(connection.refreshTokenEncrypted, tokenKey), grant_type: 'refresh_token' }),
+      });
+    } catch (error) {
+      console.warn('Google Drive token refresh network failure', { companyId, message: error instanceof Error ? error.message : 'unknown' });
+      throw new HttpsError('unavailable', 'تعذر الاتصال بخدمة Google Drive مؤقتًا. حاول مرة أخرى.');
+    }
+    const data = await response.json().catch(() => ({})) as GoogleOAuthTokenResponse;
+    if (!response.ok || !data.access_token) {
+      const failure = classifyGoogleDriveRefreshFailure(response.status, data);
+      console.warn('Google Drive token refresh rejected', { companyId, status: response.status, googleError: data.error || 'unknown', failure });
+      if (failure === 'reauth_required') {
+        await markReauthorizationRequired(companyId, data.error || 'invalid_grant');
+        throw new HttpsError('failed-precondition', reconnectMessage, reconnectDetails);
+      }
+      if (failure === 'configuration_error') throw new HttpsError('failed-precondition', 'إعدادات ربط Google Drive على السيرفر تحتاج مراجعة. تواصل مع مسؤول المنصة.');
+      throw new HttpsError('unavailable', 'تعذر التحقق من Google Drive مؤقتًا. حاول مرة أخرى.');
+    }
     return { accessToken: data.access_token, folderId: connection.folderId };
   };
 
@@ -158,8 +192,22 @@ export const createGoogleDriveFunctions = (db: FirebaseFirestore.Firestore) => {
         const refreshToken = tokenData.refresh_token || (existing?.refreshTokenEncrypted ? decrypt(existing.refreshTokenEncrypted, tokenKey) : '');
         if (!refreshToken) return fail('لم يرسل Google صلاحية دائمة للرفع. أعد المحاولة ووافق على كل الصلاحيات المطلوبة.');
         await Promise.all([
-          connectionRef.set({ folderId: state.folderId, refreshTokenEncrypted: encrypt(refreshToken, tokenKey), connectedBy: state.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
-          db.doc(`companies/${state.companyId}/settings/main`).set({ googleDriveConnected: true, googleDriveFolderId: state.folderId, googleDriveConnectedAt: FieldValue.serverTimestamp() }, { merge: true }),
+          connectionRef.set({
+            folderId: state.folderId,
+            refreshTokenEncrypted: encrypt(refreshToken, tokenKey),
+            connectedBy: state.uid,
+            status: 'connected',
+            lastRefreshErrorCode: FieldValue.delete(),
+            lastRefreshErrorAt: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true }),
+          db.doc(`companies/${state.companyId}/settings/main`).set({
+            googleDriveConnected: true,
+            googleDriveReconnectRequired: false,
+            googleDriveConnectionStatus: 'connected',
+            googleDriveFolderId: state.folderId,
+            googleDriveConnectedAt: FieldValue.serverTimestamp(),
+          }, { merge: true }),
         ]);
         response.type('html').send('<!doctype html><html dir="rtl"><body style="font-family:sans-serif;padding:32px"><h2>تم ربط Google Drive بنجاح</h2><p>يمكنك إغلاق هذه النافذة والعودة إلى البرنامج.</p><script>window.opener?.postMessage({type:"google-drive-connected"}, "*"); window.close();</script></body></html>');
         return;
@@ -172,14 +220,35 @@ export const createGoogleDriveFunctions = (db: FirebaseFirestore.Firestore) => {
     getGoogleDriveConnectionStatus: onCall(options, async (request: Request) => {
       const { companyId } = await authorize(request.auth, 'company:settings:write');
       const connection = await db.collection(connectionCollection).doc(companyId).get();
-      return { connected: connection.exists && Boolean(connection.data()?.folderId) };
+      if (!connection.exists || !connection.data()?.folderId || !connection.data()?.refreshTokenEncrypted) {
+        await db.doc(`companies/${companyId}/settings/main`).set({
+          googleDriveConnected: false,
+          googleDriveReconnectRequired: false,
+          googleDriveConnectionStatus: 'disconnected',
+        }, { merge: true });
+        return { connected: false, reconnectRequired: false, status: 'disconnected' as const };
+      }
+      try {
+        await refreshAccessToken(companyId);
+        return { connected: true, reconnectRequired: false, status: 'connected' as const };
+      } catch (error) {
+        const details = error instanceof HttpsError ? error.details as { reason?: string } | undefined : undefined;
+        if (details?.reason === reconnectDetails.reason) return { connected: false, reconnectRequired: true, status: 'reauth_required' as const };
+        throw error;
+      }
     }),
 
     disconnectGoogleDrive: onCall(options, async (request: Request) => {
       const { companyId } = await authorize(request.auth, 'company:settings:write');
       await Promise.all([
         db.collection(connectionCollection).doc(companyId).delete(),
-        db.doc(`companies/${companyId}/settings/main`).set({ googleDriveConnected: false, googleDriveFolderId: FieldValue.delete(), googleDriveConnectedAt: FieldValue.delete() }, { merge: true }),
+        db.doc(`companies/${companyId}/settings/main`).set({
+          googleDriveConnected: false,
+          googleDriveReconnectRequired: false,
+          googleDriveConnectionStatus: 'disconnected',
+          googleDriveFolderId: FieldValue.delete(),
+          googleDriveConnectedAt: FieldValue.delete(),
+        }, { merge: true }),
       ]);
       return { success: true };
     }),

@@ -41,17 +41,38 @@ export const SettingsModule: React.FC = () => {
   const [termsEn, setTermsEn] = useState(settings.termsEn || '');
   const [driveBusy, setDriveBusy] = useState(false);
   const [driveConnected, setDriveConnected] = useState(Boolean(settings.googleDriveConnected));
+  const [driveReconnectRequired, setDriveReconnectRequired] = useState(Boolean(settings.googleDriveReconnectRequired));
+  const [driveChecking, setDriveChecking] = useState(false);
   const [driveMessage, setDriveMessage] = useState('');
 
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => setDriveConnected(Boolean(settings.googleDriveConnected)), [settings.googleDriveConnected]);
+  useEffect(() => setDriveReconnectRequired(Boolean(settings.googleDriveReconnectRequired)), [settings.googleDriveReconnectRequired]);
+
+  useEffect(() => {
+    let active = true;
+    if (!settings.googleDriveConnected) return () => { active = false; };
+    setDriveChecking(true);
+    void googleDriveService.connectionStatus().then((status) => {
+      if (!active) return;
+      setDriveConnected(status.connected);
+      setDriveReconnectRequired(status.reconnectRequired);
+      if (status.reconnectRequired) setDriveMessage('انتهت صلاحية Google Drive. اضغط إعادة الربط لتفعيل الرفع التلقائي مجددًا.');
+    }).catch((error) => {
+      if (active) setDriveMessage(error instanceof Error ? error.message : 'تعذر التحقق من حالة Google Drive.');
+    }).finally(() => {
+      if (active) setDriveChecking(false);
+    });
+    return () => { active = false; };
+  }, [settings.googleDriveConnected]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.data?.type !== 'google-drive-connected') return;
       setDriveConnected(true);
+      setDriveReconnectRequired(false);
       setDriveMessage('تم ربط Google Drive بنجاح.');
     };
     window.addEventListener('message', onMessage);
@@ -81,6 +102,7 @@ export const SettingsModule: React.FC = () => {
     try {
       await googleDriveService.disconnect();
       setDriveConnected(false);
+      setDriveReconnectRequired(false);
       setDriveMessage('تم إلغاء ربط Google Drive.');
     } catch (error) {
       setDriveMessage(error instanceof Error ? error.message : 'تعذر إلغاء ربط Google Drive.');
@@ -332,14 +354,14 @@ export const SettingsModule: React.FC = () => {
               <button
                 type="button"
                 onClick={() => void connectGoogleDrive()}
-                disabled={driveBusy || driveConnected}
+                disabled={driveBusy || driveChecking || driveConnected}
                 className="flex items-center gap-2 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Link2 className="w-4 h-4" />
-                {driveConnected ? 'Google Drive متصل' : driveBusy ? 'جارٍ بدء الربط…' : 'ربط Google Drive'}
+                {driveConnected ? 'Google Drive متصل' : driveChecking ? 'جارٍ فحص الربط…' : driveBusy ? 'جارٍ بدء الربط…' : driveReconnectRequired ? 'إعادة ربط Google Drive' : 'ربط Google Drive'}
               </button>
               {driveConnected && <button type="button" onClick={() => void disconnectGoogleDrive()} disabled={driveBusy} className="flex items-center gap-2 rounded-xl border border-rose-200 px-3.5 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><Unlink className="w-4 h-4" />إلغاء الربط</button>}
-              <span className={`text-xs font-bold ${driveConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>{driveConnected ? 'الرفع التلقائي مفعل لهذه الشركة.' : 'يمكنك استخدام الرفع اليدوي بالرابط أو ربط Google للرفع التلقائي.'}</span>
+              <span className={`text-xs font-bold ${driveConnected ? 'text-emerald-600 dark:text-emerald-400' : driveReconnectRequired ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{driveConnected ? 'الرفع التلقائي مفعل لهذه الشركة.' : driveReconnectRequired ? 'انتهت صلاحية الربط ويجب إعادة تفويض Google Drive.' : 'يمكنك استخدام الرفع اليدوي بالرابط أو ربط Google للرفع التلقائي.'}</span>
             </div>
             {driveMessage && <p className="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">{driveMessage}</p>}
           </div>
