@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { error as logError } from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
 
 const routesApiKey = defineSecret('GOOGLE_MAPS_ROUTES_API_KEY');
@@ -30,8 +31,9 @@ const coordinatesFromValue = (value: string): Coordinates | null => {
 
 export const coordinatesFromMapsUrl = (value: string): Coordinates | null => {
   const decoded = decodeURIComponent(value);
-  const direct = decoded.match(/@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/)
-    || decoded.match(/!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/);
+  // Prefer the place marker. The @ pair can be only the map viewport center.
+  const direct = decoded.match(/!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/)
+    || decoded.match(/@(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/);
   if (direct) return coordinatesFromValue(`${direct[1]},${direct[2]}`);
   try {
     const url = new URL(value);
@@ -92,6 +94,10 @@ export const createTransportationFunctions = (db: FirebaseFirestore.Firestore) =
     if (!apiKey) throw new HttpsError('failed-precondition', 'حاسبة الانتقالات غير مفعّلة بعد. أضف مفتاح Google Maps Routes API على الخادم.');
     const input = (request.data || {}) as { originUrl?: unknown; destinationUrl?: unknown };
     const [origin, destination] = await Promise.all([resolveCoordinates(input.originUrl), resolveCoordinates(input.destinationUrl)]);
+    if (Math.abs(origin.latitude - destination.latitude) < 1e-7
+      && Math.abs(origin.longitude - destination.longitude) < 1e-7) {
+      return { distanceMeters: 0, durationSeconds: 0 };
+    }
     const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
       method: 'POST',
       headers: {
@@ -107,11 +113,20 @@ export const createTransportationFunctions = (db: FirebaseFirestore.Firestore) =
         units: 'METRIC',
       }),
     });
-    const data = await response.json() as { routes?: Array<{ distanceMeters?: unknown; duration?: unknown }> };
+    const data = await response.json() as {
+      routes?: Array<{ distanceMeters?: unknown; duration?: unknown }>;
+      error?: { code?: unknown; message?: unknown; status?: unknown };
+    };
     const route = data.routes?.[0];
     const distanceMeters = Number(route?.distanceMeters);
     const durationSeconds = Number(String(route?.duration || '').replace(/s$/, ''));
     if (!response.ok || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
+      logError('Google Routes API request failed', {
+        httpStatus: response.status,
+        googleCode: data.error?.code,
+        googleStatus: data.error?.status,
+        googleMessage: data.error?.message,
+      });
       throw new HttpsError('failed-precondition', 'تعذر حساب الطريق. تأكد من تفعيل Routes API وصلاحية مفتاح Google Maps.');
     }
     return { distanceMeters, durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0 };

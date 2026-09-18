@@ -16,6 +16,13 @@ test('extracts encoded place coordinates from a shared Google Maps URL', () => {
   );
 });
 
+test('prefers the place marker over the viewport center', () => {
+  assert.deepEqual(
+    coordinatesFromMapsUrl('https://www.google.com/maps/place/Test/@30.1205292,31.3156357,17z/data=!3d30.1205292!4d31.3182106'),
+    { latitude: 30.1205292, longitude: 31.3182106 },
+  );
+});
+
 test('rejects invalid coordinates', () => {
   assert.equal(coordinatesFromMapsUrl('https://www.google.com/maps?q=200,400'), null);
 });
