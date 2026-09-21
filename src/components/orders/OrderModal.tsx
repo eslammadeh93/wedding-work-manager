@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useModalViewport } from '../../hooks/useModalViewport';
 import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, AlertTriangle, UserCheck, Image, Upload, ExternalLink, Receipt, ChevronDown, Check, Wrench, LoaderCircle } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
@@ -175,6 +177,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const { t, language } = useLanguage();
   const { orders, customers, suppliers, inventory, workers, settings, addOrder, updateOrder, checkStockAvailability } = useData();
   const { authSession, user } = useAuth();
+  const overlayRef = useModalViewport(isOpen);
 
   const isEdit = !!initialOrder;
   const canManageWorkerContact = authSession?.role === 'manager' || authSession?.role === 'company_super_admin';
@@ -325,13 +328,21 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   ]);
 
   React.useEffect(() => {
-    persistDraft();
+    const timer = window.setTimeout(persistDraft, 300);
+    return () => window.clearTimeout(timer);
   }, [persistDraft]);
 
   React.useEffect(() => {
     if (isEdit) return;
+    const saveWhenHidden = () => { if (document.visibilityState === 'hidden') persistDraft(); };
     window.addEventListener('beforeunload', persistDraft);
-    return () => window.removeEventListener('beforeunload', persistDraft);
+    window.addEventListener('pagehide', persistDraft);
+    document.addEventListener('visibilitychange', saveWhenHidden);
+    return () => {
+      window.removeEventListener('beforeunload', persistDraft);
+      window.removeEventListener('pagehide', persistDraft);
+      document.removeEventListener('visibilitychange', saveWhenHidden);
+    };
   }, [isEdit, persistDraft]);
 
   const clearDraft = () => {
@@ -659,11 +670,11 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     }
   };
 
-  return (
-    <div onClick={handleClose} className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90vh] flex flex-col my-auto animate-in zoom-in-95 duration-200">
+  return createPortal(
+    <div ref={overlayRef} onClick={handleClose} className="order-modal-viewport fixed inset-x-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-label={isEdit ? t('editOrder') : t('addOrder')} onClick={(e) => e.stopPropagation()} className="bg-white dark:bg-slate-900 w-full min-w-0 max-w-3xl rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-full flex flex-col">
         {/* Header */}
-        <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
+        <div className="shrink-0 p-3 sm:p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold text-slate-900 dark:text-white text-lg flex items-center gap-2 whitespace-nowrap">
               <FileText className="w-5 h-5 text-amber-500" />
@@ -695,7 +706,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmit} className="order-modal-form p-3 sm:p-6 space-y-6 overflow-y-auto flex-1">
           {/* Section 1: Order Basics */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="-order-1">
@@ -755,7 +766,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 placeholder="01xxxxxxxxx"
                 inputMode="tel"
                 dir="ltr"
-                autoFocus={!isEdit}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
               />
               {!selectedCustomerId && phoneMatches.length > 0 && (
@@ -1401,7 +1411,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {t('attachments')} ({t('contract')}, {t('images')}, {t('files')})
               </label>
-              <div className="flex gap-2 mb-2">
+              <div className="flex flex-wrap sm:flex-nowrap gap-2 mb-2">
                 <select
                   value={attachmentType}
                   onChange={(e) => setAttachmentType(e.target.value as any)}
@@ -1417,7 +1427,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   value={attachmentUrlInput}
                   onChange={(e) => setAttachmentUrlInput(e.target.value)}
                   placeholder="https://example.com/contract.pdf or design.jpg"
-                  className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                  className="flex-1 min-w-0 px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
                 />
                 <button
                   type="button"
@@ -1475,6 +1485,6 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         onClose={() => setPreviewImageUrl(null)}
         title={language === 'ar' ? 'معاينة صورة التصميم' : 'Design image preview'}
       />
-    </div>
+    </div>, document.body
   );
 };

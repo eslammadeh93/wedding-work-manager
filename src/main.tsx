@@ -5,6 +5,17 @@ import './index.css';
 import { sanitizeText } from './utils/security';
 import { registerPwa } from './pwa';
 
+// Show the app with system fonts immediately, even on a slow Google Fonts connection.
+const fonts = document.getElementById('app-fonts') as HTMLLinkElement | null;
+if (fonts?.sheet) fonts.media = 'all';
+else fonts?.addEventListener('load', () => { fonts.media = 'all'; }, { once: true });
+
+// Safari's gesture events supplement touch-action for the app's fixed scale.
+// Single-finger scrolling and all keyboard/input events remain untouched.
+const preventPinchZoom = (event: Event) => event.preventDefault();
+document.addEventListener('gesturestart', preventPinchZoom, { passive: false });
+document.addEventListener('gesturechange', preventPinchZoom, { passive: false });
+
 // Clean script-like content while it is being typed in regular text fields.
 // Passwords are intentionally excluded so users can choose any valid password.
 document.addEventListener('input', (event) => {

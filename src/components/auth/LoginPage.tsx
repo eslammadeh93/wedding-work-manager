@@ -4,7 +4,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant';
-import wwmLogo from '../../assets/wwm-logo.png';
+const wwmLogo = '/wwm-logo.png';
 
 export const LoginPage: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();

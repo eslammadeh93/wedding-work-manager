@@ -12,7 +12,7 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 const BUILD_ID = '__WWM_BUILD_ID__';
 const CACHE_NAME = `wwm-app-shell-${BUILD_ID}`;
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/wwm-logo.png', '/wwm-notification-crown.png'];
+const APP_SHELL = ['/index.html', '/manifest.webmanifest', '/wwm-logo.png', '/wwm-notification-crown.png', /* __WWM_PRECACHE_ASSETS__ */];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -35,27 +35,24 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
+    // The installed shell and its entry assets are one build. Open immediately
+    // from cache; registerPwa offers new builds without interrupting an order.
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy));
-          return response;
-        })
-        .catch(() => caches.match('/index.html')),
+      caches.open(CACHE_NAME).then(async (cache) => (await cache.match('/index.html')) || fetch(request)),
     );
     return;
   }
 
+  // Hashed bundles are immutable. Do not redownload every cached bundle each
+  // time an installed app starts, and never put API responses in this cache.
+  if (!url.pathname.startsWith('/assets/') && !APP_SHELL.includes(url.pathname)) return;
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
+    caches.open(CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok) await cache.put(request, response.clone());
+      return response;
     }),
   );
 });

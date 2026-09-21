@@ -14,18 +14,23 @@ export default defineConfig(() => {
       },
     },
     build: {
+      manifest: true,
       // Firestore is the only required runtime SDK near this size (134 KB gzip).
       // Feature bundles remain below this threshold and load on demand.
       chunkSizeWarningLimit: 550,
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'firebase-core': ['firebase/app'],
-            'firebase-auth': ['firebase/auth'],
-            'firebase-firestore': ['firebase/firestore'],
-            'vendor-pdf': ['jspdf', 'jspdf-autotable'],
-            'vendor-xlsx': ['xlsx'],
+          // Shared preload helpers must never live inside a lazy PDF bundle:
+          // the application entry imports them even before a report is opened.
+          onlyExplicitManualChunks: true,
+          manualChunks(id) {
+            const moduleId = id.replaceAll('\\', '/');
+            if (moduleId.includes('vite/preload-helper') || moduleId.includes('commonjsHelpers')) return 'vendor-runtime';
+            if (/node_modules\/(react|react-dom|scheduler)\//.test(moduleId)) return 'vendor-react';
+            if (/node_modules\/(jspdf|jspdf-autotable)\//.test(moduleId)) return 'vendor-pdf';
+            if (moduleId.includes('/node_modules/xlsx/')) return 'vendor-xlsx';
+            if (/node_modules\/@firebase\/firestore\//.test(moduleId)) return 'firebase-firestore';
+            if (/node_modules\/@firebase\/auth\//.test(moduleId)) return 'firebase-auth';
           },
         },
       },

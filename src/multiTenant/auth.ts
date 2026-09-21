@@ -58,12 +58,14 @@ export async function resolveMultiTenantSession(user: User): Promise<AuthSession
     return { uid: user.uid, email: user.email || platformProfile.email, displayName: platformProfile.name, userType: 'platform', role: platformRole, permissions: savedPlatformPermissions || PLATFORM_PERMISSION_MATRIX[platformRole] };
   }
   if (!tokenCompanyId || !tokenRole) throw new MultiTenantAuthError('تعذر التحقق من صلاحيات الحساب.');
-  const memberSnapshot = await getDoc(doc(db, firestorePaths.companyMember(tokenCompanyId, user.uid)));
+  const [memberSnapshot, companySnapshot] = await Promise.all([
+    getDoc(doc(db, firestorePaths.companyMember(tokenCompanyId, user.uid))),
+    getDoc(doc(db, firestorePaths.company(tokenCompanyId))),
+  ]);
   debug('membership', { found: memberSnapshot.exists(), companyId: tokenCompanyId });
   if (!memberSnapshot.exists()) throw new MultiTenantAuthError('تعذر التحقق من عضوية الشركة.');
   const member = memberSnapshot.data() as CompanyMember;
   if (member.uid !== user.uid || member.status !== 'active' || member.role !== tokenRole) throw new MultiTenantAuthError('الحساب معطّل أو غير صالح.');
-  const companySnapshot = await getDoc(doc(db, firestorePaths.company(tokenCompanyId)));
   if (!companySnapshot.exists()) throw new MultiTenantAuthError('تعذر التحقق من الشركة.');
   const company = companySnapshot.data() as Company;
   debug('company', { companyId: tokenCompanyId, status: company.status, active: company.status === 'active' });

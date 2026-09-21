@@ -10,7 +10,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import wwmLogo from '../assets/wwm-logo.png';
+const wwmLogo = '/wwm-logo.png';
 
 interface NavbarProps {
   onOpenSearch: () => void;

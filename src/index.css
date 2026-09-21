@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
@@ -71,6 +70,9 @@ html {
   /* Stops browser text re-scaling from changing the app's mobile layout. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+  touch-action: pan-x pan-y;
 }
 
 :root.dark {
@@ -88,18 +90,49 @@ html[lang="en"] textarea {
 
 body {
   min-width: 320px;
+  overflow-x: clip;
   background: #fcfafb;
   color: #3c2b31;
 }
 
 /* iOS zooms a page when focusing inputs smaller than 16px. Keep the app at
    its fixed viewport scale while preserving normal touch scrolling. */
-@media (max-width: 767px) {
+@media (max-width: 767px), (any-pointer: coarse) {
   input,
   select,
   textarea {
     font-size: 16px !important;
   }
+}
+
+.order-modal-viewport {
+  top: var(--modal-top, 0px);
+  height: var(--modal-height, 100dvh);
+  padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  overscroll-behavior: none;
+}
+
+.order-modal-form {
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scroll-padding-block: 1rem;
+}
+
+/* Native date/select controls and flex children must fit a narrow iPhone. */
+.order-modal-form .grid > *,
+.order-modal-form .flex > *,
+.order-modal-form input,
+.order-modal-form select,
+.order-modal-form textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (any-pointer: coarse) {
+  .order-modal-viewport { backdrop-filter: none; }
 }
 
 /* Financial values stay isolated from surrounding RTL text and never split

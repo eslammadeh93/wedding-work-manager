@@ -1,4 +1,5 @@
 import React from 'react';
+import { useModalViewport } from '../hooks/useModalViewport';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -25,7 +26,7 @@ import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
 import type { Permission } from '../multiTenant/permissions';
-import wwmLogo from '../assets/wwm-logo.png';
+const wwmLogo = '/wwm-logo.png';
 
 export type ActiveTab =
   | 'dashboard'
@@ -74,6 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
 }) => {
+  useModalViewport(isOpen, '(max-width: 1699px)');
   const { t, language } = useLanguage();
   const { orders, inventory } = useData();
   const { profile, authSession, isDemo } = useAuth();
@@ -135,8 +137,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside
         className={`fixed min-[1700px]:sticky top-0 min-[1700px]:top-14 sm:min-[1700px]:top-16 ltr:left-0 rtl:right-0 z-50 min-[1700px]:z-10 h-screen min-[1700px]:h-[calc(100vh-3.5rem)] sm:min-[1700px]:h-[calc(100vh-4rem)] w-64 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-transform duration-300 ease-in-out ${
           isOpen
-            ? 'translate-x-0'
-            : 'ltr:-translate-x-full rtl:translate-x-full min-[1700px]:translate-x-0'
+            ? 'visible translate-x-0'
+            : 'invisible pointer-events-none ltr:-translate-x-full rtl:translate-x-full min-[1700px]:visible min-[1700px]:pointer-events-auto min-[1700px]:translate-x-0'
         }`}
       >
         {/* Mobile / Sidebar Top Header */}
