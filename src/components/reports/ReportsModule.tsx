@@ -55,7 +55,7 @@ const cashDetailTypeLabel = (type: CashCardDetailItem['type'], language: 'ar' | 
     settlement: language === 'ar' ? 'دفعة سداد' : 'Settlement payment',
     'completed-profit': language === 'ar' ? 'أوردر مكتمل بعد التكاليف' : 'Completed order after costs',
     'retained-deposit': language === 'ar' ? 'عربون محتفَظ به' : 'Retained deposit',
-    'upcoming-expense': language === 'ar' ? 'مصروف أوردر غير مكتمل' : 'Uncompleted-order expense',
+    'upcoming-expense': language === 'ar' ? 'مصاريف أخرى بتاريخ الحجز' : 'Other expenses on booking date',
     'expected-settlement': language === 'ar' ? 'دفعة سداد متوقعة' : 'Expected settlement',
     'expected-profit': language === 'ar' ? 'ربح متوقع من الأوردر' : 'Expected order profit',
     capital: language === 'ar' ? 'إضافة رأس مال' : 'Capital added',
@@ -131,15 +131,13 @@ export const ReportsModule: React.FC = () => {
     if (!usesReportQuery || !companyId) return;
     let cancelled = false;
     setIsLoadingReportData(true); setReportDataError(null);
-    const from = `${selectedYear}-01-01`;
-    const to = `${selectedYear}-12-31`;
     void (async () => {
       const collected: typeof orders = [];
       let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      // Reports are loaded on demand for the selected year, not with the app's
-      // initial data. The cap protects the browser if a year is unusually busy.
-      for (let page = 0; page < 20; page += 1) {
-        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, { scope: 'all', pageSize: 100, dateField: 'eventDate', dateFrom: from, dateTo: to, cursor });
+      // Cash includes booking expenses for future-year events and historical
+      // safe balances. Load the same history as the expense ledger, on demand.
+      for (let page = 0; page < 50; page += 1) {
+        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, { scope: 'all', pageSize: 100, cursor });
         if (!result.success || !result.data) {
           if (!cancelled) setReportDataError(result.message || 'تعذر تحميل بيانات التقرير.');
           break;
@@ -147,6 +145,7 @@ export const ReportsModule: React.FC = () => {
         collected.push(...result.data.records);
         if (!result.data.hasMore || !result.data.cursor) break;
         cursor = result.data.cursor;
+        if (page === 49 && !cancelled) setReportDataError('تجاوزت بيانات التقرير حد التحميل؛ الأرقام المعروضة غير مكتملة.');
       }
       if (!cancelled) { setReportDataOrders(collected); setIsLoadingReportData(false); }
     })();
@@ -301,10 +300,10 @@ export const ReportsModule: React.FC = () => {
         .map((entry) => ({ id: `safe-expense-${entry.id}`, orderNumber: entry.category || (language === 'ar' ? 'مصروف تشغيلي' : 'Operating expense'), customerName: entry.notes || entry.description || '—', type: 'operating-expense' as const, amount: -amount(entry.amount) })),
       ...sourceOrders
         .filter((order) => order.orderStatus === 'completed' && isOnOrBeforeMonthEnd(order.eventDate || order.weddingDate))
-        .map((order) => ({ id: `safe-completed-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'completed-order-cost' as const, amount: -(completedOrderFulfillmentCosts(order) + amount(order.otherExpenses)) }))
+        .map((order) => ({ id: `safe-completed-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'completed-order-cost' as const, amount: -completedOrderFulfillmentCosts(order) }))
         .filter((item) => item.amount < 0),
       ...sourceOrders
-        .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && isOnOrBeforeMonthEnd(order.eventDate || order.weddingDate) && amount(order.otherExpenses) > 0)
+        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && isOnOrBeforeMonthEnd(order.bookingDate || order.createdAt) && amount(order.otherExpenses) > 0)
         .map((order) => ({ id: `safe-upcoming-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'upcoming-expense' as const, amount: -amount(order.otherExpenses) })),
     ];
   }, [expenses, language, selectedMonth, selectedYear, sourceOrders]);
@@ -669,7 +668,7 @@ export const ReportsModule: React.FC = () => {
         >
           <div className="w-full md:w-auto">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white"><WalletCards className="w-5 h-5 text-amber-600 dark:text-amber-300" />{language === 'ar' ? `صافي فلوس الأوردرات لشهر ${selectedMonthName}` : `Net order cash for ${selectedMonthName}`}</div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{language === 'ar' ? 'صافي ربح الأوردرات المكتملة + عربونات الأوردرات غير المكتملة + العربونات المحتفظ بها − المصاريف الأخرى للأوردرات غير المكتملة فقط.' : 'Completed-order net profit + uncompleted-order advances + retained deposits − other expenses for uncompleted orders only.'}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">{language === 'ar' ? 'تحصيلات الشهر − المصاريف الأخرى بتاريخ الحجز − أجرة العامل والانتقالات للأوردرات المكتملة في الشهر. المصاريف الأخرى تُخصم مرة واحدة فقط.' : 'Monthly collections − other expenses by booking date − worker and transportation costs for orders completed this month. Other expenses are deducted only once.'}</p>
           </div>
           <MoneyValue amount={cashSummary.netMonthlyCash} className={`self-center max-w-full text-[clamp(1.875rem,9vw,3rem)] font-black tracking-tight ${cashSummary.netMonthlyCash >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`} />
           <span className="absolute bottom-3 end-5 inline-flex items-center gap-1 text-[11px] font-black text-slate-600 dark:text-slate-300">
@@ -734,7 +733,7 @@ export const ReportsModule: React.FC = () => {
         </div>
         {cashSummary.retainedCancelledDeposits > 0 && <p className="px-5 py-2.5 bg-violet-50 text-xs font-bold text-violet-800 dark:bg-violet-950/30 dark:text-violet-200">{language === 'ar' ? `يشمل ${formatMoney(cashSummary.retainedCancelledDeposits)} عربونات محفوظة من طلبات أُلغيت.` : `Includes ${formatMoney(cashSummary.retainedCancelledDeposits)} in retained deposits from cancelled bookings.`}</p>}
         {cashSummary.collections.length === 0 ? <p className="p-8 text-center text-sm text-slate-400">{language === 'ar' ? 'لا توجد تحصيلات مسجلة في هذا الشهر.' : 'No collections recorded this month.'}</p> : <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs text-start"><thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500"><tr><th className="p-3.5 text-start">{language === 'ar' ? 'التاريخ' : 'Date'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'الأوردر / العميل' : 'Order / customer'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'نوع التحصيل' : 'Collection type'}</th><th className="p-3.5 text-start">{language === 'ar' ? 'طريقة الدفع' : 'Method'}</th><th className="p-3.5 text-end">{language === 'ar' ? 'المبلغ' : 'Amount'}</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-800">{cashSummary.collections.map((collection) => <tr key={collection.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td className="p-3.5 font-semibold text-slate-500">{collection.date}</td><td className="p-3.5"><p className="font-bold text-slate-900 dark:text-white">{collection.orderNumber}</p><p className="text-slate-500 mt-0.5">{collection.customerName}</p></td><td className="p-3.5"><span className={`inline-flex px-2.5 py-1 rounded-lg font-bold ${collection.isCompletedOrder ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{collection.isCompletedOrder ? (language === 'ar' ? 'أوردر مكتمل' : 'Completed order') : (language === 'ar' ? 'مقدم أوردر قادم' : 'Upcoming advance')}{collection.isLegacyEstimate ? ` · ${language === 'ar' ? 'تقديري' : 'Estimated'}` : ''}</span></td><td className="p-3.5 text-slate-600 dark:text-slate-300">{collection.method}</td><td className="p-3.5 text-end font-black text-emerald-600 dark:text-emerald-400"><MoneyValue amount={collection.amount} prefix="+" /></td></tr>)}</tbody></table></div>}
-        <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: مصاريف «أخرى» للأوردر تُخصم في شهر التنفيذ، أما تكلفة العامل والانتقالات فتُخصم عند اكتمال الأوردر. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order other expenses are deducted in the execution month, while worker and transportation costs are deducted when the order is completed. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
+        <p className="px-5 py-3 bg-amber-50/70 dark:bg-amber-950/20 text-[11px] leading-5 text-amber-800 dark:text-amber-200">{language === 'ar' ? 'ملاحظة: مصاريف «أخرى» للأوردر تُخصم بتاريخ الحجز ولا تُخصم مجددًا عند اكتماله، أما تكلفة العامل والانتقالات فتُخصم عند اكتمال الأوردر. سجّل المصروفات العامة من صفحة المصروفات حتى يظهر رصيد الخزنة بدقة.' : 'Note: order other expenses are deducted on the booking date and never deducted again on completion. Worker and transportation costs are deducted when the order is completed. Record operating expenses in the expense ledger for an accurate safe balance.'}</p>
       </section>
 
       {/* Company finance ledger: capital and general expenses */}

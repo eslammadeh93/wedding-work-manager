@@ -99,17 +99,19 @@ export const reconcileMonthlyCash = (
     }
 
     // Net-cash formula: realised completed-order profit, all advances on
-    // uncompleted orders, retained deposits, then execution-month other costs.
+    // uncompleted orders, retained deposits, then booking-month other costs.
     const completedInSelectedMonth = order.orderStatus === 'completed' && inMonth(executionDate, year, month);
     if (completedInSelectedMonth) {
       // Payments received before this month were already included as advances
       // in their collection month, so completion only receives this month's cash.
       record.cashContribution += collectionsThisMonth.reduce((sum, collection) => sum + collection.amount, 0)
-        - completedOrderFulfillmentCosts(order) - positive(order.otherExpenses);
+        - completedOrderFulfillmentCosts(order);
     }
     if (isNormalOrder(order) && !completedInSelectedMonth) {
       record.cashContribution += collectionsThisMonth.reduce((sum, collection) => sum + collection.amount, 0);
-      if (inMonth(executionDate, year, month)) record.cashContribution -= positive(order.otherExpenses);
+    }
+    if (isNormalOrder(order) && inMonth(bookingDate, year, month)) {
+      record.cashContribution -= positive(order.otherExpenses);
     }
     if (order.orderStatus === 'cancelled_deposit_retained') {
       record.cashContribution += collectionsThisMonth.reduce((sum, collection) => sum + collection.amount, 0);

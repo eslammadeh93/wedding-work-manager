@@ -43,15 +43,15 @@ export interface MonthlyCashSummary {
   capitalAdded: number;
   operatingExpenses: number;
   completedOrderCosts: number;
-  /** Other expenses recognized in this month's execution window for orders not completed yet. */
+  /** Booking-month other expenses not already included in this month's completed-order costs. */
   upcomingOrderOtherExpenses: number;
-  /** Money collected for completed orders less every direct cost on those orders. */
+  /** This month's completed-order collections less fulfillment and same-month booking costs. */
   completedOrdersNetProfit: number;
   /** Completed-order net profit plus retained cancelled deposits. */
   completedOrdersNetProfitWithRetainedDeposits: number;
   /** Upcoming-order advances after subtracting only their recorded other expenses. */
   upcomingOrderAdvancesNet: number;
-  /** Booking deposits for orders not yet completed, after execution-month other expenses. */
+  /** Booking deposits for orders not yet completed, after booking-month other expenses. */
   upcomingOrderDepositsNet: number;
   /** Booking deposits received this month for orders that are not yet completed. */
   upcomingOrderDepositsPaid: number;
@@ -63,11 +63,11 @@ export interface MonthlyCashSummary {
   totalSettlementPayments: number;
   /** Outstanding order balances expected in the selected month, by execution date. */
   expectedSettlementPayments: number;
-  /** Other expenses belonging to orders scheduled for execution in the selected month. */
+  /** Booking-month other expenses outside this month's completed-order costs. */
   bookedOrderOtherExpenses: number;
   /** Worker and transportation costs for orders completed in the selected month. */
   completedWorkerTransportCosts: number;
-  /** Other expenses for not-yet-completed orders scheduled for execution in the selected month. */
+  /** Booking-month other expenses outside this month's completed-order costs. */
   totalMonthlyOrderExpenses: number;
   /**
    * Completed-order net profit + advances from uncompleted orders + retained
@@ -111,13 +111,40 @@ export const calculateSafeBalanceToDate = (
     .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
   const completedOrderCosts = orders
     .filter((order) => order.orderStatus === 'completed' && isOnOrBefore(dateKey(order.eventDate || order.weddingDate)))
-    .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
-  const upcomingOrderOtherExpenses = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
-      && isOnOrBefore(dateKey(order.eventDate || order.weddingDate)))
+    .reduce((total, order) => total + completedOrderFulfillmentCosts(order), 0);
+  const bookedOrderOtherExpenses = orders
+    .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
+      && isOnOrBefore(dateKey(order.bookingDate || order.createdAt)))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
 
-  return collected + capital - operatingExpenses - completedOrderCosts - upcomingOrderOtherExpenses;
+  return collected + capital - operatingExpenses - completedOrderCosts - bookedOrderOtherExpenses;
+};
+
+/** General expenses consume only the opening carry; order cash and capital stay separate. */
+export const calculateFinancePeriodCash = (
+  orders: Order[],
+  financeEntries: CompanyFinanceEntry[],
+  startMonth: string,
+  endMonth: string,
+) => {
+  const [endYear, endMonthNumber] = endMonth.split('-').map(Number);
+  const periodEnd = new Date(endYear, endMonthNumber, 0);
+  const [startYear, startMonthNumber] = startMonth.split('-').map(Number);
+  const previousPeriodEnd = startMonth ? new Date(startYear, startMonthNumber - 1, 0) : null;
+  const openingBalance = previousPeriodEnd ? calculateSafeBalanceToDate(orders, financeEntries, previousPeriodEnd) : 0;
+  const previousOrderCash = previousPeriodEnd ? calculateSafeBalanceToDate(orders, [], previousPeriodEnd) : 0;
+  const netOrderCash = calculateSafeBalanceToDate(orders, [], periodEnd) - previousOrderCash;
+  const entries = financeEntries.filter((entry) => {
+    const month = dateKey(entry.date)?.slice(0, 7);
+    return month && month >= startMonth && month <= endMonth;
+  });
+  const capitalAdded = entries.filter(isCapital).reduce((sum, entry) => sum + positiveAmount(entry.amount), 0);
+  const generalExpenses = entries.filter((entry) => !isCapital(entry)).reduce((sum, entry) => sum + positiveAmount(entry.amount), 0);
+  // Keep a deficit visible instead of silently funding expenses from new capital
+  // or order income. The combined safe still reflects the money actually left.
+  const remainingCarriedBalance = openingBalance - generalExpenses;
+  const totalSafeBalance = remainingCarriedBalance + capitalAdded + netOrderCash;
+  return { openingBalance, capitalAdded, generalExpenses, netOrderCash, remainingCarriedBalance, totalSafeBalance };
 };
 
 const dateKey = (value?: string): string | null => {
@@ -257,35 +284,34 @@ export const calculateMonthlyCash = (
     .filter((entry) => !isCapital(entry))
     .reduce((total, entry) => total + positiveAmount(entry.amount), 0);
 
-  // Direct costs are cash out only after an order has been completed. Event date
-  // is used as the best available settlement date until per-cost dates are stored.
+  // Worker/transport costs belong to completion. Other expenses belong only to
+  // booking, including when looking back after the order has been completed.
+  const otherExpensesThisMonth = (order: Order) => inMonth(dateKey(order.bookingDate || order.createdAt), year, month)
+    ? positiveAmount(order.otherExpenses) : 0;
+  const completedCostsThisMonth = (order: Order) => completedOrderFulfillmentCosts(order) + otherExpensesThisMonth(order);
   const completedOrderCosts = orders
     .filter((order) => order.orderStatus === 'completed' && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
-    .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
+    .reduce((total, order) => total + completedCostsThisMonth(order), 0);
 
   const completedWorkerTransportCosts = orders
     .filter((order) => order.orderStatus === 'completed' && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + completedOrderFulfillmentCosts(order), 0);
 
   const bookedOrderOtherExpenses = orders
-    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
-    .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
+    .filter(isUpcomingForSelectedMonth)
+    .reduce((total, order) => total + otherExpensesThisMonth(order), 0);
 
   // Before fulfillment, only the "other expenses" field is treated as spent.
   // Worker and transport costs remain pending until the order is completed.
-  // Other expenses are recognized in the scheduled execution month, rather
-  // than the booking month, because they have not been spent yet at booking.
-  const upcomingOrderOtherExpenses = orders
-    .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
-    .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
+  // Deduct them in the booking month, even if execution is in a later month.
+  const upcomingOrderOtherExpenses = bookedOrderOtherExpenses;
   // The report's "total expenses" card is deliberately limited to upcoming
   // orders. Worker and transport costs remain represented by completed-order
   // profit and the monthly net, not this card.
   const totalMonthlyOrderExpenses = upcomingOrderOtherExpenses;
 
-  // A completed order contributes its actual collected amount less every
-  // direct cost. Its booking expenses must never be deducted a second time
-  // from the headline cash result just because the booking was made this month.
+  // A completed order includes only costs recognized in this month. Booking
+  // expenses deducted in an earlier month must never be deducted on completion.
   // The completion month receives only payments actually collected during that
   // month. A deposit recorded in an earlier month has already affected that
   // earlier month's cash and must never be counted again on completion.
@@ -330,20 +356,19 @@ export const calculateMonthlyCash = (
   const collectedToDate = sum(allCollections.filter((collection) => onOrBeforeMonthEnd(dateKey(collection.date), year, month)));
   const completedCostsToDate = orders
     .filter((order) => order.orderStatus === 'completed' && onOrBeforeMonthEnd(dateKey(order.eventDate || order.weddingDate), year, month))
-    .reduce((total, order) => total + completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses), 0);
-  // Other expenses become an outflow on the scheduled execution date. They
-  // must not reduce the safe while the event is still in a future month.
-  const upcomingOrderOtherExpensesToDate = orders
-    .filter((order) => order.orderStatus !== 'completed' && order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && onOrBeforeMonthEnd(dateKey(order.eventDate || order.weddingDate), year, month))
+    .reduce((total, order) => total + completedOrderFulfillmentCosts(order), 0);
+  // Booking expenses stay deducted once, regardless of later completion.
+  const bookedOrderOtherExpensesToDate = orders
+    .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && onOrBeforeMonthEnd(dateKey(order.bookingDate || order.createdAt), year, month))
     .reduce((total, order) => total + positiveAmount(order.otherExpenses), 0);
-  const orderCashBalanceToDate = collectedToDate - completedCostsToDate - upcomingOrderOtherExpensesToDate;
+  const orderCashBalanceToDate = collectedToDate - completedCostsToDate - bookedOrderOtherExpensesToDate;
 
   const netMonthlyCashBreakdown: NetMonthlyCashBreakdownItem[] = [
     ...orders
       .filter((order) => order.orderStatus === 'completed' && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
       .map((order) => {
         const collectedThisMonth = sum(collections.filter((collection) => collection.orderId === order.id));
-        const orderCosts = completedOrderFulfillmentCosts(order) + positiveAmount(order.otherExpenses);
+        const orderCosts = completedCostsThisMonth(order);
         return {
           id: `${order.id}-completed`,
           orderId: order.id,
@@ -376,7 +401,7 @@ export const calculateMonthlyCash = (
       })
       .filter((item): item is NonNullable<typeof item> => item !== null),
     ...orders
-      .filter((order) => isUpcomingForSelectedMonth(order) && inMonth(dateKey(order.eventDate || order.weddingDate), year, month) && positiveAmount(order.otherExpenses) > 0)
+      .filter((order) => isUpcomingForSelectedMonth(order) && otherExpensesThisMonth(order) > 0)
       .map((order) => ({
         id: `${order.id}-expense`, orderId: order.id, orderNumber: order.orderNumber, customerName: order.customerName,
         kind: 'upcoming-expense' as const, amount: -positiveAmount(order.otherExpenses),

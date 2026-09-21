@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Expense, FinanceType } from '../../types';
 import { ExpenseModal } from './ExpenseModal';
 import { MoneyValue } from '../ui/MoneyValue';
-import { calculateMonthlyCash, calculateSafeBalanceToDate } from '../../utils/monthlyCash';
+import { calculateFinancePeriodCash } from '../../utils/monthlyCash';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
@@ -40,15 +40,15 @@ const CashBalanceDetailsModal: React.FC<{
   onClose: () => void;
 }> = ({ total, items, language, onClose }) => (
   <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-    <section role="dialog" aria-modal="true" aria-label={language === 'ar' ? 'تفاصيل رصيد الخزنة المُرحّل' : 'Carried safe balance details'} dir={language === 'ar' ? 'rtl' : 'ltr'} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl dark:bg-slate-900" onMouseDown={(event) => event.stopPropagation()}>
+    <section role="dialog" aria-modal="true" aria-label={language === 'ar' ? 'تفاصيل رصيد الخزنة الإجمالي' : 'Total safe balance details'} dir={language === 'ar' ? 'rtl' : 'ltr'} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl dark:bg-slate-900" onMouseDown={(event) => event.stopPropagation()}>
       <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <div><h2 className="text-lg font-black text-slate-900 dark:text-white">{language === 'ar' ? 'تفاصيل رصيد الخزنة المُرحّل' : 'Carried safe balance details'}</h2><p className="mt-1 text-xs text-slate-500">{language === 'ar' ? 'يبدأ برصيد الشهر السابق ثم يُضاف ويُخصم منه حساب الشهر المختار.' : 'It starts with the previous month balance, then applies the selected month movements.'}</p></div>
+        <div><h2 className="text-lg font-black text-slate-900 dark:text-white">{language === 'ar' ? 'تفاصيل رصيد الخزنة الإجمالي' : 'Total safe balance details'}</h2><p className="mt-1 text-xs text-slate-500">{language === 'ar' ? 'المصروفات العامة تُخصم من الرصيد المرحّل فقط. الإجمالي = الباقي من المرحّل + رأس المال المضاف + صافي فلوس الأوردرات.' : 'General expenses reduce only the carried balance. Total = remaining carry + added capital + net order cash.'}</p></div>
         <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label={language === 'ar' ? 'إغلاق' : 'Close'}><X className="h-5 w-5" /></button>
       </header>
       <div className="space-y-3 p-5">
         {items.length === 0 ? <p className="rounded-2xl bg-slate-50 p-8 text-center text-sm text-slate-500 dark:bg-white/[0.05]">{language === 'ar' ? 'لا توجد حركات مالية مسجلة.' : 'No financial movements recorded.'}</p> : items.map((item) => <div key={item.id} className="flex items-start justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700"><div className="min-w-0"><p className="font-black text-slate-900 dark:text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{item.subtitle}</p></div><MoneyValue amount={Math.abs(item.amount)} prefix={item.amount < 0 ? '-' : '+'} className={`shrink-0 text-lg font-black ${item.amount < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-300'}`} /></div>)}
       </div>
-      <footer className="sticky bottom-0 flex items-center justify-between gap-4 border-t border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><span className="font-black text-slate-900 dark:text-white">{language === 'ar' ? 'رصيد نهاية الشهر' : 'Month-end balance'}</span><MoneyValue amount={total} className={`text-xl font-black ${total >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} /></footer>
+      <footer className="sticky bottom-0 flex items-center justify-between gap-4 border-t border-slate-100 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><span className="font-black text-slate-900 dark:text-white">{language === 'ar' ? 'رصيد الخزنة الإجمالي' : 'Total safe balance'}</span><MoneyValue amount={total} className={`text-xl font-black ${total >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`} /></footer>
     </section>
   </div>
 );
@@ -97,8 +97,8 @@ export const ExpensesModule: React.FC = () => {
       const collected: typeof orders = [];
       let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
       let completed = true;
-      // Unlike reports, the safe also includes deposits whose event is still
-      // in the future, so this deliberately has no event-date filter.
+      // Cash includes deposits and booking expenses for future events,
+      // so this deliberately has no event-date filter.
       for (let page = 0; page < 50; page += 1) {
         const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, {
           scope: 'all', pageSize: 100, cursor,
@@ -128,25 +128,12 @@ export const ExpensesModule: React.FC = () => {
     : periodMode === 'year' ? periodYear
       : periodBounds.start === periodBounds.end ? new Date(`${periodBounds.start}-01T00:00:00`).toLocaleString(language === 'ar' ? 'ar-EG' : 'en-US', { month: 'long', year: 'numeric' })
         : `${periodBounds.start} — ${periodBounds.end}`;
-  const [selectedYear, selectedMonthIndex] = periodBounds.end.split('-').map(Number);
-  const monthExpenses = useMemo(() => expenses.filter((entry) => {
-    const key = entry.date?.slice(0, 7) || '';
-    return key >= periodBounds.start && key <= periodBounds.end;
-  }), [expenses, periodBounds]);
-  const monthlyCapital = useMemo(() => monthExpenses
-    .filter((entry) => entry.type === 'capital' || entry.category === 'رأس مال')
-    .reduce((sum, entry) => sum + (entry.amount || 0), 0), [monthExpenses]);
-  const monthlyGeneralExpenses = useMemo(() => monthExpenses
-    .filter((entry) => entry.type !== 'capital' && entry.category !== 'رأس مال')
-    .reduce((sum, entry) => sum + (entry.amount || 0), 0), [monthExpenses]);
-  const monthlyCashSummary = useMemo(
-    () => calculateMonthlyCash(accountingOrders, expenses, selectedYear, selectedMonthIndex - 1),
-    [accountingOrders, expenses, selectedMonthIndex, selectedYear],
+  const periodCash = useMemo(
+    () => calculateFinancePeriodCash(accountingOrders, expenses, periodBounds.start, periodBounds.end),
+    [accountingOrders, expenses, periodBounds],
   );
-  const openingSafeBalance = useMemo(() => {
-    const previousMonthEnd = new Date(selectedYear, selectedMonthIndex - 1, 0);
-    return calculateSafeBalanceToDate(accountingOrders, expenses, previousMonthEnd);
-  }, [accountingOrders, expenses, selectedMonthIndex, selectedYear]);
+  const { openingBalance: openingSafeBalance, capitalAdded: monthlyCapital, generalExpenses: monthlyGeneralExpenses,
+    remainingCarriedBalance, totalSafeBalance } = periodCash;
   const carriedBalanceEntry = useMemo(() => periodMode === 'month' && openingSafeBalance > 0 ? {
     id: `carried-balance-${selectedMonth}`,
     type: 'capital' as const,
@@ -162,14 +149,11 @@ export const ExpensesModule: React.FC = () => {
 
   const cashBalanceDetails = useMemo<CashBalanceDetailItem[]>(() => {
     return [
-      { id: 'opening-balance', title: language === 'ar' ? 'رصيد مُرحّل من الشهر السابق' : 'Balance carried from previous month', subtitle: language === 'ar' ? 'الرصيد المتبقي في نهاية الشهر السابق' : 'The balance remaining at the end of the previous month', amount: openingSafeBalance },
-      { id: 'collections', title: language === 'ar' ? 'إجمالي تحصيلات الأوردرات' : 'Total order collections', subtitle: language === 'ar' ? 'العربونات ودفعات السداد المسجلة في الشهر المختار' : 'Deposits and settlement payments recorded in the selected month', amount: monthlyCashSummary.grossMonthlyIncome },
-      { id: 'capital', title: language === 'ar' ? 'رأس المال المضاف' : 'Capital added', subtitle: language === 'ar' ? 'إضافات رأس المال في الشهر المختار' : 'Capital additions in the selected month', amount: monthlyCashSummary.capitalAdded },
-      { id: 'operating-expenses', title: language === 'ar' ? 'المصروفات العامة' : 'Operating expenses', subtitle: language === 'ar' ? 'المصروفات التشغيلية في الشهر المختار' : 'Operating expenses in the selected month', amount: -monthlyCashSummary.operatingExpenses },
-      { id: 'completed-order-costs', title: language === 'ar' ? 'تكاليف الأوردرات المكتملة' : 'Completed-order costs', subtitle: language === 'ar' ? 'تكاليف التنفيذ للأوردرات المكتملة في الشهر المختار' : 'Execution costs for orders completed in the selected month', amount: -monthlyCashSummary.completedOrderCosts },
-      { id: 'upcoming-order-expenses', title: language === 'ar' ? 'مصاريف أخرى في شهر التنفيذ' : 'Other expenses in execution month', subtitle: language === 'ar' ? 'مصاريف أوردرات غير مكتملة موعدها في الشهر المختار' : 'Uncompleted-order expenses scheduled in the selected month', amount: -monthlyCashSummary.upcomingOrderOtherExpenses },
+      { id: 'remaining-carry', title: language === 'ar' ? 'الباقي من الرصيد المرحل' : 'Remaining carried balance', subtitle: language === 'ar' ? 'الرصيد المرحّل في بداية الفترة ناقص المصروفات العامة خلالها' : 'Opening carry less general expenses in this period', amount: remainingCarriedBalance },
+      { id: 'capital', title: language === 'ar' ? 'رأس المال المضاف' : 'Capital added', subtitle: language === 'ar' ? 'إضافات رأس المال خلال الفترة المختارة' : 'Capital additions in the selected period', amount: monthlyCapital },
+      { id: 'order-cash', title: language === 'ar' ? 'صافي فلوس الأوردرات' : 'Net order cash', subtitle: language === 'ar' ? 'تحصيلات الفترة بعد مصاريف الأوردرات فقط' : 'Period collections after order costs only', amount: periodCash.netOrderCash },
     ].filter((item) => item.amount !== 0);
-  }, [language, monthlyCashSummary, openingSafeBalance]);
+  }, [language, monthlyCapital, periodCash.netOrderCash, remainingCarriedBalance]);
 
   const filteredExpenses = [...expenses, ...(carriedBalanceEntry ? [carriedBalanceEntry] : [])].filter((e) => {
     const isCap = e.type === 'capital' || e.category === 'رأس مال';
@@ -249,7 +233,7 @@ export const ExpensesModule: React.FC = () => {
       </div>
 
       {/* Financial Overview Banner (KPIs) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Total Capital */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-hidden">
           <div className="flex min-w-0 items-center gap-3.5">
@@ -259,14 +243,10 @@ export const ExpensesModule: React.FC = () => {
             <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
                 {periodMode === 'month'
-                  ? openingSafeBalance > 0
-                    ? (monthlyCapital > 0
-                      ? (language === 'ar' ? 'رصيد افتتاحي + رأس مال مضاف' : 'Opening balance + capital added')
-                      : (language === 'ar' ? 'رصيد افتتاحي مُرحّل' : 'Carried opening balance'))
-                    : (language === 'ar' ? 'رأس المال المضاف للشهر' : 'Capital added this month')
+                  ? (language === 'ar' ? 'رأس المال المضاف للشهر' : 'Capital added this month')
                   : (language === 'ar' ? 'رأس المال المضاف للفترة' : 'Capital added in period')}
               </span>
-              <MoneyValue amount={monthlyCapital + (periodMode === 'month' ? openingSafeBalance : 0)} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400" />
+              <MoneyValue amount={monthlyCapital} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-emerald-600 dark:text-emerald-400" />
             </div>
           </div>
           <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-lg">
@@ -282,9 +262,12 @@ export const ExpensesModule: React.FC = () => {
             </div>
             <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                {language === 'ar' ? 'المصروفات العامة للشهر' : 'General expenses this month'}
+                {periodMode === 'month'
+                  ? (language === 'ar' ? 'المصروفات العامة للشهر' : 'General expenses this month')
+                  : (language === 'ar' ? 'المصروفات العامة للفترة' : 'General expenses in period')}
               </span>
               <MoneyValue amount={monthlyGeneralExpenses} className="mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black text-rose-600 dark:text-rose-400" />
+              <p className="mt-1 text-[11px] text-slate-500">{language === 'ar' ? 'تُخصم من الرصيد المرحّل فقط' : 'Deducted from the carried balance only'}</p>
             </div>
           </div>
           <span className="p-1.5 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-lg">
@@ -292,11 +275,27 @@ export const ExpensesModule: React.FC = () => {
           </span>
         </div>
 
-        {/* Current Cash Balance */}
+        {/* Remaining carry is separate from new capital and order cash. */}
+        <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+          <div className="flex min-w-0 items-center gap-3.5">
+            <div className={`p-3 rounded-2xl ${remainingCarriedBalance >= 0 ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}><Wallet className="w-6 h-6" /></div>
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-slate-400 block">{language === 'ar' ? 'الباقي من الرصيد المرحل' : 'Remaining carried balance'}</span>
+              <MoneyValue amount={remainingCarriedBalance} className={`mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black ${remainingCarriedBalance >= 0 ? 'text-cyan-600 dark:text-cyan-400' : 'text-rose-600 dark:text-rose-400'}`} />
+            </div>
+          </div>
+          <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-[11px] text-slate-500 dark:border-slate-800">
+            <div className="flex justify-between gap-3"><span>{language === 'ar' ? 'الرصيد المرحّل أول الفترة' : 'Opening carried balance'}</span><MoneyValue amount={openingSafeBalance} className="font-bold" /></div>
+            <div className="flex justify-between gap-3"><span>{language === 'ar' ? 'ناقص المصروفات العامة' : 'Less general expenses'}</span><MoneyValue amount={monthlyGeneralExpenses} className="font-bold text-rose-600 dark:text-rose-400" /></div>
+            {remainingCarriedBalance < 0 && <p className="pt-1 text-rose-600 dark:text-rose-400">{language === 'ar' ? 'يوجد عجز في الرصيد المرحّل.' : 'The carried balance has a deficit.'}</p>}
+          </div>
+        </div>
+
+        {/* Total Cash Balance */}
         <div
           role="button"
           tabIndex={0}
-          aria-label={language === 'ar' ? 'عرض تفاصيل الرصيد الحالي' : 'View current balance details'}
+          aria-label={language === 'ar' ? 'عرض تفاصيل رصيد الخزنة الإجمالي' : 'View total safe balance details'}
           onClick={() => setShowCashBalanceDetails(true)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -304,12 +303,12 @@ export const ExpensesModule: React.FC = () => {
               setShowCashBalanceDetails(true);
             }
           }}
-          className="cursor-pointer p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-400/70"
+          className="cursor-pointer p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-400/70"
         >
           <div className="flex min-w-0 items-center gap-3.5">
             <div
               className={`p-3 rounded-2xl ${
-                monthlyCashSummary.expectedSafeBalance >= 0
+                totalSafeBalance >= 0
                   ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
                   : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
               }`}
@@ -318,21 +317,22 @@ export const ExpensesModule: React.FC = () => {
             </div>
             <div className="min-w-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                {language === 'ar' ? 'رصيد الخزنة المُرحّل' : 'Carried safe balance'}
+                {language === 'ar' ? 'رصيد الخزنة الإجمالي' : 'Total safe balance'}
               </span>
               <MoneyValue
-                amount={monthlyCashSummary.expectedSafeBalance}
+                amount={totalSafeBalance}
                 className={`mt-0.5 text-[clamp(1rem,3vw,1.5rem)] font-black ${
-                  monthlyCashSummary.expectedSafeBalance >= 0
+                  totalSafeBalance >= 0
                     ? 'text-amber-600 dark:text-amber-400'
                     : 'text-rose-600 dark:text-rose-400'
                 }`}
               />
             </div>
           </div>
-          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
-            {language === 'ar' ? 'رصيد مرحّل + تحصيلات + رأس مال − مصروفات وتنفيذ' : 'Carried balance + collections + capital − costs'}
-          </span>
+          <p className="mt-3 text-[11px] leading-5 text-slate-500">
+            {language === 'ar' ? 'الباقي من الرصيد المرحّل + رأس المال المضاف + صافي فلوس الأوردرات' : 'Remaining carried balance + added capital + net order cash'}
+          </p>
+          <p className="mt-1 text-[10px] font-bold text-amber-600 dark:text-amber-400">{language === 'ar' ? 'اضغط لعرض التفاصيل' : 'Click for details'}</p>
         </div>
       </div>
 
@@ -543,7 +543,7 @@ export const ExpensesModule: React.FC = () => {
       )}
 
       {showCashBalanceDetails && <CashBalanceDetailsModal
-        total={monthlyCashSummary.expectedSafeBalance}
+        total={totalSafeBalance}
         items={cashBalanceDetails}
         language={language}
         onClose={() => setShowCashBalanceDetails(false)}

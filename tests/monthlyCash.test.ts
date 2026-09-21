@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateMonthlyCash, calculateSafeBalanceToDate } from '../src/utils/monthlyCash';
-import type { Order } from '../src/types';
+import { calculateFinancePeriodCash, calculateMonthlyCash, calculateSafeBalanceToDate } from '../src/utils/monthlyCash';
+import { reconcileMonthlyCash } from '../src/utils/monthlyCashReconciliation';
+import { buildMonthlySourceCashNet } from '../src/utils/reportInsights';
+import type { CompanyFinanceEntry, Order } from '../src/types';
 
 const order = (changes: Partial<Order>): Order => ({
   id: 'order-1', orderNumber: 'ORD-1', customerId: 'customer-1', customerName: 'عميل', customerPhone: '',
@@ -38,7 +40,7 @@ test('uses booking date for legacy payments without history', () => {
   assert.equal(result.advancesFromUpcomingOrders, 500);
 });
 
-test('records an upcoming order other expense in its execution month, not its booking month', () => {
+test('records other expenses in the booking month even when collection and execution are later', () => {
   const futureCollectionOrder = order({
     id: 'future-collection', bookingDate: '2026-07-22', createdAt: '2026-07-22', totalPaid: 400, otherExpenses: 100,
     paymentHistory: [{ id: 'august-payment', amount: 400, date: '2026-08-10', method: 'cash' }],
@@ -47,9 +49,11 @@ test('records an upcoming order other expense in its execution month, not its bo
   const july = calculateMonthlyCash([futureCollectionOrder], [], 2026, 6);
   const august = calculateMonthlyCash([futureCollectionOrder], [], 2026, 7);
 
-  assert.equal(july.upcomingOrderOtherExpenses, 0);
-  assert.equal(july.orderCashBalanceToDate, 0);
-  assert.equal(august.upcomingOrderOtherExpenses, 100);
+  assert.equal(july.upcomingOrderOtherExpenses, 100);
+  assert.equal(july.netMonthlyCash, -100);
+  assert.equal(july.orderCashBalanceToDate, -100);
+  assert.equal(august.upcomingOrderOtherExpenses, 0);
+  assert.equal(august.netMonthlyCash, 400);
   assert.equal(august.orderCashBalanceToDate, 300);
 });
 
@@ -101,8 +105,8 @@ test('headline net uses completed profit and subtracts only uncompleted-order ot
     order({ id: 'retained', bookingDate: '2026-08-04', orderStatus: 'cancelled_deposit_retained', totalPaid: 200, paymentHistory: [{ id: 'retained-deposit', amount: 200, date: '2026-08-04', method: 'cash' }] }),
   ], [], 2026, 7);
 
-  assert.equal(result.completedOrdersNetProfit, 700);
-  assert.equal(result.netMonthlyCash, 1_150); // 700 + 300 + 200 - 50
+  assert.equal(result.completedOrdersNetProfit, 800); // July's other expenses stay in July.
+  assert.equal(result.netMonthlyCash, 1_250); // 800 + 300 + 200 - 50
 });
 
 test('expected monthly profit includes deposits for bookings executing in a later month', () => {
@@ -160,7 +164,7 @@ test('does not count an old deposit again when its order is completed in a later
   assert.equal(september.completedOrdersNetProfit, 300); // 1,800 collected in September - 1,500 execution costs
   assert.equal(september.netMonthlyCash, 300);
   assert.deepEqual(september.netMonthlyCashBreakdown, [{
-    id: 'completed-later-completed', orderId: 'completed-later', orderNumber: 'ORD-OLD-DEPOSIT', customerName: 'Ø¹Ù…ÙŠÙ„',
+    id: 'completed-later-completed', orderId: 'completed-later', orderNumber: 'ORD-OLD-DEPOSIT', customerName: completedLater.customerName,
     kind: 'completed-order', amount: 300, collectedThisMonth: 1_800, completedOrderCosts: 1_500,
   }]);
 });
@@ -177,4 +181,152 @@ test('calculates the current safe balance from collections, capital, and recogni
 
   assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 10)), 600);
   assert.equal(calculateSafeBalanceToDate(orders, finance, new Date(2026, 7, 31)), 1_250);
+});
+
+test('booking expenses stay deducted once through future execution and completion', () => {
+  const booked = order({
+    bookingDate: '2026-09-21', createdAt: '2026-09-21',
+    eventDate: '2026-10-01', weddingDate: '2026-10-01',
+    totalPrice: 2_000, deposit: 1_000, totalPaid: 1_000, remainingBalance: 1_000,
+    otherExpenses: 200, workerCost: 300, transportationCost: 100, orderSource: 'campaign',
+    paymentHistory: [{ id: 'deposit', amount: 1_000, date: '2026-09-21', method: 'cash', type: 'deposit' }],
+  });
+  const completed = order({ ...booked, orderStatus: 'completed', totalPaid: 2_000, remainingBalance: 0,
+    paymentHistory: [...booked.paymentHistory, { id: 'settlement', amount: 1_000, date: '2026-10-01', method: 'cash', type: 'settlement' }],
+  });
+
+  for (const state of [booked, completed]) {
+    const september = calculateMonthlyCash([state], [], 2026, 8);
+    assert.equal(september.netMonthlyCash, 800);
+    assert.equal(september.completedOrderCosts, 0);
+    assert.equal(september.upcomingOrderOtherExpenses, 200);
+    assert.equal(september.orderCashBalanceToDate, 800);
+    assert.equal(september.expectedSafeBalance, 800);
+    assert.equal(calculateSafeBalanceToDate([state], [], new Date(2026, 8, 20)), 0);
+    assert.equal(calculateSafeBalanceToDate([state], [], new Date(2026, 8, 21)), 800);
+    const october = calculateMonthlyCash([state], [], 2026, 9);
+    assert.equal(october.upcomingOrderOtherExpenses, 0);
+    assert.equal(october.netMonthlyCash, state === booked ? 0 : 600);
+    assert.equal(october.completedOrderCosts, state === booked ? 0 : 400);
+    assert.equal(october.expectedSafeBalance, september.netMonthlyCash + october.netMonthlyCash);
+    assert.equal(october.orderCashBalanceToDate, october.expectedSafeBalance);
+
+    for (const month of [8, 9]) {
+      const summary = calculateMonthlyCash([state], [], 2026, month);
+      assert.equal(summary.netMonthlyCashBreakdown.reduce((sum, item) => sum + item.amount, 0), summary.netMonthlyCash);
+      assert.equal(buildMonthlySourceCashNet([state], 2026, month).campaign, summary.netMonthlyCash);
+      const reconciliation = reconcileMonthlyCash([state], [], 2026, month);
+      assert.equal(reconciliation.items.reduce((sum, item) => sum + item.difference, 0), reconciliation.difference);
+    }
+  }
+});
+
+test('same-month booking and completion deduct other expenses only once', () => {
+  const sameMonth = order({ otherExpenses: 200, workerCost: 300, transportationCost: 100, totalPaid: 1_000,
+    paymentHistory: [{ id: 'paid', amount: 1_000, date: '2026-08-02', method: 'cash', type: 'deposit' }],
+  });
+  const pending = calculateMonthlyCash([sameMonth], [], 2026, 7);
+  assert.equal(pending.netMonthlyCash, 800);
+  assert.equal(pending.completedOrderCosts, 0);
+  const completed = calculateMonthlyCash([{ ...sameMonth, orderStatus: 'completed' }], [], 2026, 7);
+  assert.equal(completed.netMonthlyCash, 400);
+  assert.equal(completed.completedOrderCosts, 600);
+  assert.equal(completed.upcomingOrderOtherExpenses, 0);
+  assert.equal(completed.expectedSafeBalance, 400);
+  assert.equal(completed.netMonthlyCashBreakdown.reduce((sum, item) => sum + item.amount, 0), 400);
+});
+
+test('legacy booking date falls back to creation date across the year boundary', () => {
+  const legacy = order({ bookingDate: undefined, createdAt: '2026-12-20T10:00:00Z',
+    eventDate: '2027-01-10', weddingDate: '2027-01-10', otherExpenses: 100,
+    totalPaid: 0, deposit: 0, workerCost: 200, transportationCost: 50,
+  });
+  for (const orderStatus of ['confirmed', 'completed'] as const) {
+    const state = { ...legacy, orderStatus };
+    assert.equal(calculateMonthlyCash([state], [], 2026, 11).netMonthlyCash, -100);
+    assert.equal(calculateSafeBalanceToDate([state], [], new Date(2026, 11, 31)), -100);
+    const january = calculateMonthlyCash([state], [], 2027, 0);
+    assert.equal(january.netMonthlyCash, orderStatus === 'completed' ? -250 : 0);
+    assert.equal(january.orderCashBalanceToDate, orderStatus === 'completed' ? -350 : -100);
+  }
+});
+
+const carryFinance: CompanyFinanceEntry[] = [
+  { id: 'opening-capital', type: 'capital', category: 'رأس مال', amount: 1_000, date: '2026-08-01', createdAt: '' },
+  { id: 'new-capital', type: 'capital', category: 'رأس مال', amount: 500, date: '2026-09-05', createdAt: '' },
+  { id: 'salary', type: 'expense', category: 'مرتبات', amount: 300, date: '2026-09-10', createdAt: '' },
+  { id: 'rent', type: 'expense', category: 'إيجار', amount: 100, date: '2026-09-15', createdAt: '' },
+];
+const carryOrder = order({
+  bookingDate: '2026-09-01', createdAt: '2026-09-01', eventDate: '2026-10-01', weddingDate: '2026-10-01',
+  totalPaid: 1_000, deposit: 1_000, otherExpenses: 200, workerCost: 300, transportationCost: 100,
+  paymentHistory: [{ id: 'deposit', amount: 1_000, date: '2026-09-01', method: 'cash', type: 'deposit' }],
+});
+
+test('general expenses reduce only carried funds while capital and net order cash stay separate', () => {
+  const result = calculateFinancePeriodCash([carryOrder], carryFinance, '2026-09', '2026-09');
+  assert.deepEqual(result, {
+    openingBalance: 1_000, capitalAdded: 500, generalExpenses: 400, netOrderCash: 800,
+    remainingCarriedBalance: 600, totalSafeBalance: 1_900,
+  });
+  assert.equal(result.netOrderCash, calculateMonthlyCash([carryOrder], carryFinance, 2026, 8).netMonthlyCash);
+  assert.equal(result.totalSafeBalance, calculateSafeBalanceToDate([carryOrder], carryFinance, new Date(2026, 8, 30)));
+
+  const beforeExpenses = calculateFinancePeriodCash([carryOrder], carryFinance.filter(entry => entry.type === 'capital'), '2026-09', '2026-09');
+  assert.equal(beforeExpenses.remainingCarriedBalance, 1_000);
+  assert.equal(beforeExpenses.netOrderCash, result.netOrderCash);
+  assert.equal(beforeExpenses.capitalAdded, result.capitalAdded);
+});
+
+test('editing and deleting a general expense recalculates the remaining carry and total once', () => {
+  const edited = carryFinance.map(entry => entry.id === 'salary' ? { ...entry, amount: 600 } : entry);
+  const afterEdit = calculateFinancePeriodCash([carryOrder], edited, '2026-09', '2026-09');
+  assert.equal(afterEdit.remainingCarriedBalance, 300);
+  assert.equal(afterEdit.totalSafeBalance, 1_600);
+  assert.equal(afterEdit.netOrderCash, 800);
+  assert.equal(afterEdit.capitalAdded, 500);
+  const afterDelete = calculateFinancePeriodCash([carryOrder], edited.filter(entry => entry.id !== 'salary'), '2026-09', '2026-09');
+  assert.equal(afterDelete.remainingCarriedBalance, 900);
+  assert.equal(afterDelete.totalSafeBalance, 2_200);
+});
+
+test('a carried deficit stays visible without reducing the new capital or order cash buckets', () => {
+  const overspent = carryFinance.map(entry => entry.id === 'salary' ? { ...entry, amount: 1_200 } : entry);
+  const result = calculateFinancePeriodCash([carryOrder], overspent, '2026-09', '2026-09');
+  assert.equal(result.remainingCarriedBalance, -300);
+  assert.equal(result.capitalAdded, 500);
+  assert.equal(result.netOrderCash, 800);
+  assert.equal(result.totalSafeBalance, 1_000);
+  const noCarry = calculateFinancePeriodCash([carryOrder], carryFinance.filter(entry => entry.id !== 'opening-capital'), '2026-09', '2026-09');
+  assert.equal(noCarry.openingBalance, 0);
+  assert.equal(noCarry.remainingCarriedBalance, -400);
+  assert.equal(noCarry.totalSafeBalance, 900);
+});
+
+test('next month carries the previous total and recognizes only that month expenses and completion costs', () => {
+  const completed = { ...carryOrder, orderStatus: 'completed' as const, totalPaid: 2_000,
+    paymentHistory: [...carryOrder.paymentHistory, { id: 'settlement', amount: 1_000, date: '2026-10-01', method: 'cash', type: 'settlement' as const }],
+  };
+  const finance = [...carryFinance, { id: 'october-salary', type: 'expense' as const, category: 'مرتبات', amount: 500, date: '2026-10-10', createdAt: '' }];
+  const result = calculateFinancePeriodCash([completed], finance, '2026-10', '2026-10');
+  assert.equal(result.openingBalance, 1_900);
+  assert.equal(result.generalExpenses, 500);
+  assert.equal(result.remainingCarriedBalance, 1_400);
+  assert.equal(result.netOrderCash, 600);
+  assert.equal(result.capitalAdded, 0);
+  assert.equal(result.totalSafeBalance, 2_000);
+});
+
+test('range, year and all-period summaries use the opening and movements of the whole selected period', () => {
+  const range = calculateFinancePeriodCash([carryOrder], carryFinance, '2026-08', '2026-09');
+  const year = calculateFinancePeriodCash([carryOrder], carryFinance, '2026-01', '2026-12');
+  const all = calculateFinancePeriodCash([carryOrder], carryFinance, '', '9999-12');
+  for (const result of [range, year, all]) {
+    assert.equal(result.openingBalance, 0);
+    assert.equal(result.capitalAdded, 1_500);
+    assert.equal(result.generalExpenses, 400);
+    assert.equal(result.netOrderCash, 800);
+    assert.equal(result.remainingCarriedBalance, -400);
+    assert.equal(result.totalSafeBalance, 1_900);
+  }
 });

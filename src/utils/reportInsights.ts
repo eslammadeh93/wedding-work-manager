@@ -118,7 +118,7 @@ export function buildMonthlySourceCashNet(orders: Order[], year: number, month: 
       .filter((collection) => isInMonth(collection.date));
 
     if (completedThisMonth) {
-      result[source] += collectionsThisMonth.reduce((total, collection) => total + collection.amount, 0) - directCostsOf(order);
+      result[source] += collectionsThisMonth.reduce((total, collection) => total + collection.amount, 0) - completedOrderFulfillmentCosts(order);
     }
 
     // A completed order is represented by its execution-month result only.
@@ -127,9 +127,9 @@ export function buildMonthlySourceCashNet(orders: Order[], year: number, month: 
       result[source] += collectionsThisMonth.reduce((total, collection) => total + collection.amount, 0);
     }
 
-    // Before completion, other expenses are attributed to the execution month.
+    // Other expenses stay in the booking month, even after completion.
     // Retained cancellations do not have a future-order expense deduction.
-    if (!completedThisMonth && status !== 'cancelled' && status !== 'cancelled_deposit_retained' && eventIsInMonth) {
+    if (status !== 'cancelled' && status !== 'cancelled_deposit_retained' && isInMonth(order.bookingDate || order.createdAt)) {
       result[source] -= Number(order.otherExpenses || 0);
     }
   });

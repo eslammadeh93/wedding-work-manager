@@ -1144,8 +1144,11 @@ const platformMonthlyAccounts = (orders: PlatformCashOrder[], expenses: Array<Re
   const expectedSettlementPayments = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + Math.max(0, order.totalPrice - (order.totalPaid > 0 ? order.totalPaid : order.deposit)), 0);
   const upcomingOrderDeposits = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && upcoming(order) && !collection.retained && collection.paymentType === 'deposit'); }));
   const operatingExpenses = expenses.filter(expense => platformMonthMatches(platformDate(expense.date), month) && expense.type !== 'capital' && String(expense.category || '') !== 'رأس مال' && !expense.deletedAt).reduce((total, expense) => total + platformNumber(expense.amount), 0);
-  const completedOrderCosts = orders.filter(completedInMonth).reduce((total, order) => total + order.workerCost + order.transportationCost + order.otherExpenses, 0);
-  const upcomingOrderOtherExpenses = orders.filter(order => upcoming(order) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + order.otherExpenses, 0);
+  const bookedInMonth = (order: PlatformCashOrder) => platformMonthMatches(order.bookingDate || order.createdAt, month);
+  // Booking expenses are spent before fulfillment and must not be charged again
+  // when an order booked in an earlier month is completed.
+  const completedOrderCosts = orders.filter(completedInMonth).reduce((total, order) => total + order.workerCost + order.transportationCost + (bookedInMonth(order) ? order.otherExpenses : 0), 0);
+  const upcomingOrderOtherExpenses = orders.filter(order => upcoming(order) && bookedInMonth(order)).reduce((total, order) => total + order.otherExpenses, 0);
   const completedOrdersNetProfit = collectedFromCompletedOrders - completedOrderCosts;
   const netMonthlyCash = completedOrdersNetProfit + advancesFromUpcomingOrders + retainedCancelledDeposits - upcomingOrderOtherExpenses;
   const executedOrdersNetProfit = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + order.totalPrice - order.otherExpenses - order.workerCost - order.transportationCost, 0);
