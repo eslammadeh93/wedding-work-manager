@@ -1,9 +1,13 @@
 import React from 'react';
 import { Printer, X } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
+import { orderFinancialPosition } from '../../utils/orderPaymentState';
 import { useData } from '../../context/DataContext';
 import { Order } from '../../types';
 import { OrderSourceBadge } from './OrderSourceBadge';
+
+/** Legacy entries that stay stored on the order but count for nothing. */
+const isLegacySecurity = (type: string | undefined) => type === 'security_deposit' || type === 'security_refund';
 
 interface OrderInvoicePrintProps {
   order: Order | null;
@@ -12,6 +16,15 @@ interface OrderInvoicePrintProps {
 
 export const OrderInvoicePrint: React.FC<OrderInvoicePrintProps> = ({ order, onClose }) => {
   const { language, t } = useLanguage();
+
+  // Money is read through the same helpers the rest of the app uses, so the
+  // invoice cannot tell a different story from the order screen or the
+  // reports. Legacy security entries are excluded from the same helpers, so
+  // they are not listed here either.
+  const position = orderFinancialPosition(order);
+  const history = order.paymentHistory || [];
+  const contractPayments = history.filter((entry) => !isLegacySecurity(entry.type) && entry.type !== 'refund');
+  const contractRefunds = history.filter((entry) => entry.type === 'refund');
   const { settings } = useData();
 
   if (!order) return null;
@@ -130,25 +143,75 @@ export const OrderInvoicePrint: React.FC<OrderInvoicePrintProps> = ({ order, onC
             </table>
           </div>
 
-          {/* Pricing Summary */}
+          {/*
+            Financial summary. The security amount is printed for reference
+            beneath the totals and is never added to any of them: it is not a
+            payment and has no financial effect on the order.
+          */}
           <div className="flex justify-end">
-            <div className="w-64 space-y-1.5 text-xs bg-amber-50 p-4 rounded-xl border border-amber-200">
+            <div className="w-80 space-y-1.5 text-xs bg-amber-50 p-4 rounded-xl border border-amber-200">
               <div className="flex justify-between font-medium">
                 <span>{t('totalPrice')}:</span>
                 <span className="font-bold text-slate-900">${order.totalPrice.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between font-medium">
-                <span>{t('deposit')}:</span>
-                <span className="font-bold text-emerald-700">${order.deposit.toLocaleString()}</span>
+              {order.discountInfo && order.discountInfo.trim().length > 0 && (
+                <div className="flex justify-between gap-3 text-[11px] text-slate-500">
+                  <span>{language === 'ar' ? 'بيان الخصم' : 'Discount note'}:</span>
+                  <span className="text-end font-semibold text-slate-700">{order.discountInfo}</span>
+                </div>
+              )}
+
+              {contractPayments.length > 0 && (
+                <div className="border-t border-amber-200 pt-1.5 space-y-0.5">
+                  <p className="font-bold text-slate-700">{language === 'ar' ? 'الدفعات المستلمة' : 'Payments received'}</p>
+                  {contractPayments.map((payment) => (
+                    <div key={payment.id} className="flex justify-between text-[11px] text-slate-600">
+                      <span>{payment.date}{payment.method ? ` — ${payment.method}` : ''}</span>
+                      <span className="font-bold text-emerald-700">${Number(payment.amount).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {contractRefunds.length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="font-bold text-slate-700">{language === 'ar' ? 'مبالغ مستردة' : 'Refunds returned'}</p>
+                  {contractRefunds.map((refund) => (
+                    <div key={refund.id} className="flex justify-between text-[11px] text-slate-600">
+                      <span>{refund.date}{refund.method ? ` — ${refund.method}` : ''}</span>
+                      <span className="font-bold text-rose-600">-${Number(refund.amount).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="border-t border-amber-200 pt-1.5 flex justify-between font-medium">
+                <span>{language === 'ar' ? 'إجمالي المدفوع للأوردر' : 'Total paid to the order'}:</span>
+                <span className="font-bold text-emerald-700">${position.totalPaid.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between font-medium">
-                <span>{t('securityDeposit')}:</span>
-                <span className="font-bold text-indigo-700">${(order.securityDeposit || 0).toLocaleString()}</span>
-              </div>
-              <div className="border-t border-amber-200 pt-1.5 flex justify-between font-extrabold text-sm text-slate-900">
+              <div className="flex justify-between font-extrabold text-sm text-slate-900">
                 <span>{t('remainingBalance')}:</span>
-                <span className="text-rose-600">${order.remainingBalance.toLocaleString()}</span>
+                <span className="text-rose-600">${position.remainingBalance.toLocaleString()}</span>
               </div>
+
+              {position.customerCredit > 0 && (
+                <div className="flex justify-between gap-2 border-t border-amber-200 pt-1.5 font-medium">
+                  <span>{language === 'ar' ? 'رصيد مستحق للعميل' : 'Credit owed to customer'}:</span>
+                  <span className="font-bold text-amber-700">${position.customerCredit.toLocaleString()}</span>
+                </div>
+              )}
+
+              {Number(order.securityDeposit) > 0 && (
+                <div className="mt-1 space-y-0.5 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="font-bold text-indigo-900">{language === 'ar' ? 'التأمين' : 'Security deposit'}:</span>
+                    <span className="font-bold text-indigo-800">${Number(order.securityDeposit || 0).toLocaleString()}</span>
+                  </div>
+                  <p className="text-[10px] text-indigo-700">
+                    {language === 'ar' ? 'للعلم فقط: غير محسوب ضمن أي مبلغ.' : 'For reference only: not included in any amount.'}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

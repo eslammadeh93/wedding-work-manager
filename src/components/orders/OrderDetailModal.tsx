@@ -22,6 +22,10 @@ import { useAuth } from '../../context/AuthContext';
 import { Order, OrderStatus, PaymentEntry, WorkerMovement } from '../../types';
 import { toSafeExternalUrl } from '../../utils/security';
 import { localDateString } from '../../utils/localDate';
+import { editPaymentEntry, removePaymentEntry, resolveOrderPaymentState } from '../../utils/orderPaymentState';
+import { recordedOrderPayment } from '../../utils/orderPayments';
+import { refundPaymentEntry } from '../../utils/financialRetention';
+import { orderFinancialPosition } from '../../utils/orderPaymentState';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { canViewCustomerContact as contactIsVisible } from '../../utils/workerContact';
@@ -52,7 +56,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onOrderChanged,
 }) => {
   const { t, language } = useLanguage();
-  const { updateOrder, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
+  const { updateOrder, updateOrderPayments, settings, addPaymentToOrder, addActivityLog, recordWorkerMovement } = useData();
   const { profile, authSession, isDemo } = useAuth();
 
   const isWorker = profile?.role === 'worker';
@@ -61,9 +65,13 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState('InstaPay');
   const [paymentNotes, setPaymentNotes] = useState('');
+  // The receipt date is when the money actually arrived. It is deliberately
+  // independent of the event date, which belongs to the execution schedule.
+  const [paymentDate, setPaymentDate] = useState(localDateString());
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [editingPayment, setEditingPayment] = useState<PaymentEntry | null>(null);
   const [editedPaymentDate, setEditedPaymentDate] = useState('');
+  const [editedPaymentAmount, setEditedPaymentAmount] = useState('');
   const [isLogging, setIsLogging] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
@@ -126,17 +134,54 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   if (!order) return null;
 
-  const withPaymentHistory = (paymentHistory: PaymentEntry[]): Order => {
-    const totalPaid = Math.max(order.deposit || 0, paymentHistory.reduce((sum, payment) => sum + (payment.amount || 0), 0));
-    const remainingBalance = Math.max(0, (order.totalPrice || 0) - totalPaid);
-    return {
-      ...order,
-      paymentHistory,
-      totalPaid,
-      remainingBalance,
-      paymentStatus: totalPaid >= (order.totalPrice || 0) && order.totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid',
-      updatedAt: new Date().toISOString(),
-    };
+  const withPaymentHistory = (paymentHistory: PaymentEntry[]): Order => ({
+    ...order,
+    // Same canonical calculation the write itself used, so the open modal
+    // shows exactly what was stored.
+    ...resolveOrderPaymentState(order, { paymentHistory, totalPrice: order.totalPrice }),
+    paymentHistory,
+    updatedAt: new Date().toISOString(),
+  });
+
+  /**
+   * Cancelling an order must never quietly remove money that was already
+   * received. The receipt stays exactly as recorded; the user says what
+   * actually happened to the money, and a refund is written as its own dated
+   * movement on the day it went back.
+   */
+  const collectRefundOnCancel = async (): Promise<boolean> => {
+    const collected = recordedOrderPayment(order);
+    if (collected <= 0) return true;
+
+    const question = language === 'ar'
+      ? `تم تحصيل ${collected.toLocaleString()} لهذا الأوردر. اكتب المبلغ المسترد للعميل الآن، أو اتركه 0 إذا لم يُرد شيء. الدفعة الأصلية ستبقى مسجلة كما هي.`
+      : `${collected.toLocaleString()} was collected for this order. Enter the amount refunded to the customer now, or leave 0 if nothing was returned. The original receipt stays recorded as it is.`;
+    const answer = window.prompt(question, '0');
+    if (answer === null) return false;
+    const refunded = Number(answer);
+    if (!Number.isFinite(refunded) || refunded < 0 || refunded > collected) {
+      setLogToastIsError(true);
+      setLogToast(language === 'ar' ? 'قيمة الاسترداد غير صالحة.' : 'The refund amount is not valid.');
+      return false;
+    }
+    if (refunded === 0) return true;
+
+    const refundDate = window.prompt(
+      language === 'ar' ? 'تاريخ خروج المبلغ المسترد (YYYY-MM-DD):' : 'Date the refund left the company (YYYY-MM-DD):',
+      localDateString(),
+    );
+    if (refundDate === null) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(refundDate)) {
+      setLogToastIsError(true);
+      setLogToast(language === 'ar' ? 'تاريخ الاسترداد غير صالح.' : 'The refund date is not valid.');
+      return false;
+    }
+
+    const refundId = `refund_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+    const entry = refundPaymentEntry(refundId, refunded, refundDate, paymentMethod, language === 'ar' ? 'استرداد عند الإلغاء' : 'Refund on cancellation');
+    await updateOrderPayments(order.id, (history) => [...history, entry]);
+    onOrderChanged?.(withPaymentHistory([...(order.paymentHistory || []), entry]));
+    return true;
   };
 
   const handleStatusChange = async (newStatus: OrderStatus) => {
@@ -144,6 +189,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     try {
       statusUpdateInFlightRef.current = true;
       setIsUpdatingStatus(true);
+      // A retained cancellation keeps the money by definition, so it asks nothing.
+      if (newStatus === 'cancelled' && !(await collectRefundOnCancel())) return;
       await updateOrder(order.id, { orderStatus: newStatus });
       onOrderChanged?.({ ...order, orderStatus: newStatus, updatedAt: new Date().toISOString() });
       setLogToastIsError(false);
@@ -167,9 +214,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       const payment: PaymentEntry = {
         id: paymentRequestIdRef.current || `pay_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`,
         amount: Number(paymentAmount),
-        // Settlement payments belong to the execution month, not the day the
-        // record happens to be edited.
-        date: order.eventDate || order.weddingDate || localDateString(),
+        // The date the settlement was actually received, never the event date.
+        date: paymentDate || localDateString(),
         method: paymentMethod,
         type: 'settlement',
         notes: paymentNotes || 'Settlement Payment',
@@ -180,6 +226,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       onOrderChanged?.(withPaymentHistory([...(order.paymentHistory || []), payment]));
       setPaymentAmount(0);
       setPaymentNotes('');
+      setPaymentDate(localDateString());
       setShowAddPayment(false);
       paymentRequestIdRef.current = null;
       setLogToastIsError(false);
@@ -221,54 +268,92 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     }
   };
 
-  const handlePaymentDateEdit = (payment: PaymentEntry) => {
+  const handlePaymentEdit = (payment: PaymentEntry) => {
     setEditingPayment(payment);
     setEditedPaymentDate(payment.date.slice(0, 10));
+    setEditedPaymentAmount(String(payment.amount));
   };
 
-  const handlePaymentDateSave = async (event: React.FormEvent) => {
+  /**
+   * Corrects one recorded payment.
+   *
+   * Only the amount and the date are correctable: the method and the entry's
+   * type describe what actually happened and changing them would reclassify a
+   * movement rather than fix a typo. The write goes through the transactional
+   * payment path, which re-reads the stored history, so this never submits the
+   * snapshot the modal was opened with, and the order's version is checked so
+   * a payment recorded elsewhere in the meantime refuses the correction
+   * instead of being overwritten.
+   */
+  const handlePaymentEditSave = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!editingPayment || !editedPaymentDate || isSavingPaymentEdit) return;
+    if (!editingPayment || isSavingPaymentEdit) return;
+
+    const amount = Number(editedPaymentAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setLogToastIsError(true);
+      setLogToast(language === 'ar' ? 'أدخل مبلغًا صحيحًا أكبر من صفر.' : 'Enter a valid amount greater than zero.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editedPaymentDate)) {
+      setLogToastIsError(true);
+      setLogToast(language === 'ar' ? 'تاريخ غير صالح.' : 'That date is not valid.');
+      return;
+    }
+    const correction = { amount, date: editedPaymentDate };
+    const question = language === 'ar'
+      ? `تعديل الدفعة من $${editingPayment.amount.toLocaleString()} بتاريخ ${editingPayment.date.slice(0, 10)} إلى $${amount.toLocaleString()} بتاريخ ${editedPaymentDate}؟ سيُعاد حساب المدفوع والمتبقي.`
+      : `Change this payment from $${editingPayment.amount.toLocaleString()} on ${editingPayment.date.slice(0, 10)} to $${amount.toLocaleString()} on ${editedPaymentDate}? Paid and remaining amounts will be recalculated.`;
+    if (!window.confirm(question)) return;
 
     try {
       setIsSavingPaymentEdit(true);
-      await updateOrder(order.id, {
-        paymentHistory: (order.paymentHistory || []).map((payment) => payment.id === editingPayment.id
-          ? { ...payment, date: editedPaymentDate }
-          : payment),
-      });
-      onOrderChanged?.(withPaymentHistory((order.paymentHistory || []).map((payment) => payment.id === editingPayment.id
-        ? { ...payment, date: editedPaymentDate }
-        : payment)));
+      await updateOrderPayments(
+        order.id,
+        (history) => editPaymentEntry(history, editingPayment.id, correction),
+        { expectedUpdatedAt: order.updatedAt },
+      );
+      const nextHistory = editPaymentEntry(order.paymentHistory || [], editingPayment.id, correction);
+      if (nextHistory) onOrderChanged?.(withPaymentHistory(nextHistory));
       setEditingPayment(null);
       setLogToastIsError(false);
-      setLogToast(language === 'ar' ? 'تم تعديل تاريخ الدفعة وتحديث الحسابات.' : 'Payment date updated and financial reports refreshed.');
+      setLogToast(language === 'ar' ? 'تم تعديل الدفعة وتحديث الحسابات.' : 'Payment corrected and the totals recalculated.');
     } catch (error) {
       setLogToastIsError(true);
-      setLogToast(error instanceof Error ? error.message : 'تعذر تعديل تاريخ الدفعة.');
+      setLogToast(error instanceof Error ? error.message : 'تعذر تعديل الدفعة.');
     } finally {
       setIsSavingPaymentEdit(false);
     }
   };
 
-  const handleDeleteSettlementPayment = async (payment: PaymentEntry) => {
-    if (payment.type !== 'settlement' || settlementDeleteInFlightRef.current) return;
+  /**
+   * Removes one recorded payment. Only that entry goes: the price, the costs
+   * and every other payment are untouched, and the derived totals are
+   * recalculated by the canonical resolver inside the same transaction.
+   */
+  const handleDeletePayment = async (payment: PaymentEntry) => {
+    if (settlementDeleteInFlightRef.current) return;
     const question = language === 'ar'
-      ? `حذف دفعة السداد بقيمة $${payment.amount.toLocaleString()}؟ سيُعاد حساب الرصيد.`
-      : `Delete the $${payment.amount.toLocaleString()} settlement payment? The balance will be recalculated.`;
+      ? `حذف هذه الحركة نهائيًا بقيمة $${payment.amount.toLocaleString()} بتاريخ ${payment.date.slice(0, 10)}؟ سيُعاد حساب المدفوع والمتبقي.`
+      : `Permanently delete this $${payment.amount.toLocaleString()} entry dated ${payment.date.slice(0, 10)}? Paid and remaining amounts will be recalculated.`;
     if (!window.confirm(question)) return;
 
     try {
       settlementDeleteInFlightRef.current = true;
       setDeletingSettlementPaymentId(payment.id);
-      const paymentHistory = (order.paymentHistory || []).filter((entry) => entry.id !== payment.id);
-      await updateOrder(order.id, { paymentHistory });
-      onOrderChanged?.(withPaymentHistory(paymentHistory));
+      await updateOrderPayments(
+        order.id,
+        (history) => removePaymentEntry(history, payment.id),
+        { expectedUpdatedAt: order.updatedAt },
+      );
+      const nextHistory = removePaymentEntry(order.paymentHistory || [], payment.id);
+      if (nextHistory) onOrderChanged?.(withPaymentHistory(nextHistory));
+      if (editingPayment?.id === payment.id) setEditingPayment(null);
       setLogToastIsError(false);
-      setLogToast(language === 'ar' ? 'تم حذف دفعة السداد وتحديث الرصيد.' : 'Settlement payment deleted and balance updated.');
+      setLogToast(language === 'ar' ? 'تم حذف الحركة وتحديث الرصيد.' : 'Entry deleted and the balance updated.');
     } catch (error) {
       setLogToastIsError(true);
-      setLogToast(error instanceof Error ? error.message : (language === 'ar' ? 'تعذر حذف دفعة السداد.' : 'Could not delete the settlement payment.'));
+      setLogToast(error instanceof Error ? error.message : (language === 'ar' ? 'تعذر حذف الحركة.' : 'Could not delete the entry.'));
     } finally {
       settlementDeleteInFlightRef.current = false;
       setDeletingSettlementPaymentId(null);
@@ -494,11 +579,25 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 </div>
               </div>
 
-              <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                {language === 'ar'
-                  ? `سيُسجَّل السداد بتاريخ التنفيذ: ${order.eventDate || order.weddingDate || localDateString()}`
-                  : `This settlement will be recorded on the execution date: ${order.eventDate || order.weddingDate || localDateString()}`}
-              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    {language === 'ar' ? 'تاريخ استلام الدفعة' : 'Payment receipt date'}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                  />
+                </div>
+                <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300 self-end pb-1.5">
+                  {language === 'ar'
+                    ? 'يُسجَّل السداد بتاريخ استلامه فعليًا، وليس بتاريخ التنفيذ.'
+                    : 'The settlement is recorded on the date it was actually received, not the execution date.'}
+                </p>
+              </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -645,17 +744,20 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           </div>
 
           {!isWorker && editingPayment && (
-            <form onSubmit={handlePaymentDateSave} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+            <form onSubmit={handlePaymentEditSave} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-black text-amber-950 dark:text-amber-100">{language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'}</h4>
+                  <h4 className="text-sm font-black text-amber-950 dark:text-amber-100">{language === 'ar' ? 'تصحيح الدفعة' : 'Correct payment'}</h4>
                   <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">{language === 'ar' ? `دفعة ${editingPayment.type === 'deposit' ? 'العربون' : 'السداد'} بقيمة $${editingPayment.amount.toLocaleString()}` : `${editingPayment.type === 'deposit' ? 'Deposit' : 'Settlement'} payment of $${editingPayment.amount.toLocaleString()}`}</p>
                 </div>
                 <button type="button" onClick={() => setEditingPayment(null)} disabled={isSavingPaymentEdit} className="rounded-lg p-1 text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:text-amber-200 dark:hover:bg-amber-900/40" aria-label={language === 'ar' ? 'إلغاء' : 'Cancel'}><X className="h-4 w-4" /></button>
               </div>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <label className="block text-xs font-bold text-amber-950 dark:text-amber-100"><span className="mb-1 block">{language === 'ar' ? 'تاريخ التحصيل الفعلي' : 'Actual collection date'}</span><input type="date" required value={editedPaymentDate} onChange={(event) => setEditedPaymentDate(event.target.value)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-amber-800 dark:bg-slate-900 dark:text-white" /></label>
-                <div className="flex gap-2"><button type="button" onClick={() => setEditingPayment(null)} disabled={isSavingPaymentEdit} className="rounded-xl px-3 py-2 text-xs font-bold text-slate-600 hover:bg-amber-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-amber-900/40">{language === 'ar' ? 'إلغاء' : 'Cancel'}</button><button type="submit" disabled={isSavingPaymentEdit} className="rounded-xl bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-60">{isSavingPaymentEdit ? (language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ التاريخ' : 'Save date')}</button></div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="block text-xs font-bold text-amber-950 dark:text-amber-100"><span className="mb-1 block">{language === 'ar' ? 'المبلغ الصحيح' : 'Corrected amount'}</span><input type="number" min="1" step="1" required value={editedPaymentAmount} onChange={(event) => setEditedPaymentAmount(event.target.value)} className="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 sm:w-36 dark:border-amber-800 dark:bg-slate-900 dark:text-white" /></label>
+                  <label className="block text-xs font-bold text-amber-950 dark:text-amber-100"><span className="mb-1 block">{language === 'ar' ? 'تاريخ التحصيل الفعلي' : 'Actual collection date'}</span><input type="date" required value={editedPaymentDate} onChange={(event) => setEditedPaymentDate(event.target.value)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-amber-800 dark:bg-slate-900 dark:text-white" /></label>
+                </div>
+                <div className="flex gap-2"><button type="button" onClick={() => setEditingPayment(null)} disabled={isSavingPaymentEdit} className="rounded-xl px-3 py-2 text-xs font-bold text-slate-600 hover:bg-amber-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-amber-900/40">{language === 'ar' ? 'إلغاء' : 'Cancel'}</button><button type="submit" disabled={isSavingPaymentEdit} className="rounded-xl bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-60">{isSavingPaymentEdit ? (language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ التعديل' : 'Save correction')}</button></div>
               </div>
             </form>
           )}
@@ -663,8 +765,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <OrderPaymentHistory
             order={order}
             isWorker={isWorker}
-            onEditPayment={handlePaymentDateEdit}
-            onDeleteSettlementPayment={handleDeleteSettlementPayment}
+            onEditPayment={handlePaymentEdit}
+            onDeletePayment={handleDeletePayment}
             deletingPaymentId={deletingSettlementPaymentId}
           />
           <OrderInventorySection order={order} isWorker={isWorker} />

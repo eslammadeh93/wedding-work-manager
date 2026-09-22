@@ -1,14 +1,25 @@
-import { Timestamp, collection, deleteDoc, doc, getCountFromServer, getDoc, getDocs, limit, onSnapshot, orderBy, query, setDoc, startAfter, where, type DocumentData, type QueryConstraint, type QueryDocumentSnapshot, type Unsubscribe } from 'firebase/firestore';
+import { Timestamp, collection, deleteDoc, doc, getCountFromServer, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, setDoc, startAfter, where, type DocumentData, type QueryConstraint, type QueryDocumentSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { auth, db, functions } from '../../firebase/config';
 import { httpsCallable } from 'firebase/functions';
 import { firestorePaths } from '../firestorePaths';
 import { mergeWorkerContact } from '../../utils/workerContact';
 import type { AuthSession } from '../types';
+import { RecordConflictError } from './recordConflict';
+import { applyVersionedUpdate } from './versionedUpdate';
+
+export { RecordConflictError };
 
 export type CompanyCollection = 'orders' | 'workTasks' | 'customers' | 'suppliers' | 'workers' | 'inventory' | 'expenses' | 'categories' | 'activityLogs' | 'notifications';
 export type DataErrorCode = 'UNAUTHENTICATED' | 'NO_COMPANY_CONTEXT' | 'PERMISSION_DENIED' | 'NETWORK_ERROR' | 'NOT_FOUND' | 'VALIDATION_ERROR' | 'CONFLICT' | 'WRITE_FAILED' | 'DELETE_FAILED' | 'INVALID_QUANTITY' | 'INVENTORY_NOT_FOUND' | 'CROSS_TENANT_INVENTORY' | 'INSUFFICIENT_STOCK' | 'INVENTORY_INVARIANT' | 'ORDER_NOT_FOUND' | 'CUSTOMER_NOT_FOUND' | 'ORDER_ALREADY_DELETED' | 'ORDER_STALE' | 'UNKNOWN_ERROR';
 export interface DataOperationResult<T> { success: boolean; data?: T; code?: DataErrorCode; message?: string; error?: unknown; }
-export type OrderPageScope = 'active' | 'finished' | 'archived' | 'all';
+/**
+ * `all` stays operational: it excludes archived and deleted records exactly as
+ * before. `financial` is the accounting view - it adds archived orders and
+ * deleted orders that were retained because they carry posted financial
+ * history. Accounting inclusion is deliberately independent of what the
+ * operational screens choose to hide.
+ */
+export type OrderPageScope = 'active' | 'finished' | 'archived' | 'all' | 'financial';
 export interface OrderPageRequest {
   scope: OrderPageScope;
   pageSize?: number;
@@ -110,8 +121,14 @@ function pageResult<T extends { id: string }>(snapshots: QueryDocumentSnapshot<D
   };
 }
 
-function matchesOrderPageRequest(data: DocumentData, request: OrderPageRequest): boolean {
+export function matchesOrderPageRequest(data: DocumentData, request: OrderPageRequest): boolean {
   const status = String(data.orderStatus || '');
+  if (request.scope === 'financial') {
+    // Archived orders are still real accounting history, and a deleted order
+    // is included only when it was retained for its financial history.
+    if (data.deletedAt && data.financiallyRetained !== true) return false;
+    return !request.paymentStatus || data.paymentStatus === request.paymentStatus;
+  }
   if (data.deletedAt) return false;
   if (request.scope === 'archived') return Boolean(data.archivedAt);
   if (data.archivedAt) return false;
@@ -119,13 +136,55 @@ function matchesOrderPageRequest(data: DocumentData, request: OrderPageRequest):
   return !request.paymentStatus || data.paymentStatus === request.paymentStatus;
 }
 
-const orderPageResult = <T extends { id: string }>(snapshots: QueryDocumentSnapshot<DocumentData>[], request: OrderPageRequest, pageSize: number): PageResult<T> => {
-  const records = snapshots.filter((item) => matchesOrderPageRequest(item.data(), request)).slice(0, pageSize)
-    .map((item) => ({ id: item.id, ...item.data() } as T));
+/**
+ * How many documents one request reads. It must be strictly larger than the
+ * page size, otherwise a full page can never be distinguished from the end of
+ * the collection and the caller stops early - which is how financial history
+ * used to stop dead at the first 100 orders.
+ */
+export const orderScanSize = (pageSize: number) => Math.min(250, pageSize * 2 + 1);
+
+/** The shape this module needs from a Firestore snapshot, so it can be tested. */
+export interface OrderPageSnapshot {
+  id: string;
+  data(): DocumentData;
+}
+
+/**
+ * Turns one scanned window into a page.
+ *
+ * Some filtering happens on the client, so the number of documents read and
+ * the number returned differ. Two things must hold for a paged read to be
+ * trustworthy: the cursor has to point at the last document actually consumed
+ * - never at the end of the scan window, which would skip every matching
+ * document in between - and `hasMore` has to stay true whenever the window was
+ * saturated, even if this particular page came back empty after filtering.
+ */
+export const orderPageResult = <T extends { id: string }>(
+  snapshots: readonly OrderPageSnapshot[],
+  request: OrderPageRequest,
+  pageSize: number,
+  scanSize = orderScanSize(pageSize),
+): PageResult<T> => {
+  const records: T[] = [];
+  let consumedIndex = -1;
+  for (let index = 0; index < snapshots.length && records.length < pageSize; index += 1) {
+    consumedIndex = index;
+    const snapshot = snapshots[index];
+    if (!matchesOrderPageRequest(snapshot.data(), request)) continue;
+    records.push({ id: snapshot.id, ...snapshot.data() } as T);
+  }
+
+  // Documents after the cursor were read but not consumed; the next request
+  // re-reads them, so nothing is skipped and nothing is returned twice.
+  const windowSaturated = snapshots.length >= scanSize;
+  const unconsumed = snapshots.length - 1 - consumedIndex;
+  const hasMore = windowSaturated || unconsumed > 0;
+
   return {
     records,
-    cursor: snapshots.length ? snapshots[snapshots.length - 1] : null,
-    hasMore: snapshots.length > pageSize,
+    cursor: (consumedIndex >= 0 ? snapshots[consumedIndex] : null) as PageResult<T>['cursor'],
+    hasMore: hasMore && consumedIndex >= 0,
   };
 };
 
@@ -136,16 +195,17 @@ const orderPageConstraints = (request: OrderPageRequest, pageSize: number): Quer
     constraints.push(where('archivedAt', '>', ''), orderBy('archivedAt', 'desc'));
   } else {
     if (request.status) constraints.push(where('orderStatus', '==', request.status));
-    else if (request.scope !== 'all') constraints.push(where('orderStatus', 'in', request.scope === 'active' ? activeOrderStatuses : finishedOrderStatuses));
+    else if (request.scope !== 'all' && request.scope !== 'financial') constraints.push(where('orderStatus', 'in', request.scope === 'active' ? activeOrderStatuses : finishedOrderStatuses));
     if (request.paymentStatus) constraints.push(where('paymentStatus', '==', request.paymentStatus));
     if (request.dateFrom) constraints.push(where(dateField, '>=', request.dateFrom));
     if (request.dateTo) constraints.push(where(dateField, '<=', request.dateTo));
     constraints.push(orderBy(dateField, request.scope === 'active' ? 'asc' : 'desc'));
   }
   if (request.cursor) constraints.push(startAfter(request.cursor));
-  // Scan a bounded extra window so soft-deleted legacy documents never leave
-  // visible holes in a page before the scheduled purge removes them.
-  constraints.push(limit(Math.min(100, pageSize * 2)));
+  // A bounded window, deliberately wider than the page, so locally filtered
+  // documents never leave holes and a full page is still distinguishable from
+  // the end of the collection.
+  constraints.push(limit(orderScanSize(pageSize)));
   return constraints;
 };
 
@@ -165,8 +225,7 @@ const orderPageFallbackConstraints = (request: OrderPageRequest, pageSize: numbe
   if (request.cursor) constraints.push(startAfter(request.cursor));
   // This bounded window is deliberately larger than a page because status and
   // payment are temporarily filtered locally until the composite index is ready.
-  const scanSize = Math.min(100, pageSize * 2);
-  constraints.push(limit(scanSize));
+  constraints.push(limit(orderScanSize(pageSize)));
   return constraints;
 };
 
@@ -174,12 +233,9 @@ async function getOrderPageWhileIndexBuilds<T extends { id: string }>(companyId:
   const pageSize = safePageSize(request.pageSize);
   const constraints = orderPageFallbackConstraints(request, pageSize);
   const snapshot = await getDocs(query(collection(db, firestorePaths.orders(companyId)), ...constraints));
-  const matched = snapshot.docs.filter((item) => matchesOrderPageRequest(item.data(), request));
-  return {
-    records: matched.slice(0, pageSize).map((item) => ({ id: item.id, ...item.data() } as T)),
-    cursor: snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : null,
-    hasMore: snapshot.docs.length === Math.min(100, pageSize * 2),
-  };
+  // The same cursor and lookahead rules apply here, so a temporary fallback
+  // page can never silently drop records either.
+  return orderPageResult<T>(snapshot.docs, request, pageSize);
 }
 
 /** All tenant operational paths are constructed here, never in UI components. */
@@ -427,6 +483,54 @@ export const companyDataService = {
   async set<T>(companyId: string, name: CompanyCollection, id: string, value: T, merge = false): Promise<DataOperationResult<T>> {
     try { const path = firestorePaths[name](companyId); warnOnTenantRootCollection(path); await setDoc(doc(db, path, id), value as object, { merge }); return { success: true, data: value }; }
     catch (error) { return { success: false, ...messageFor(error, 'تعذر حفظ البيانات.'), code: 'WRITE_FAILED' }; }
+  },
+  /**
+   * Version-checked update for records an editor can hold open for a while.
+   *
+   * Unlike `set(..., { merge: true })` this never recreates a document: a
+   * transaction update on a missing document fails, so saving a form whose
+   * record was deleted in the meantime reports a conflict instead of
+   * resurrecting a deleted financial record.
+   */
+  async updateExisting<T extends object>(companyId: string, name: CompanyCollection, id: string, value: T, expectedUpdatedAt?: string): Promise<DataOperationResult<T>> {
+    try {
+      const path = firestorePaths[name](companyId); warnOnTenantRootCollection(path);
+      const reference = doc(db, path, id);
+      await runTransaction(db, (transaction) => applyVersionedUpdate(transaction, reference, value as object, expectedUpdatedAt));
+      return { success: true, data: value };
+    } catch (error) {
+      if (error instanceof RecordConflictError) return { success: false, code: error.code, message: error.message, error };
+      return { success: false, ...messageFor(error, 'تعذر حفظ البيانات.'), code: 'WRITE_FAILED' };
+    }
+  },
+  /**
+   * Voids a financial record instead of destroying it: the original entry is
+   * kept and marked, and a separate dated reversal entry cancels its effect
+   * from the day of the void. Both writes commit together, so accounting can
+   * never be left with a void and no reversal - or the reverse.
+   */
+  async voidFinanceEntry<T extends object>(companyId: string, id: string, voidPatch: T, reversalId: string, reversal: object, expectedUpdatedAt?: string): Promise<DataOperationResult<void>> {
+    try {
+      const path = firestorePaths.expenses(companyId); warnOnTenantRootCollection(path);
+      const original = doc(db, path, id);
+      const reversalRef = doc(db, path, reversalId);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(original);
+        if (!snapshot.exists()) throw new RecordConflictError('NOT_FOUND', 'تم حذف هذا السجل. حدّث الصفحة قبل الحفظ.');
+        const current = snapshot.data() || {};
+        if (current.voidedAt) throw new RecordConflictError('CONFLICT', 'تم إلغاء هذا القيد بالفعل.');
+        const currentVersion = typeof current.updatedAt === 'string' ? current.updatedAt : undefined;
+        if (expectedUpdatedAt && currentVersion && expectedUpdatedAt !== currentVersion) {
+          throw new RecordConflictError('CONFLICT', 'تم تعديل هذا السجل من مستخدم آخر. حدّث الصفحة ثم حاول مرة أخرى.');
+        }
+        transaction.set(reversalRef, { ...reversal, companyId });
+        transaction.update(original, voidPatch as object);
+      });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof RecordConflictError) return { success: false, code: error.code, message: error.message, error };
+      return { success: false, ...messageFor(error, 'تعذر إلغاء القيد.'), code: 'WRITE_FAILED' };
+    }
   },
   async remove(companyId: string, name: CompanyCollection, id: string): Promise<DataOperationResult<void>> {
     try { const path = firestorePaths[name](companyId); warnOnTenantRootCollection(path); await deleteDoc(doc(db, path, id)); return { success: true }; }

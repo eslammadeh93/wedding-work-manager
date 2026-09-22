@@ -1,6 +1,8 @@
 import React from 'react';
 import { Car, Check, Clock, DollarSign, FileText, Image as ImageIcon, MessageCircle, Package, Pencil, Phone, Receipt, Trash2, UserCheck, Wrench } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
+import { orderFinancialPosition } from '../../utils/orderPaymentState';
+import { legacyFractionalFinancialFields } from '../../utils/financialValidation';
 import type { Order, PaymentEntry, WorkerMovement } from '../../types';
 import { toTelHref, toWhatsAppHref } from '../../utils/phone';
 import { OrderSourceBadge } from './OrderSourceBadge';
@@ -39,16 +41,46 @@ export const OrderCustomerSection: React.FC<{ order: Order; isWorker: boolean; c
 };
 
 export const OrderFinancialSummary: React.FC<{ order: Order }> = ({ order }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const expenses = (order.workerCost || 0) + (order.transportationCost || 0) + (order.otherExpenses || 0);
+  // The security amount is shown for reference only: it is not a payment and
+  // enters none of the totals beside it. An overpayment is owed back, so it
+  // does not belong in the order's own totals either.
+  const position = orderFinancialPosition(order);
+  const fractionalFields = legacyFractionalFinancialFields(order as unknown as Record<string, unknown>);
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 text-center">
         <div><span className="text-xs text-slate-400 font-semibold">{t('totalPrice')}</span><p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">${order.totalPrice.toLocaleString()}</p></div>
         <div><span className="text-xs text-slate-400 font-semibold">{t('totalPaid')}</span><p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">${(order.totalPaid ?? order.deposit).toLocaleString()}</p></div>
-        <div><span className="text-xs text-slate-400 font-semibold">{t('securityDeposit')}</span><p className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">${(order.securityDeposit || 0).toLocaleString()}</p></div>
+        <div><span className="text-xs text-slate-400 font-semibold">{t('securityDeposit')}</span><p className="text-lg font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">${Number(order.securityDeposit || 0).toLocaleString()}</p><span className="text-[10px] text-slate-400">{language === 'ar' ? 'للعلم فقط' : 'for reference only'}</span></div>
         <div><span className="text-xs text-slate-400 font-semibold">{t('remainingBalance')}</span><p className="text-lg font-bold text-rose-600 dark:text-rose-400 mt-0.5">${order.remainingBalance.toLocaleString()}</p></div>
       </div>
+
+      {position.customerCredit > 0 && (
+        <div className="p-3 rounded-2xl border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300 text-xs font-bold">
+          {language === 'ar'
+            ? `رصيد للعميل: $${position.customerCredit.toLocaleString()} — مدفوع زيادة عن سعر الأوردر ومستحق للعميل.`
+            : `Customer credit: $${position.customerCredit.toLocaleString()} — paid above the order price and owed back.`}
+        </div>
+      )}
+
+      {order.discountInfo && order.discountInfo.trim().length > 0 && (
+        <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60 text-xs">
+          <span className="font-semibold text-slate-400">{language === 'ar' ? 'بيان الخصم' : 'Discount note'}</span>
+          <p className="mt-0.5 font-bold text-slate-900 dark:text-white">{order.discountInfo}</p>
+          <span className="text-[10px] text-slate-400">{language === 'ar' ? 'للتوضيح فقط — السعر النهائي مسجَّل أعلاه.' : 'For reference only — the final price is recorded above.'}</span>
+        </div>
+      )}
+
+      {fractionalFields.length > 0 && (
+        <div role="alert" className="p-3 rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 text-xs font-bold">
+          {language === 'ar'
+            ? `توجد مبالغ بكسور غير صالحة بالجنيه المصري (${fractionalFields.join('، ')}). صححها يدويًا؛ لم يتم تقريبها تلقائيًا.`
+            : `Some amounts are not whole pounds (${fractionalFields.join(', ')}). Correct them by hand; nothing was rounded automatically.`}
+        </div>
+      )}
+
       <div className="p-4 bg-rose-50/30 dark:bg-rose-950/20 rounded-2xl border border-rose-200/60 dark:border-rose-900/40 space-y-3">
         <h4 className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-2"><Receipt className="w-4 h-4 text-rose-500" /><span>{t('orderExpensesSection')}</span></h4>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
@@ -70,10 +102,38 @@ const Metric: React.FC<{ label: string; value: number; className?: string; premi
   </div>
 );
 
-export const OrderPaymentHistory: React.FC<{ order: Order; isWorker: boolean; onEditPayment?: (payment: PaymentEntry) => void; onDeleteSettlementPayment?: (payment: PaymentEntry) => void; deletingPaymentId?: string | null }> = ({ order, isWorker, onEditPayment, onDeleteSettlementPayment, deletingPaymentId }) => {
+/** Legacy security movements: stored, shown as such, financially inert. */
+const isLegacySecurityEntry = (type: string | undefined) => type === 'security_deposit' || type === 'security_refund';
+
+const entryLabel = (type: string | undefined, language: string): string => {
+  if (type === 'settlement') return language === 'ar' ? 'سداد' : 'Settlement';
+  if (type === 'refund') return language === 'ar' ? 'استرداد' : 'Refund';
+  if (isLegacySecurityEntry(type)) return language === 'ar' ? 'تأمين (سجل قديم)' : 'Security (legacy)';
+  return language === 'ar' ? 'عربون' : 'Deposit';
+};
+
+const entryTone = (type: string | undefined): string => {
+  if (type === 'settlement') return 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300';
+  if (type === 'refund') return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300';
+  if (isLegacySecurityEntry(type)) return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300';
+  return 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300';
+};
+
+/**
+ * The recorded movements for an order, each with a correction and a deletion.
+ *
+ * Every row is user-entered, so every row can be fixed or removed: a payment
+ * typed with the wrong amount or date is corrected in place, and one entered
+ * by mistake is deleted outright. Both go through the transactional payment
+ * path, which recalculates the paid total, the remaining balance, the status
+ * and any customer credit from the entries that are actually left. A legacy
+ * security row is editable and deletable in the same way, and because it is
+ * excluded from every calculation neither action can move a financial total.
+ */
+export const OrderPaymentHistory: React.FC<{ order: Order; isWorker: boolean; onEditPayment?: (payment: PaymentEntry) => void; onDeletePayment?: (payment: PaymentEntry) => void; deletingPaymentId?: string | null }> = ({ order, isWorker, onEditPayment, onDeletePayment, deletingPaymentId }) => {
   const { t, language } = useLanguage();
   if (isWorker || !order.paymentHistory?.length) return null;
-  return <div><h4 className="font-bold text-slate-900 dark:text-white text-sm mb-2 flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span>{t('paymentHistory')}</span></h4><div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden text-xs">{order.paymentHistory.map((pay) => <div key={pay.id} className="p-2.5 bg-white dark:bg-slate-800/50 flex items-center justify-between gap-3"><div className="min-w-0"><span className="font-bold text-slate-900 dark:text-white">${pay.amount.toLocaleString()}</span><span className="mx-2 text-slate-400">({pay.method})</span>{pay.type && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${pay.type === 'settlement' ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300' : 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300'}`}>{pay.type === 'settlement' ? (language === 'ar' ? 'سداد' : 'Settlement') : (language === 'ar' ? 'عربون' : 'Deposit')}</span>}{pay.notes && <span className="text-slate-500 italic">- {pay.notes}</span>}</div><div className="flex shrink-0 items-center gap-1.5"><span className="text-slate-400 font-mono">{pay.date}</span>{onEditPayment && <button type="button" onClick={() => onEditPayment(pay)} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/40 dark:hover:text-amber-300" title={language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'} aria-label={language === 'ar' ? 'تعديل تاريخ الدفعة' : 'Edit payment date'}><Pencil className="h-3.5 w-3.5" /></button>}{pay.type === 'settlement' && onDeleteSettlementPayment && <button type="button" onClick={() => onDeleteSettlementPayment(pay)} disabled={deletingPaymentId === pay.id} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300" title={language === 'ar' ? 'حذف دفعة السداد' : 'Delete settlement payment'} aria-label={language === 'ar' ? 'حذف دفعة السداد' : 'Delete settlement payment'}><Trash2 className="h-3.5 w-3.5" /></button>}</div></div>)}</div></div>;
+  return <div><h4 className="font-bold text-slate-900 dark:text-white text-sm mb-2 flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-500" /><span>{t('paymentHistory')}</span></h4><div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden text-xs">{order.paymentHistory.map((pay) => <div key={pay.id} className="p-2.5 bg-white dark:bg-slate-800/50 flex items-center justify-between gap-3"><div className="min-w-0"><span className="font-bold text-slate-900 dark:text-white">${pay.amount.toLocaleString()}</span><span className="mx-2 text-slate-400">({pay.method})</span><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${entryTone(pay.type)}`}>{entryLabel(pay.type, language)}</span>{pay.notes && <span className="text-slate-500 italic"> - {pay.notes}</span>}</div><div className="flex shrink-0 items-center gap-1.5"><span className="text-slate-400 font-mono">{pay.date}</span>{onEditPayment && <button type="button" onClick={() => onEditPayment(pay)} disabled={deletingPaymentId === pay.id} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50 dark:hover:bg-amber-950/40 dark:hover:text-amber-300" title={language === 'ar' ? 'تعديل المبلغ أو التاريخ' : 'Edit amount or date'} aria-label={language === 'ar' ? 'تعديل المبلغ أو التاريخ' : 'Edit amount or date'}><Pencil className="h-3.5 w-3.5" /></button>}{onDeletePayment && <button type="button" onClick={() => onDeletePayment(pay)} disabled={deletingPaymentId === pay.id} className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-300" title={language === 'ar' ? 'حذف الحركة' : 'Delete entry'} aria-label={language === 'ar' ? 'حذف الحركة' : 'Delete entry'}><Trash2 className="h-3.5 w-3.5" /></button>}</div></div>)}</div></div>;
 };
 
 export const OrderInventorySection: React.FC<{ order: Order; isWorker: boolean }> = ({ order, isWorker }) => {

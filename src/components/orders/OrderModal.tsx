@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { newSubmissionId } from '../../utils/submissionId';
 import { createPortal } from 'react-dom';
 import { useModalViewport } from '../../hooks/useModalViewport';
 import { X, Plus, Trash2, Calendar, MapPin, DollarSign, Package, FileText, AlertTriangle, UserCheck, Image, Upload, ExternalLink, Receipt, ChevronDown, Check, Wrench, LoaderCircle } from 'lucide-react';
@@ -44,6 +45,7 @@ interface NewOrderDraft {
   totalPrice?: number;
   deposit?: number;
   securityDeposit?: number;
+  discountInfo?: string;
   workerCost?: number;
   transportationCost?: number;
   otherExpenses?: number;
@@ -221,6 +223,9 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [totalPrice, setTotalPrice] = useState<number>(initialOrder?.totalPrice ?? initialDraft?.totalPrice ?? 0);
   const [deposit, setDeposit] = useState<number>(initialOrder?.deposit ?? initialDraft?.deposit ?? 0);
   const [securityDeposit, setSecurityDeposit] = useState<number>(initialOrder?.securityDeposit ?? initialDraft?.securityDeposit ?? 0);
+  // Discounts are worked out by hand and `totalPrice` is already the final
+  // agreed figure, so this is a note about that figure, not an input to it.
+  const [discountInfo, setDiscountInfo] = useState(initialOrder?.discountInfo || initialDraft?.discountInfo || '');
   const [workerCost, setWorkerCost] = useState<number>(initialOrder?.workerCost ?? initialDraft?.workerCost ?? 0);
   const [transportationCost, setTransportationCost] = useState<number>(initialOrder?.transportationCost ?? initialDraft?.transportationCost ?? 0);
   const [otherExpenses, setOtherExpenses] = useState<number>(initialOrder?.otherExpenses ?? initialDraft?.otherExpenses ?? 0);
@@ -307,7 +312,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       orderNumber, selectedCustomerId, customerName, customerPhone,
       bookingDate, weddingDate, deliveryDate, returnDate, eventLocation,
       locationLink, salesEmployee, responsibleId, responsibleName, responsiblePhone, orderSource, workerId, workerName,
-      workerCanContactCustomer, totalPrice, deposit, securityDeposit,
+      workerCanContactCustomer, totalPrice, deposit, securityDeposit, discountInfo,
       workerCost, transportationCost, otherExpenses, paymentMethod,
       paymentStatus, orderStatus, notes, designImages, reservedItems,
       supplierRentals, attachmentUrlInput, attachmentType, attachments,
@@ -321,7 +326,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     isEdit, draftStorageKey, orderNumber, selectedCustomerId, customerName,
     customerPhone, bookingDate, weddingDate, deliveryDate, returnDate,
     eventLocation, locationLink, salesEmployee, responsibleId, responsibleName, responsiblePhone, orderSource, workerId,
-    workerName, workerCanContactCustomer, totalPrice, deposit, securityDeposit,
+    workerName, workerCanContactCustomer, totalPrice, deposit, securityDeposit, discountInfo,
     workerCost, transportationCost, otherExpenses, paymentMethod, paymentStatus,
     orderStatus, notes, designImages, reservedItems, supplierRentals,
     attachmentUrlInput, attachmentType, attachments,
@@ -569,6 +574,13 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     setAttachmentUrlInput('');
   };
 
+  // Captured once when the editor opens, never refreshed while it stays open.
+  const openedVersionRef = useRef<string | undefined>(initialOrder?.updatedAt);
+  // One identity for this creation attempt, reused by every retry of it. It
+  // becomes the document id, so a retried save writes to the document the
+  // first attempt targeted instead of creating a second order.
+  const submissionIdRef = useRef<string>(newSubmissionId('ord'));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
@@ -617,6 +629,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       totalPrice: Number(totalPrice),
       deposit: Number(deposit),
       securityDeposit: Number(securityDeposit) || 0,
+      discountInfo: discountInfo.trim(),
       workerCost: Number(workerCost) || 0,
       transportationCost: Number(transportationCost) || 0,
       otherExpenses: Number(otherExpenses) || 0,
@@ -635,22 +648,30 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         quantity: Math.max(1, Number(line.quantity) || 1),
       })),
       attachments,
-      paymentHistory: initialOrder?.paymentHistory || [
-        {
-          id: 'pay_init_' + Date.now(),
-          amount: Number(deposit),
-          // Booking date is explicitly the date the deposit was received; using
-          // today's date makes historical monthly cash reports inaccurate.
-          date: bookingDate || localDateString(),
-          method: paymentMethod,
-          type: 'deposit',
-          notes: 'Initial Deposit Payment',
-        },
-      ],
+      // Editing an order never submits payment history: payments are owned by
+      // the order's stored record, and a deposit correction is applied to the
+      // matching entry inside the write transaction. Only a new order brings
+      // its opening deposit entry with it, and only when money was taken.
+      ...(isEdit ? {} : {
+        paymentHistory: Number(deposit) > 0 ? [
+          {
+            id: 'pay_init_' + Date.now(),
+            amount: Number(deposit),
+            // Booking date is explicitly the date the deposit was received; using
+            // today's date makes historical monthly cash reports inaccurate.
+            date: bookingDate || localDateString(),
+            method: paymentMethod,
+            type: 'deposit' as const,
+            notes: 'Initial Deposit Payment',
+          },
+        ] : [],
+      }),
     };
 
     if (isEdit && initialOrder) {
-      await updateOrder(initialOrder.id, payload);
+      // The version this form was opened with. A payment recorded after that
+      // moment makes the save fail instead of overwriting the newer record.
+      await updateOrder(initialOrder.id, payload, { expectedUpdatedAt: openedVersionRef.current });
     } else {
       await addOrder(
         payload,
@@ -659,6 +680,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
           phone: customerPhone,
           notes: `Created via Order ${orderNumber}`,
         },
+        { submissionId: submissionIdRef.current },
       );
     }
     clearDraft();
@@ -1045,11 +1067,14 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="1"
                   value={securityDeposit}
                   onChange={(e) => setSecurityDeposit(Math.max(0, Number(e.target.value)))}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-slate-900 dark:text-white text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  {language === 'ar' ? 'مبلغ محتجز للعميل — لا يُحتسب ضمن سعر الأوردر أو أرباحه.' : 'Held for the customer — never part of the order price or profit.'}
+                </span>
               </div>
 
               <div>
@@ -1059,6 +1084,22 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 <div className="w-full px-3.5 py-2.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-100/60 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 text-sm font-extrabold">
                   ${remainingBalance.toLocaleString()}
                 </div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {language === 'ar' ? 'بيان الخصم (اختياري)' : 'Discount note (optional)'}
+                </label>
+                <input
+                  type="text"
+                  value={discountInfo}
+                  onChange={(e) => setDiscountInfo(e.target.value)}
+                  placeholder={language === 'ar' ? 'مثال: 10% أو 12000 ← 10500' : 'e.g. 10% or 12,000 → 10,500'}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <span className="mt-1 block text-[10px] text-slate-400">
+                  {language === 'ar' ? 'للتوضيح فقط. اكتب السعر النهائي بعد الخصم في خانة إجمالي السعر.' : 'For reference only. Enter the final agreed price in the total price field.'}
+                </span>
               </div>
             </div>
 
@@ -1131,7 +1172,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="1"
                   value={workerCost}
                   onChange={(e) => setWorkerCost(Math.max(0, Number(e.target.value)))}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold outline-none focus:ring-2 focus:ring-rose-500"
@@ -1145,7 +1186,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="1"
                   value={transportationCost}
                   onChange={(e) => setTransportationCost(Math.max(0, Number(e.target.value)))}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold outline-none focus:ring-2 focus:ring-rose-500"
@@ -1159,7 +1200,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 <input
                   type="number"
                   min="0"
-                  step="any"
+                  step="1"
                   value={otherExpenses}
                   onChange={(e) => setOtherExpenses(Math.max(0, Number(e.target.value)))}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold outline-none focus:ring-2 focus:ring-rose-500"

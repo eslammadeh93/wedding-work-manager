@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { X, Building2, Receipt } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { Expense, FinanceType } from '../../types';
 import { localDateString } from '../../utils/localDate';
+import { newSubmissionId } from '../../utils/submissionId';
 
 interface ExpenseModalProps {
   isOpen: boolean;
@@ -55,6 +56,13 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     initialExpense?.notes || initialExpense?.description || ''
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // The version this editor opened with. Saving an expense that someone else
+  // changed - or deleted - in the meantime must fail, not overwrite or revive it.
+  const openedVersionRef = useRef<string | undefined>(initialExpense?.updatedAt);
+  // Same rule as orders: one identity per creation attempt, so a retried save
+  // cannot post the same expense twice.
+  const submissionIdRef = useRef<string>(newSubmissionId('exp'));
 
   if (!isOpen) return null;
 
@@ -81,12 +89,15 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
     }
 
     try {
+      setSaveError(null);
       if (isEdit && initialExpense) {
-        await updateExpense(initialExpense.id, payload);
+        await updateExpense(initialExpense.id, payload, { expectedUpdatedAt: openedVersionRef.current });
       } else {
-        await addExpense(payload);
+        await addExpense(payload, { submissionId: submissionIdRef.current });
       }
       onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'تعذر حفظ المصروف. حاول مرة أخرى.');
     } finally {
       setIsSaving(false);
     }
@@ -164,7 +175,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
               <input
                 type="number"
                 min="0.01"
-                step="any"
+                step="1"
                 required
                 value={amount || ''}
                 onChange={(e) => setAmount(Number(e.target.value))}
@@ -246,6 +257,12 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
             />
           </div>
+
+          {saveError && (
+            <p role="alert" className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+              {saveError}
+            </p>
+          )}
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
             <button

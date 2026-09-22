@@ -72,6 +72,9 @@ test('separates monthly deposits and settlements while deducting booking and com
   assert.equal(result.completedWorkerTransportCosts, 250);
   assert.equal(result.totalMonthlyOrderExpenses, 100);
   assert.equal(result.netMonthlyCash, 1450);
+  // 1,900 + 1,750 of margin for August's scheduled work, plus the 300 the
+  // business kept from the retained cancellation, which it has earned.
+  assert.equal(result.expectedOrderProfit, 3950);
   assert.equal(result.netMonthlyOrderProfit, 3950);
   assert.equal(result.completedOrdersNetProfit, 750);
   assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 1050);
@@ -88,10 +91,13 @@ test('keeps a retained cancelled deposit in finance, separate from upcoming orde
   assert.equal(result.retainedCancelledDeposits, 500);
   assert.equal(result.completedOrdersNetProfit, 0);
   assert.equal(result.completedOrdersNetProfitWithRetainedDeposits, 500);
-  assert.equal(result.advancesFromUpcomingOrders, 0);
-  assert.equal(result.orderCashNet, 500);
-  assert.equal(result.orderCashBalanceToDate, 500);
-  assert.equal(result.collections[0]?.isRetainedDeposit, true);
+  // The plain cancellation received 500 too. That money was really received,
+  // so it stays recorded until a refund movement says otherwise; only the
+  // retained deposit is classified as retained income.
+  assert.equal(result.advancesFromUpcomingOrders, 500);
+  assert.equal(result.orderCashNet, 1000);
+  assert.equal(result.orderCashBalanceToDate, 1000);
+  assert.equal(result.collections.some((collection) => collection.isRetainedDeposit), true);
 });
 
 test('headline net uses completed profit and subtracts only uncompleted-order other expenses', () => {
@@ -109,7 +115,7 @@ test('headline net uses completed profit and subtracts only uncompleted-order ot
   assert.equal(result.netMonthlyCash, 1_250); // 800 + 300 + 200 - 50
 });
 
-test('expected monthly profit includes deposits for bookings executing in a later month', () => {
+test('expected monthly profit adds this-month margin and advances taken for later months', () => {
   const result = calculateMonthlyCash([
     order({
       id: 'this-month', totalPrice: 1_000, workerCost: 100,
@@ -126,7 +132,12 @@ test('expected monthly profit includes deposits for bookings executing in a late
     }),
   ], [], 2026, 7);
 
-  assert.equal(result.netMonthlyOrderProfit, 1_600); // 900 + 500 + 200
+  // 900 from the order executed in August (1,000 - 100), plus the 500 advance
+  // taken in August for a September event, plus the 200 kept from the retained
+  // cancellation.
+  assert.equal(result.expectedOrderProfit, 1_600);
+  // All three orders took money in August: 500 + 500 + 200.
+  assert.equal(result.netOrderCash, 1_200);
 });
 
 test('keeps a future order deposit in its booking month after the order is later completed', () => {
@@ -144,7 +155,9 @@ test('keeps a future order deposit in its booking month after the order is later
 
   assert.equal(result.advancesFromUpcomingOrders, 1_000);
   assert.equal(result.netMonthlyCash, 1_000);
-  assert.equal(result.netMonthlyOrderProfit, 1_000);
+  // The event is in September, so August cannot claim the margin - but the
+  // 1,000 advance really did arrive in August and counts there.
+  assert.equal(result.expectedOrderProfit, 1_000);
 });
 
 test('does not count an old deposit again when its order is completed in a later month', () => {
@@ -263,17 +276,21 @@ const carryOrder = order({
   paymentHistory: [{ id: 'deposit', amount: 1_000, date: '2026-09-01', method: 'cash', type: 'deposit' }],
 });
 
-test('general expenses reduce only carried funds while capital and net order cash stay separate', () => {
+test('capital added is available to the operating balance, and order cash stays separate', () => {
   const result = calculateFinancePeriodCash([carryOrder], carryFinance, '2026-09', '2026-09');
+  // 1,000 carried in + 500 put in - 400 of salaries and rent = 1,100 operating,
+  // then the orders' own 800 on top.
   assert.deepEqual(result, {
     openingBalance: 1_000, capitalAdded: 500, generalExpenses: 400, netOrderCash: 800,
-    remainingCarriedBalance: 600, totalSafeBalance: 1_900,
+    remainingCarriedBalance: 1_100, totalSafeBalance: 1_900,
+    openingCarriedBalance: 1_000, generalOperatingExpenses: 400,
+    remainingOperatingBalance: 1_100, totalTreasuryBalance: 1_900,
   });
   assert.equal(result.netOrderCash, calculateMonthlyCash([carryOrder], carryFinance, 2026, 8).netMonthlyCash);
   assert.equal(result.totalSafeBalance, calculateSafeBalanceToDate([carryOrder], carryFinance, new Date(2026, 8, 30)));
 
   const beforeExpenses = calculateFinancePeriodCash([carryOrder], carryFinance.filter(entry => entry.type === 'capital'), '2026-09', '2026-09');
-  assert.equal(beforeExpenses.remainingCarriedBalance, 1_000);
+  assert.equal(beforeExpenses.remainingCarriedBalance, 1_500);
   assert.equal(beforeExpenses.netOrderCash, result.netOrderCash);
   assert.equal(beforeExpenses.capitalAdded, result.capitalAdded);
 });
@@ -281,26 +298,30 @@ test('general expenses reduce only carried funds while capital and net order cas
 test('editing and deleting a general expense recalculates the remaining carry and total once', () => {
   const edited = carryFinance.map(entry => entry.id === 'salary' ? { ...entry, amount: 600 } : entry);
   const afterEdit = calculateFinancePeriodCash([carryOrder], edited, '2026-09', '2026-09');
-  assert.equal(afterEdit.remainingCarriedBalance, 300);
-  assert.equal(afterEdit.totalSafeBalance, 1_600);
+  assert.equal(afterEdit.remainingCarriedBalance, 800); // 1,000 + 500 - 700
+  assert.equal(afterEdit.totalSafeBalance, 1_600); // unchanged: only the split moved
   assert.equal(afterEdit.netOrderCash, 800);
   assert.equal(afterEdit.capitalAdded, 500);
   const afterDelete = calculateFinancePeriodCash([carryOrder], edited.filter(entry => entry.id !== 'salary'), '2026-09', '2026-09');
-  assert.equal(afterDelete.remainingCarriedBalance, 900);
+  assert.equal(afterDelete.remainingCarriedBalance, 1_400); // 1,000 + 500 - 100
   assert.equal(afterDelete.totalSafeBalance, 2_200);
 });
 
 test('a carried deficit stays visible without reducing the new capital or order cash buckets', () => {
   const overspent = carryFinance.map(entry => entry.id === 'salary' ? { ...entry, amount: 1_200 } : entry);
   const result = calculateFinancePeriodCash([carryOrder], overspent, '2026-09', '2026-09');
-  assert.equal(result.remainingCarriedBalance, -300);
+  // 1,000 carried + 500 put in - 1,300 spent leaves 200 still operating.
+  assert.equal(result.remainingCarriedBalance, 200);
   assert.equal(result.capitalAdded, 500);
   assert.equal(result.netOrderCash, 800);
   assert.equal(result.totalSafeBalance, 1_000);
-  const noCarry = calculateFinancePeriodCash([carryOrder], carryFinance.filter(entry => entry.id !== 'opening-capital'), '2026-09', '2026-09');
+
+  // With nothing carried in, the same spending really is a deficit, and it is
+  // shown as one rather than clamped to zero.
+  const noCarry = calculateFinancePeriodCash([carryOrder], overspent.filter(entry => entry.id !== 'opening-capital'), '2026-09', '2026-09');
   assert.equal(noCarry.openingBalance, 0);
-  assert.equal(noCarry.remainingCarriedBalance, -400);
-  assert.equal(noCarry.totalSafeBalance, 900);
+  assert.equal(noCarry.remainingCarriedBalance, -800); // 0 + 500 - 1,300
+  assert.equal(noCarry.totalSafeBalance, 0);
 });
 
 test('next month carries the previous total and recognizes only that month expenses and completion costs', () => {
@@ -311,7 +332,7 @@ test('next month carries the previous total and recognizes only that month expen
   const result = calculateFinancePeriodCash([completed], finance, '2026-10', '2026-10');
   assert.equal(result.openingBalance, 1_900);
   assert.equal(result.generalExpenses, 500);
-  assert.equal(result.remainingCarriedBalance, 1_400);
+  assert.equal(result.remainingCarriedBalance, 1_400); // 1,900 carried + 0 capital - 500
   assert.equal(result.netOrderCash, 600);
   assert.equal(result.capitalAdded, 0);
   assert.equal(result.totalSafeBalance, 2_000);
@@ -326,7 +347,7 @@ test('range, year and all-period summaries use the opening and movements of the 
     assert.equal(result.capitalAdded, 1_500);
     assert.equal(result.generalExpenses, 400);
     assert.equal(result.netOrderCash, 800);
-    assert.equal(result.remainingCarriedBalance, -400);
+    assert.equal(result.remainingCarriedBalance, 1_100); // 0 + 1,500 - 400
     assert.equal(result.totalSafeBalance, 1_900);
   }
 });

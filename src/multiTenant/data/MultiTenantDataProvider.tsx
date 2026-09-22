@@ -12,6 +12,13 @@ import { companyMembersService } from '../companyMembersService';
 import { calculateSafeBalanceToDate } from '../../utils/monthlyCash';
 import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../../utils/recycleBin';
 import { resolveOrderCustomers } from '../../utils/orderCustomer';
+import { resolveOrderPaymentState, appendPaymentEntry, type OrderPaymentIntent } from '../../utils/orderPaymentState';
+import { assertValidExpense, assertValidOrderFinancials } from '../../utils/financialValidation';
+import { expenseReversalEntry, expenseVoidMetadata, financialHistoryOrders } from '../../utils/financialRetention';
+import { loadFinancialOrderHistory, type FinancialHistoryStatus } from './financialHistory';
+import type { ExpenseAccess } from '../../utils/financialAvailability';
+import { buildFinancialBackup } from '../../utils/financialBackup';
+import { newSubmissionId, submissionIdFor } from '../../utils/submissionId';
 
 const defaultCategories: CategoryItem[] = [];
 const newId = (prefix: string) => `${prefix}_${crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
@@ -41,6 +48,17 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   const [activityLogs, setActivityLogs] = useState<ActivityLogRecord[]>([]); const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [settings, setSettings] = useState<CompanySettings>(initialCompanySettings);
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState<string | null>(null); const [retryVersion, setRetryVersion] = useState(0);
+  // Accounting history is a separate dataset from the operational order list:
+  // the listener above deliberately keeps only a short recent window so the
+  // screens stay fast, which is far too little to total the books from.
+  const [financialOrders, setFinancialOrders] = useState<Order[]>([]);
+  const [financialHistoryStatus, setFinancialHistoryStatus] = useState<FinancialHistoryStatus | undefined>(undefined);
+  const [financialHistoryMessage, setFinancialHistoryMessage] = useState<string | undefined>(undefined);
+  const [financialHistoryLoading, setFinancialHistoryLoading] = useState(true);
+  const [expenseAccess, setExpenseAccess] = useState<ExpenseAccess>('denied');
+  // Bumped whenever a write changes something the books depend on, so the
+  // history reloads once instead of going stale or polling.
+  const [financialDataVersion, setFinancialDataVersion] = useState(0);
 
   // Firestore listeners confirm every write for all connected devices. These
   // local patches cover the small gap before that acknowledgement arrives,
@@ -54,6 +72,8 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   };
   const removeLocal = <T extends { id: string }>(set: React.Dispatch<React.SetStateAction<T[]>>, id: string) => set(current => current.filter(item => item.id !== id));
   const applyLocalWrite = useCallback((name: CompanyCollection, id: string, data: object, merge: boolean) => {
+    // Anything that moves money invalidates the loaded history exactly once.
+    if (name === 'orders' || name === 'expenses') setFinancialDataVersion((version) => version + 1);
     if (name === 'orders') mergeLocal(setOrders, id, data, merge);
     else if (name === 'workTasks') mergeLocal(setWorkTasks, id, data, merge);
     else if (name === 'customers') mergeLocal(setCustomers, id, data, merge);
@@ -123,6 +143,7 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
       : allowed('company:orders:read')
         ? listenLatest<Order>('orders', setOrders, { orderByField: 'eventDate', direction: 'asc', pageSize: 75, from: { field: 'eventDate', value: operationalWindowStart() } })
         : () => undefined;
+    setExpenseAccess(allowed('company:expenses:read') ? 'granted' : 'denied');
     const unsubs = [orderListener];
     let deferredListenersTimer: number | undefined;
     // The operational listener intentionally loads only current orders. Keep a
@@ -143,6 +164,8 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     if (allowed('company:suppliers:read')) unsubs.push(listen<Supplier>('suppliers', (items) => setSuppliers(sortCreated(items))));
     if (allowed('company:workers:read')) unsubs.push(listen<Worker>('workers', (items) => setWorkers(sortCreated(items))));
     if (allowed('company:inventory:read')) unsubs.push(listen<InventoryItem>('inventory', setInventory));
+    // An unreadable collection is not an empty one. The flag lets the screens
+    // withhold expense-dependent figures instead of showing them as zero.
     if (allowed('company:expenses:read')) unsubs.push(listen<Expense>('expenses', (items) => setExpenses(sortCreated(items))));
     if (allowed('company:categories:read')) unsubs.push(listen<CategoryItem>('categories', setCategories));
     if (allowed('company:activity_logs:read')) {
@@ -161,22 +184,66 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   }, [authSession, clear, profile?.workerId, retryVersion]);
 
   const company = useCallback(() => trustedCompanyIdFromSession(authSession), [authSession]);
+  /**
+   * Loads the complete financial dataset, separately from the operational
+   * listener and without touching it. A failure is reported as a failure; the
+   * operational list is never quietly substituted for history that did not
+   * load, because that would silently understate the books.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let companyId = '';
+    try { companyId = trustedCompanyIdFromSession(authSession); } catch { companyId = ''; }
+    const canReadOrders = authSession?.userType === 'company' && authSession.permissions.includes('company:orders:read');
+    if (!companyId || !canReadOrders) {
+      setFinancialOrders([]); setFinancialHistoryStatus(undefined); setFinancialHistoryLoading(false);
+      return () => { cancelled = true; };
+    }
+    setFinancialHistoryLoading(true);
+    void (async () => {
+      const result = await loadFinancialOrderHistory(companyId);
+      if (cancelled) return;
+      setFinancialOrders(result.status === 'error' ? [] : result.records);
+      setFinancialHistoryStatus(result.status);
+      setFinancialHistoryMessage(result.message);
+      setFinancialHistoryLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [authSession, financialDataVersion, retryVersion]);
+  const refreshFinancialHistory = useCallback(() => setFinancialDataVersion((version) => version + 1), []);
+
   const write = useCallback(async <T extends object,>(name: CompanyCollection, id: string, data: T, merge = false) => { const result = await companyDataService.set(company(), name, id, data, merge); if (!result.success) failure(result); applyLocalWrite(name, id, data, merge); return id; }, [applyLocalWrite, company]);
   const remove = useCallback(async (name: CompanyCollection, id: string) => { const result = await companyDataService.remove(company(), name, id); if (!result.success) failure(result); applyLocalRemove(name, id); }, [applyLocalRemove, company]);
-  const addOrder = useCallback(async (data: NewOrderData, newCustomer?: NewOrderCustomer) => {
-    const id = newId('ord'); const customerId = data.customerId || (newCustomer ? newId('cus') : '');
+  const addOrder = useCallback(async (data: NewOrderData, newCustomer?: NewOrderCustomer, options?: { submissionId?: string }) => {
+    // The submission id becomes the document id, so retrying the same save
+    // targets the document that already exists instead of making a second one.
+    const id = submissionIdFor('ord', options?.submissionId);
+    const customerId = data.customerId || (newCustomer ? newId('cus') : '');
     if (!customerId) throw new Error('يرجى اختيار عميل أو إدخال بيانات عميل جديد.');
-    const now = new Date().toISOString(); const companyId = company(); const history = data.paymentHistory || []; const totalPaid = Math.max(data.deposit || 0, history.reduce((sum, entry) => sum + (entry.amount || 0), 0)); const totalPrice = data.totalPrice || 0;
+    const now = new Date().toISOString(); const companyId = company();
+    const history = (data.paymentHistory || []).filter((entry) => Number(entry.amount) > 0);
+    const totalPrice = data.totalPrice || 0;
+    // A new order has no stored history yet, so the canonical resolver simply
+    // totals the entries the form supplied.
+    const financial = resolveOrderPaymentState({ deposit: data.deposit || 0, totalPaid: 0, paymentHistory: [], totalPrice }, { paymentHistory: history, totalPrice });
+    assertValidOrderFinancials({ ...data, ...financial });
+    const totalPaid = financial.totalPaid;
     const eventDate = data.eventDate || data.weddingDate;
-    const order: Order = { ...sanitizeData(data), id, companyId, customerId, eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), archivedAt: null, orderSource: data.orderSource || 'other', workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid', createdAt: now, updatedAt: now };
+    const order: Order = { ...sanitizeData(data), id, companyId, customerId, eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), archivedAt: null, orderSource: data.orderSource || 'other', workerCanContactCustomer: data.workerCanContactCustomer === true, paymentHistory: history, totalPaid, remainingBalance: financial.remainingBalance, paymentStatus: financial.paymentStatus, createdAt: now, updatedAt: now };
     const customer: Customer | undefined = newCustomer ? { ...sanitizeData(newCustomer), id: customerId, companyId, orderIds: [id], createdAt: now, updatedAt: now } : undefined;
     const result = await orderInventoryTransaction.create(companyId, order, customer);
-    if (!result.success) failure(result);
+    // `create` refuses to overwrite an existing order, so a retry of the same
+    // submission comes back as a stale-order conflict. That is this submission
+    // having already succeeded, not a new failure, so the id is returned.
+    if (!result.success) {
+      if (options?.submissionId && result.code === 'ORDER_STALE') return id;
+      failure(result);
+    }
     applyLocalWrite('orders', id, order, false);
     if (customer) applyLocalWrite('customers', customer.id, customer, false);
     return id;
   }, [applyLocalWrite, company]);
-  const updateOrder = useCallback(async (id: string, data: Partial<Order>) => {
+  const updateOrder = useCallback(async (id: string, data: Partial<Order>, options?: { expectedUpdatedAt?: string }) => {
     let old = orders.find((item) => item.id === id);
     if (!old) {
       const fetched = await companyDataService.get<Order>(company(), 'orders', id);
@@ -184,15 +251,51 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     }
     if (!old) throw new Error('لم يتم العثور على الطلب.');
     if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بتعديل الطلب أو حالته.');
-    const paymentHistory = data.paymentHistory || old.paymentHistory || [];
-    const totalPrice = data.totalPrice ?? old.totalPrice;
-    const totalPaid = Math.max(data.deposit ?? old.deposit, paymentHistory.reduce((sum, entry) => sum + (entry.amount || 0), 0));
+    // Derived financial fields are never accepted from a caller: they are
+    // recomputed inside the transaction from the record as it is stored.
+    const { paymentHistory, totalPaid: _storedPaid, remainingBalance: _storedBalance, paymentStatus: _storedStatus, ...editable } = data;
     const eventDate = data.eventDate || data.weddingDate || old.eventDate || old.weddingDate;
-    const patch: Partial<Order> = { ...(sanitizeData(data) as Partial<Order>), eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), paymentHistory, totalPaid, remainingBalance: Math.max(0, totalPrice - totalPaid), paymentStatus: (totalPaid >= totalPrice && totalPrice > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid') as Order['paymentStatus'], updatedAt: new Date().toISOString() };
-    const result = await orderInventoryTransaction.update(company(), id, patch, old.updatedAt);
+    const intent: OrderPaymentIntent = {
+      totalPrice: data.totalPrice ?? old.totalPrice,
+      ...(paymentHistory ? { paymentHistory } : {}),
+      ...(data.deposit !== undefined ? { deposit: Number(data.deposit) } : {}),
+    };
+    const patch: Partial<Order> = { ...(sanitizeData(editable) as Partial<Order>), eventDate, archiveEligibleAt: archiveEligibleAt(eventDate), updatedAt: new Date().toISOString() };
+    assertValidOrderFinancials(patch, old);
+    // A form that was opened earlier passes the version it started from, so a
+    // payment recorded in the meantime is never overwritten.
+    const result = await orderInventoryTransaction.update(company(), id, patch, options?.expectedUpdatedAt ?? old.updatedAt, intent);
     if (!result.success) failure(result);
-    applyLocalWrite('orders', id, patch, true);
+    applyLocalWrite('orders', id, { ...patch, ...resolveOrderPaymentState(old, intent) }, true);
   }, [applyLocalWrite, authSession?.role, company, orders]);
+  /**
+   * Every payment mutation runs against the order as stored right now, so an
+   * open detail screen can never resurrect a payment list it read minutes ago.
+   */
+  /**
+   * The one payment write. `apply` is a reducer over the history as stored
+   * inside the transaction, never a snapshot from the screen, so a payment
+   * recorded while the modal was open is carried through rather than
+   * overwritten. `expectedUpdatedAt` is passed by corrections and deletions,
+   * which must refuse outright if the record moved on; an ordinary append
+   * leaves it out so a retry stays idempotent.
+   */
+  const updateOrderPayments = useCallback(async (
+    id: string,
+    apply: (history: PaymentEntry[]) => PaymentEntry[] | null,
+    options?: { expectedUpdatedAt?: string },
+  ) => {
+    if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بتعديل الطلب أو حالته.');
+    const result = await orderInventoryTransaction.mutateFinancial(company(), id, (current) => {
+      const nextHistory = apply(current.paymentHistory || []);
+      if (!nextHistory) return null;
+      const financial = resolveOrderPaymentState(current, { paymentHistory: nextHistory, totalPrice: current.totalPrice });
+      assertValidOrderFinancials({ ...financial, totalPrice: current.totalPrice }, current);
+      return financial;
+    }, options?.expectedUpdatedAt);
+    if (!result.success) failure(result);
+    if (result.data?.patch) applyLocalWrite('orders', id, result.data.patch, true);
+  }, [applyLocalWrite, authSession?.role, company]);
   const deleteOrder = useCallback(async (id: string) => {
     const result = await orderInventoryTransaction.remove(company(), id);
     if (!result.success) failure(result);
@@ -217,22 +320,45 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   }, [authSession?.role, profile?.workerId, workTasks, write]);
   const deleteWorkTask = useCallback(async (id: string) => { if (authSession?.role === 'worker') throw new Error('لا يُسمح للمنفذ بحذف المهمة.'); await remove('workTasks', id); }, [authSession?.role, remove]);
   const addPaymentToOrder = useCallback(async (id: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => {
-    let order = orders.find((item) => item.id === id);
-    if (!order) {
-      const fetched = await companyDataService.get<Order>(company(), 'orders', id);
-      if (fetched.success) order = fetched.data;
-    }
-    if (!order) throw new Error('لم يتم العثور على الطلب.');
-    // Keep a caller-provided id. Retrying the same action cannot create a
-    // second settlement payment.
-    const paymentId = payment.id || newId('pay');
-    if ((order.paymentHistory || []).some((entry) => entry.id === paymentId)) return;
-    await updateOrder(id, { paymentHistory: [...(order.paymentHistory || []), { ...payment, id: paymentId }] });
-  }, [company, orders, updateOrder]);
-  const addRecord = useCallback(async <T extends object>(name: CompanyCollection, prefix: string, data: T) => { const id = newId(prefix); await write(name, id, { ...sanitizeData(data), id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); return id; }, [write]);
-  const updateRecord = useCallback(async <T extends object>(name: CompanyCollection, id: string, data: T) => write(name, id, { ...sanitizeData(data), updatedAt: new Date().toISOString() }, true), [write]);
+    // Keep a caller-provided id: retrying the same action cannot create a
+    // second settlement payment, and the duplicate check runs against the
+    // record inside the transaction rather than a cached copy.
+    const entry: PaymentEntry = { ...payment, id: payment.id || newId('pay') };
+    await updateOrderPayments(id, (history) => appendPaymentEntry(history, entry));
+  }, [updateOrderPayments]);
+  const addRecord = useCallback(async <T extends object>(name: CompanyCollection, prefix: string, data: T, options?: { submissionId?: string }) => {
+    // Same rule as orders: the submission id is the document id, so a retried
+    // save writes over its own document rather than creating a second expense.
+    const id = submissionIdFor(prefix, options?.submissionId);
+    await write(name, id, { ...sanitizeData(data), id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    return id;
+  }, [write]);
+  // Version-checked so two open editors cannot silently overwrite each other
+  // and a stale editor cannot resurrect a record deleted in the meantime.
+  const updateRecord = useCallback(async <T extends object>(name: CompanyCollection, id: string, data: T, options?: { expectedUpdatedAt?: string }) => {
+    const value = { ...sanitizeData(data), updatedAt: new Date().toISOString() };
+    const result = await companyDataService.updateExisting(company(), name, id, value, options?.expectedUpdatedAt);
+    if (!result.success) failure(result);
+    applyLocalWrite(name, id, value, true);
+  }, [applyLocalWrite, company]);
+  /**
+   * A financial entry is never destroyed. The original stays as evidence, and
+   * a dated reversal entry cancels it from the day of the void, so the month
+   * it was booked in keeps the number it was reported with.
+   */
+  const voidExpense = useCallback(async (id: string) => {
+    const existing = expenses.find((item) => item.id === id);
+    if (!existing) throw new Error('لم يتم العثور على القيد.');
+    if (existing.voidedAt) return;
+    const reversalId = newId('exp');
+    const reversal = expenseReversalEntry(existing, reversalId);
+    const result = await companyDataService.voidFinanceEntry(company(), id, expenseVoidMetadata(reversalId), reversalId, { ...reversal, id: reversalId }, existing.updatedAt);
+    if (!result.success) failure(result);
+    applyLocalWrite('expenses', id, expenseVoidMetadata(reversalId), true);
+    applyLocalWrite('expenses', reversalId, { ...reversal, id: reversalId }, false);
+  }, [applyLocalWrite, company, expenses]);
   const updateSettings = useCallback(async (data: Partial<CompanySettings>) => { const next = { ...settings, ...sanitizeData(data) }; const result = await companyDataService.setSettings(company(), next); if (!result.success) failure(result); }, [company, settings]);
-  const exportBackupJson = useCallback(() => { const companyId = company(); const payload = { version: 1, companyId, exportDate: new Date().toISOString(), settings, customers, suppliers, inventory, orders, expenses, categories }; const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = `Company_${companyId}_Backup.json`; link.click(); URL.revokeObjectURL(url); }, [categories, company, customers, expenses, inventory, orders, settings, suppliers]);
+
   const restoreBackupJson = useCallback(async (json: string) => { try { const parsed = JSON.parse(json); if (parsed.companyId !== company()) throw new Error('ملف النسخة الاحتياطية يخص شركة أخرى.'); throw new Error('استعادة النسخ الاحتياطية للشركات غير متاحة حتى النسخة الآمنة.'); } catch (error) { console.warn(error instanceof Error ? error.message : 'Restore rejected'); return false; } }, [company]);
   const updateWorkerSafe = useCallback(async (id: string, data: Partial<Worker>) => { const result = await companyMembersService.updateWorker({ workerId: id, name: data.fullName, username: data.username, phone: data.phone, jobTitle: data.jobTitle, notes: data.notes }); if (!result.success) throw new Error(result.message); }, []);
   const deleteWorkerSafe = useCallback(async (id: string) => { const result = await companyMembersService.deleteWorker({ workerId: id }); if (!result.success) throw new Error(result.message); }, []);
@@ -268,11 +394,53 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
   }, [deletedOrders, orders]);
   const deletedItems = useMemo(() => buildRecycleBinItems(recycleBinOrders, customers, inventory), [recycleBinOrders, customers, inventory]);
   const checkStockAvailability = useCallback((items: { inventoryItemId: string; quantity: number }[]) => { const warnings = items.flatMap(({ inventoryItemId, quantity }) => { const item = activeInventory.find((candidate) => candidate.id === inventoryItemId); return item && quantity > item.availableQuantity ? [`الكمية المطلوبة من ${item.nameAr} غير متاحة.`] : []; }); return { available: warnings.length === 0, warnings }; }, [activeInventory]);
+  /**
+   * Deleting an order removes it from the screens, not from the books. Orders
+   * that were retained for their posted financial history stay in the dataset
+   * the cash balance is computed from.
+   */
+  const accountingOrders = useMemo(
+    () => financialHistoryOrders(
+      // The financial scope already carries archived and retained-deleted
+      // orders; the operational list and the recycle bin only fill the gap
+      // while that dataset is still loading.
+      resolveOrderCustomers(financialOrders, customers).concat(activeOrders),
+      resolveOrderCustomers(deletedOrders, customers),
+    ),
+    [activeOrders, customers, deletedOrders, financialOrders],
+  );
+  /**
+   * Writes the whole accounting dataset, not the short operational window, and
+   * refuses outright when the financial history is loading, failed, truncated
+   * or unreadable. A backup that is quietly missing most of the ledger is
+   * worse than none, because it looks like one.
+   */
+  const exportBackupJson = useCallback(() => {
+    const payload = buildFinancialBackup({
+      companyId: company(),
+      historyStatus: financialHistoryStatus,
+      historyLoading: financialHistoryLoading,
+      historyMessage: financialHistoryMessage,
+      expenseAccess,
+      accountingOrders,
+      expenses, customers, suppliers, inventory, categories, settings,
+    });
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Company_${payload.companyId}_Financial_Backup.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [accountingOrders, categories, company, customers, expenseAccess, expenses, financialHistoryLoading, financialHistoryMessage, financialHistoryStatus, inventory, settings, suppliers]);
+  /** What a repair run would change, computed without writing anything. */
   const financialTotals = useMemo(() => {
-    const totalCapital = expenses.filter((item) => item.type === 'capital').reduce((sum, item) => sum + (item.amount || 0), 0);
-    const totalGeneralExpenses = expenses.filter((item) => item.type !== 'capital').reduce((sum, item) => sum + (item.amount || 0), 0);
-    return { totalCapital, totalGeneralExpenses, currentCashBalance: calculateSafeBalanceToDate(activeOrders, expenses) };
-  }, [activeOrders, expenses]);
+    // A voided entry keeps its original amount as evidence; the dated reversal
+    // entry is what cancels it, so the two net out in these totals.
+    const effect = (item: Expense) => (item.isReversal ? -(item.amount || 0) : (item.amount || 0));
+    const totalCapital = expenses.filter((item) => item.type === 'capital').reduce((sum, item) => sum + effect(item), 0);
+    const totalGeneralExpenses = expenses.filter((item) => item.type !== 'capital').reduce((sum, item) => sum + effect(item), 0);
+    return { totalCapital, totalGeneralExpenses, currentCashBalance: calculateSafeBalanceToDate(accountingOrders, expenses) };
+  }, [accountingOrders, expenses]);
   const addCategory = useCallback(async (data: NewCategoryData) => {
     const key = sanitizeData(data.key).trim().toLowerCase().replace(/\s+/g, '_');
     const nameEn = sanitizeData(data.nameEn).trim(); const nameAr = sanitizeData(data.nameAr).trim();
@@ -281,6 +449,9 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     await write('categories', category.id, category);
     return category;
   }, [write]);
-  const value = useMemo<DataContextType>(() => ({ orders: activeOrders, workTasks, customers: activeCustomers, suppliers, workers, inventory: activeInventory, expenses, settings, notifications, categories, activityLogs, loading, recycleBinItems: deletedItems, restoreDeletedItem, ...financialTotals, addOrder, updateOrder, deleteOrder, addPaymentToOrder, addWorkTask, updateWorkTask, deleteWorkTask, addWorker: async () => { throw new Error('إنشاء العامل متاح من قسم العمال فقط.'); }, updateWorker: updateWorkerSafe, deleteWorker: deleteWorkerSafe, toggleWorkerStatus: toggleWorkerStatusSafe, addCustomer: (data) => addRecord('customers', 'cus', data), updateCustomer: (id, data) => updateRecord('customers', id, data), deleteCustomer: (id) => write('customers', id, deletionMetadata(), true), addSupplier: (data) => addRecord('suppliers', 'sup', data), updateSupplier: (id, data) => updateRecord('suppliers', id, data), deleteSupplier: (id) => remove('suppliers', id), addInventoryItem: (data) => addRecord('inventory', 'inv', { ...data, reservedQuantity: 0, availableQuantity: data.quantity }), updateInventoryItem: (id, data) => updateRecord('inventory', id, data), deleteInventoryItem: (id) => write('inventory', id, deletionMetadata(), true), addExpense: (data) => { if (data.linkedOrderId && !activeOrders.some((order) => order.id === data.linkedOrderId)) return Promise.reject(new Error('الطلب المرتبط لا يتبع الشركة الحالية.')); return addRecord('expenses', 'exp', data); }, updateExpense: (id, data) => updateRecord('expenses', id, data), deleteExpense: (id) => remove('expenses', id), addCategory, updateSettings, seedSampleData: async () => { throw new Error('البيانات التجريبية معطلة في وضع الشركات.'); }, exportBackupJson, restoreBackupJson, addActivityLog: addActivityLogSafe, recordWorkerMovement: recordWorkerMovementSafe, markNotificationAsRead: async (id) => markNotificationsSafe([id]), clearAllNotifications: async () => markNotificationsSafe(notifications.filter((item) => !item.read).map((item) => item.id)), checkStockAvailability }), [activeCustomers, activeInventory, activeOrders, activityLogs, addActivityLogSafe, addCategory, addOrder, addPaymentToOrder, addRecord, addWorkTask, categories, checkStockAvailability, deleteOrder, deleteWorkTask, deleteWorkerSafe, deletedItems, expenses, exportBackupJson, financialTotals, loading, markNotificationsSafe, notifications, recordWorkerMovementSafe, remove, restoreBackupJson, restoreDeletedItem, settings, suppliers, toggleWorkerStatusSafe, updateOrder, updateRecord, updateSettings, updateWorkTask, updateWorkerSafe, workTasks, workers, write]);
+  const value = useMemo<DataContextType>(() => ({ orders: activeOrders, workTasks, customers: activeCustomers, suppliers, workers, inventory: activeInventory, expenses, settings, notifications, categories, activityLogs, loading, recycleBinItems: deletedItems, restoreDeletedItem, ...financialTotals,
+    accountingOrders,
+    financialData: { status: financialHistoryStatus, loading: financialHistoryLoading, message: financialHistoryMessage, expenseAccess },
+    refreshFinancialHistory, addOrder, updateOrder, updateOrderPayments, deleteOrder, addPaymentToOrder, addWorkTask, updateWorkTask, deleteWorkTask, addWorker: async () => { throw new Error('إنشاء العامل متاح من قسم العمال فقط.'); }, updateWorker: updateWorkerSafe, deleteWorker: deleteWorkerSafe, toggleWorkerStatus: toggleWorkerStatusSafe, addCustomer: (data) => addRecord('customers', 'cus', data), updateCustomer: (id, data) => updateRecord('customers', id, data), deleteCustomer: (id) => write('customers', id, deletionMetadata(), true), addSupplier: (data) => addRecord('suppliers', 'sup', data), updateSupplier: (id, data) => updateRecord('suppliers', id, data), deleteSupplier: (id) => remove('suppliers', id), addInventoryItem: (data) => addRecord('inventory', 'inv', { ...data, reservedQuantity: 0, availableQuantity: data.quantity }), updateInventoryItem: (id, data) => updateRecord('inventory', id, data), deleteInventoryItem: (id) => write('inventory', id, deletionMetadata(), true), addExpense: (data, options) => { try { assertValidExpense(data, (orderId) => activeOrders.some((order) => order.id === orderId)); } catch (error) { return Promise.reject(error); } return addRecord('expenses', 'exp', data, options); }, updateExpense: (id, data, options) => { assertValidExpense(data, (orderId) => activeOrders.some((order) => order.id === orderId), expenses.find((item) => item.id === id)); return updateRecord('expenses', id, data, options); }, deleteExpense: voidExpense, addCategory, updateSettings, seedSampleData: async () => { throw new Error('البيانات التجريبية معطلة في وضع الشركات.'); }, exportBackupJson, restoreBackupJson, addActivityLog: addActivityLogSafe, recordWorkerMovement: recordWorkerMovementSafe, markNotificationAsRead: async (id) => markNotificationsSafe([id]), clearAllNotifications: async () => markNotificationsSafe(notifications.filter((item) => !item.read).map((item) => item.id)), checkStockAvailability }), [activeCustomers, activeInventory, activeOrders, activityLogs, addActivityLogSafe, addCategory, addOrder, addPaymentToOrder, addRecord, addWorkTask, categories, checkStockAvailability, deleteOrder, deleteWorkTask, deleteWorkerSafe, deletedItems, expenses, exportBackupJson, financialTotals, loading, markNotificationsSafe, notifications, recordWorkerMovementSafe, remove, restoreBackupJson, updateOrderPayments, voidExpense, accountingOrders, expenseAccess, financialHistoryLoading, financialHistoryMessage, financialHistoryStatus, refreshFinancialHistory, restoreDeletedItem, settings, suppliers, toggleWorkerStatusSafe, updateOrder, updateRecord, updateSettings, updateWorkTask, updateWorkerSafe, workTasks, workers, write]);
   return <DataContext.Provider value={value}>{loadError && <div role="alert" dir="rtl" className="fixed z-[100] bottom-4 left-4 max-w-sm rounded-xl bg-red-600 text-white px-4 py-3 shadow-lg text-sm"><p>{loadError}</p><button type="button" className="mt-2 underline font-bold" onClick={() => setRetryVersion((version) => version + 1)}>حاول مرة أخرى</button></div>}{children}</DataContext.Provider>;
 }

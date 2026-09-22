@@ -55,6 +55,8 @@ export interface PlatformCompanyOrder {
   otherExpenses: number;
   orderStatus: string;
   notes: string;
+  /** Version this order was read at. The correction call must echo it back. */
+  version?: string;
 }
 
 export interface PlatformCompanyOrderMonth {
@@ -127,12 +129,16 @@ export interface UpdatePlatformCompanyOrderRequest {
   eventLocation: string;
   totalPrice: number;
   deposit: number;
-  totalPaid: number;
   workerCost: number;
   transportationCost: number;
   otherExpenses: number;
   orderStatus: string;
   notes: string;
+  /** The version the correction form was opened with. */
+  expectedVersion: string;
+  /** A deliberate correction of the collected amount; it is recorded as an adjustment entry. */
+  paymentAdjustment?: number;
+  adjustmentReason?: string;
 }
 
 export interface CompanyManagementRequest {

@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   BarChart3,
   Download,
@@ -28,12 +27,13 @@ import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
 import { calculateMonthlyCash, orderCashCollections } from '../../utils/monthlyCash';
-import { reconcileMonthlyCash } from '../../utils/monthlyCashReconciliation';
+import { expenseMetricState, financialExportBlockedReason, orderMetricState } from '../../utils/financialAvailability';
+import { availableFinancialYears, isInFinancialMonth } from '../../utils/financialCalendar';
+import { reconcileMonthlyCash, type ReconciliationReason } from '../../utils/monthlyCashReconciliation';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { getOrderSourceLabel } from '../orders/OrderSourceBadge';
 import { formatMoney, MoneyValue } from '../ui/MoneyValue';
 import { buildCustomerSourceBreakdown, buildMonthlySourceCashNet, buildMonthlyComparison, buildServiceProfitability } from '../../utils/reportInsights';
-import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
@@ -107,15 +107,12 @@ const CashCardDetailsModal: React.FC<{
 
 export const ReportsModule: React.FC = () => {
   const { t, language } = useLanguage();
-  const { orders, expenses, inventory, settings } = useData();
+  const { orders, expenses, inventory, settings, accountingOrders, financialData } = useData();
   const { authSession, profile, isDemo } = useAuth();
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const reportDateBasis: 'event' = 'event';
-  const [reportDataOrders, setReportDataOrders] = useState<typeof orders>([]);
-  const [isLoadingReportData, setIsLoadingReportData] = useState(false);
-  const [reportDataError, setReportDataError] = useState<string | null>(null);
   const [showCashReview, setShowCashReview] = useState(false);
   const [showNetCashBreakdown, setShowNetCashBreakdown] = useState(false);
   const [selectedCashCard, setSelectedCashCard] = useState<CashCardKey | null>(null);
@@ -127,57 +124,80 @@ export const ReportsModule: React.FC = () => {
   }, [authSession, isDemo, profile?.role]);
   const usesReportQuery = USE_MULTI_TENANT_DATA && Boolean(companyId);
 
-  useEffect(() => {
-    if (!usesReportQuery || !companyId) return;
-    let cancelled = false;
-    setIsLoadingReportData(true); setReportDataError(null);
-    void (async () => {
-      const collected: typeof orders = [];
-      let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      // Cash includes booking expenses for future-year events and historical
-      // safe balances. Load the same history as the expense ledger, on demand.
-      for (let page = 0; page < 50; page += 1) {
-        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, { scope: 'all', pageSize: 100, cursor });
-        if (!result.success || !result.data) {
-          if (!cancelled) setReportDataError(result.message || 'تعذر تحميل بيانات التقرير.');
-          break;
-        }
-        collected.push(...result.data.records);
-        if (!result.data.hasMore || !result.data.cursor) break;
-        cursor = result.data.cursor;
-        if (page === 49 && !cancelled) setReportDataError('تجاوزت بيانات التقرير حد التحميل؛ الأرقام المعروضة غير مكتملة.');
-      }
-      if (!cancelled) { setReportDataOrders(collected); setIsLoadingReportData(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [companyId, selectedYear, usesReportQuery]);
+  // The financial dataset comes from the provider's single loader, which also
+  // reloads it when a payment, refund or expense changes. Reports no longer
+  // runs its own paging loop, so Finance and Reports can no longer disagree.
+  const financialState = expenseMetricState({
+    historyStatus: financialData.status,
+    historyLoading: financialData.loading,
+    historyMessage: financialData.message,
+    expenseAccess: financialData.expenseAccess,
+  });
+  const orderOnlyState = orderMetricState({
+    historyStatus: financialData.status,
+    historyLoading: financialData.loading,
+    historyMessage: financialData.message,
+    expenseAccess: financialData.expenseAccess,
+  });
+  const exportBlockedReason = financialExportBlockedReason({
+    historyStatus: financialData.status,
+    historyLoading: financialData.loading,
+    historyMessage: financialData.message,
+    expenseAccess: financialData.expenseAccess,
+  });
+  const reportDataError = orderOnlyState.available === true ? null : orderOnlyState.message;
+  const isLoadingReportData = financialData.loading;
 
-  const sourceOrders = usesReportQuery ? reportDataOrders : orders;
+  // A failed or partial history is reported as such; substituting the short
+  // operational window here would understate the books while looking valid.
+  const sourceOrders = usesReportQuery ? accountingOrders : orders;
 
-  const availableYears = useMemo(() => {
-    const years = new Set<number>([new Date().getFullYear()]);
-    sourceOrders.forEach((order) => {
-      const year = new Date(order.eventDate || order.weddingDate).getFullYear();
-      if (Number.isFinite(year)) years.add(year);
-    });
-    expenses.forEach((expense) => {
-      const year = new Date(expense.date).getFullYear();
-      if (Number.isFinite(year)) years.add(year);
-    });
-    return [...years].sort((a, b) => b - a);
-  }, [expenses, sourceOrders]);
+  // A named explanation per reconciliation reason, so an order that differs
+  // says which rule produced its two figures. Read-only: nothing here repairs,
+  // dates or guesses at anything.
+  const reasonText: Record<ReconciliationReason, { ar: string; en: string }> = {
+    'deleted-order': {
+      ar: 'الأوردر محذوف: الفلوس التي دخلت فعلًا تبقى محسوبة، لكن لا ربح متوقع منه لأن الشغل لن يتم.',
+      en: 'Deleted order: the cash it really took still counts, but it forecasts no margin because the work will not happen.',
+    },
+    'cancelled-no-retention': {
+      ar: 'أوردر ملغي بدون احتجاز: لا يُحتسب له ربح، والمبلغ المحصّل يظل مسجّلًا في شهره، وأي استرداد يظهر في شهره.',
+      en: 'Cancelled with nothing retained: no margin is recognized, the collected cash stays in its own month, and any refund shows in its month.',
+    },
+    'retained-cancellation': {
+      ar: 'إلغاء مع احتجاز العربون: الربح يُعترف به في شهر حدث الإلغاء، وقد يختلف عن شهر دخول الفلوس.',
+      en: 'Cancelled with the deposit retained: profit is recognized in the month the cancellation happened, which can differ from the month the cash arrived.',
+    },
+    'collection-after-event-month': {
+      ar: 'موعد التنفيذ في شهر سابق: ربح الأوردر اتحسب في شهر تنفيذه، والمبلغ الذي وصل هذا الشهر فلوس فقط وليس ربحًا جديدًا.',
+      en: 'The event was in an earlier month: its margin was recognized there, so money arriving this month is cash only, not new profit.',
+    },
+    'missing-event-date': {
+      ar: 'لا يوجد تاريخ تنفيذ مسجّل للأوردر، فلا يمكن نسب ربحه المتوقع لأي شهر. سجّل تاريخ المناسبة.',
+      en: 'The order has no recorded event date, so no month can claim its expected margin. Record the event date.',
+    },
+    'advance-for-future-event': {
+      ar: 'موعد التنفيذ في شهر قادم: يُحتسب هذا الشهر المقدَّم المحصَّل فقط في حدود سعر الأوردر، والربح الكامل في شهر التنفيذ.',
+      en: 'The event is in a later month: only this month’s advance counts, capped at the order price, with the full margin in the execution month.',
+    },
+    'uncollected-this-month': {
+      ar: 'موعد التنفيذ هذا الشهر: يُحتسب كامل ربح الأوردر حتى لو لم يُحصَّل بعد، فالفرق غالبًا رصيد متبقٍ لم يدخل الخزنة.',
+      en: 'The event is this month: the whole margin counts even if it has not been collected, so the gap is usually an unpaid balance.',
+    },
+    other: {
+      ar: 'راجع دفعات هذا الأوردر وتكاليفه وحالة تنفيذه.',
+      en: 'Review this order’s payments, costs and completion status.',
+    },
+  };
+  const availableYears = useMemo(
+    () => availableFinancialYears(sourceOrders, expenses),
+    [expenses, sourceOrders],
+  );
 
   // Filtered orders & company finances by month/year & date basis
-  const reportOrders = sourceOrders.filter((o) => {
-    const targetDateStr = o.eventDate || o.weddingDate;
-    const d = new Date(targetDateStr);
-    return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth;
-  });
+  const reportOrders = sourceOrders.filter((o) => isInFinancialMonth(o.eventDate || o.weddingDate, selectedYear, selectedMonth));
 
-  const monthExpenses = expenses.filter((e) => {
-    const d = new Date(e.date);
-    return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth;
-  });
+  const monthExpenses = expenses.filter((e) => isInFinancialMonth(e.date, selectedYear, selectedMonth));
 
   const monthCapitalList = monthExpenses.filter((e) => e.type === 'capital' || e.category === 'رأس مال');
   const monthGeneralExpensesList = monthExpenses.filter((e) => e.type !== 'capital' && e.category !== 'رأس مال');
@@ -337,6 +357,9 @@ export const ReportsModule: React.FC = () => {
 
   // PDF Export Function
   const handleExportPdf = () => {
+    // An exported figure leaves the app with nothing on it to say the inputs
+    // were partial, so an incomplete dataset never gets exported at all.
+    if (exportBlockedReason) return;
     const doc = new jsPDF();
 
     const title = language === 'ar' ? settings.companyNameAr : settings.companyNameEn;
@@ -390,6 +413,7 @@ export const ReportsModule: React.FC = () => {
 
   // Excel Export Function
   const handleExportExcel = () => {
+    if (exportBlockedReason) return;
     const summaryData = [
       { Metric: 'Company', Value: settings.companyNameEn },
       { Metric: 'Period', Value: `${selectedMonth + 1}/${selectedYear}` },
@@ -477,20 +501,38 @@ export const ReportsModule: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleExportPdf}
-            className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-colors"
+            disabled={Boolean(exportBlockedReason)}
+            title={exportBlockedReason || undefined}
+            className="px-4 py-2 bg-rose-500 hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-colors"
           >
             <FileText className="w-4 h-4" />
             <span>{t('exportPdf')}</span>
           </button>
           <button
             onClick={handleExportExcel}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-colors"
+            disabled={Boolean(exportBlockedReason)}
+            title={exportBlockedReason || undefined}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-colors"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>{t('exportExcel')}</span>
           </button>
         </div>
       </div>
+
+      {(reportDataError || isLoadingReportData || financialState.available !== true) && (
+        <div
+          role={reportDataError ? 'alert' : undefined}
+          className={`rounded-2xl border px-4 py-3 text-xs font-bold ${reportDataError
+            ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300'
+            : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'}`}
+        >
+          <p>{reportDataError || (isLoadingReportData ? 'جارٍ تحميل السجل المالي…' : financialState.available !== true ? financialState.message : '')}</p>
+          {financialState.available !== true && financialState.reason === 'permission' && (
+            <p className="mt-1 font-medium">الأرقام التي تعتمد على المصروفات ورأس المال مخفية لهذا السبب، ولم تُحتسب كصفر.</p>
+          )}
+        </div>
+      )}
 
       {/* Month selector: cash is always calculated by real transaction dates. */}
       <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
@@ -530,6 +572,7 @@ export const ReportsModule: React.FC = () => {
         </div>
         {reportDataError && <p role="alert" className="w-full text-xs font-bold text-rose-600 dark:text-rose-400">{reportDataError}</p>}
       </div>
+
 
       {/* Growth and profitability insights for the selected year/month. */}
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -639,17 +682,40 @@ export const ReportsModule: React.FC = () => {
                   <div><p className="text-[10px] text-slate-500">{language === 'ar' ? 'الربح المتوقع من الأوردر' : 'Expected from order'}</p><MoneyValue amount={item.expectedContribution} className="mt-0.5 block font-black text-slate-800 dark:text-slate-100" /></div>
                   <div><p className="text-[10px] text-slate-500">{language === 'ar' ? 'المحتسب في فلوس الشهر' : 'Counted in monthly cash'}</p><MoneyValue amount={item.cashContribution} className="mt-0.5 block font-black text-emerald-700 dark:text-emerald-300" /></div>
                 </div>
-                <p className="mt-2 text-[11px] leading-5 text-slate-600 dark:text-slate-300">{item.difference > 0 ? (language === 'ar' ? 'الربح المتوقع من هذا الأوردر أكبر من المبلغ الذي دخل حساب الشهر؛ راجع الدفعة أو الرصيد المتبقي وحالة تنفيذ الأوردر.' : 'This order’s forecast is higher than the cash counted this month; review its payment, remaining balance, and completion status.') : (language === 'ar' ? 'المبلغ الداخل في حساب الشهر أكبر من الربح المتوقع لهذا الأوردر؛ راجع الدفعات المسجلة والتكاليف.' : 'Cash counted this month is higher than this order’s forecast; review its payments and costs.')}</p>
+                <p className="mt-2 text-[11px] leading-5 text-slate-600 dark:text-slate-300">{language === 'ar' ? reasonText[item.reason].ar : reasonText[item.reason].en}</p>
               </div>)}
             </div>
           </div>}
 
           {cashReconciliation.issues.length > 0 && <div className="mt-4 border-t border-amber-200/80 pt-4 dark:border-amber-900/60">
-            <p className="mb-2 text-xs font-black text-slate-800 dark:text-slate-100">{language === 'ar' ? 'بيانات تحتاج مراجعة' : 'Data needing review'}</p>
+            <p className="mb-1 text-xs font-black text-slate-800 dark:text-slate-100">{language === 'ar' ? `بيانات تحتاج مراجعة — ${selectedMonthName}` : `Data needing review — ${selectedMonthName}`}</p>
+            <p className="mb-2 text-[11px] leading-5 text-slate-500">{language === 'ar' ? 'أوردرات لها حركة مالية في هذا الشهر فقط: دفعة أو استرداد بتاريخ الشهر، أو موعد تنفيذ فيه، أو حدث إلغاء خلاله.' : 'Only orders with activity in this month: a payment or refund dated in it, an event scheduled in it, or a cancellation event during it.'}</p>
             <ul className="space-y-1.5 text-xs leading-5 text-rose-700 dark:text-rose-300">
               {cashReconciliation.issues.slice(0, 8).map(issue => <li key={issue.id}>{language === 'ar' ? issue.messageAr : issue.messageEn}</li>)}
             </ul>
           </div>}
+        </div>}
+
+        {/*
+          Faults that are true of the record in every month. They are kept
+          visible whatever month is selected, and deliberately sit outside the
+          month panel: none of them is part of the selected month's difference.
+        */}
+        {showCashReview && cashReconciliation.globalIssues.length > 0 && <div className="rounded-2xl border border-slate-300 bg-slate-50 p-4 md:p-5 dark:border-slate-700 dark:bg-slate-900/40">
+          <div className="flex gap-2.5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" />
+            <div>
+              <h4 className="font-black text-slate-900 dark:text-white">{language === 'ar' ? 'مشاكل بيانات عامة — كل الفترات' : 'General data problems — all periods'}</h4>
+              <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                {language === 'ar'
+                  ? 'مشاكل في السجل نفسه وليست تابعة لشهر معيّن، ولا تدخل في فرق مراجعة هذا الشهر. تظهر دائمًا مهما كان الشهر المختار.'
+                  : 'Problems with the record itself, belonging to no single month. They are not part of this month’s difference and stay visible whichever month is selected.'}
+              </p>
+            </div>
+          </div>
+          <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
+            {cashReconciliation.globalIssues.slice(0, 8).map(issue => <li key={issue.id}>{language === 'ar' ? issue.messageAr : issue.messageEn}</li>)}
+          </ul>
         </div>}
 
         {/* The headline mirrors the operational cash formula shown to the user. */}

@@ -21,12 +21,24 @@ import { googleDriveService } from '../../multiTenant/googleDriveService';
 export const SettingsModule: React.FC = () => {
   const { t, language, setLanguage } = useLanguage();
   const { darkMode, toggleDarkMode } = useTheme();
+
   const {
     settings,
     updateSettings,
     exportBackupJson,
     seedSampleData,
   } = useData();
+  // The backup refuses to write a file when the financial history is
+  // incomplete, so the refusal has to be shown rather than swallowed.
+  const [backupError, setBackupError] = React.useState<string | null>(null);
+  const handleExportBackup = () => {
+    try {
+      setBackupError(null);
+      exportBackupJson();
+    } catch (error) {
+      setBackupError(error instanceof Error ? error.message : 'تعذر أخذ نسخة احتياطية كاملة.');
+    }
+  };
 
   const [companyNameAr, setCompanyNameAr] = useState(settings.companyNameAr);
   const [companyNameEn, setCompanyNameEn] = useState(settings.companyNameEn);
@@ -404,11 +416,17 @@ export const SettingsModule: React.FC = () => {
             : 'You can export a backup of your company data now. Backup restore will be available in a future release after secure data review before import.'}
         </p>
 
+        {backupError && (
+          <p role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
+            {backupError}
+          </p>
+        )}
+
         <div className="max-w-sm">
           {/* Export JSON */}
           <button
             type="button"
-            onClick={exportBackupJson}
+            onClick={handleExportBackup}
             className="w-full p-4 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-start flex flex-col justify-between cursor-pointer transition-colors"
           >
             <Download className="w-5 h-5 text-amber-500 mb-2" />

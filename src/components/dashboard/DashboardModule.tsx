@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   DollarSign,
   TrendingUp,
@@ -17,7 +17,9 @@ import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
 import { MobileManagerNav } from '../MobileManagerNav';
-import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
+import { expenseMetricState, orderMetricState } from '../../utils/financialAvailability';
+import { calculateMonthlyCash } from '../../utils/monthlyCash';
+import { isInFinancialMonth, recentMonthWindows } from '../../utils/financialCalendar';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { OrderSourceBadge } from '../orders/OrderSourceBadge';
 import { MoneyValue } from '../ui/MoneyValue';
@@ -43,33 +45,51 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   const { t, language } = useLanguage();
   const { profile } = useAuth();
   const { isDemo, resetDemo } = useDemoMode();
-  const { orders, inventory, activityLogs, totalCapital, totalGeneralExpenses, currentCashBalance } = useData();
+  const { orders, inventory, activityLogs, expenses, accountingOrders, totalCapital, totalGeneralExpenses, currentCashBalance, financialData } = useData();
+  // These three cards are totals of the whole book. While the financial
+  // history is still loading, failed, or is unreadable for this user, the
+  // figure would be an understatement rather than a balance, so the card
+  // says so instead of showing a number that looks authoritative.
+  const financialInputs = {
+    historyStatus: financialData.status,
+    historyLoading: financialData.loading,
+    historyMessage: financialData.message,
+    expenseAccess: financialData.expenseAccess,
+  };
+  const cashState = expenseMetricState(financialInputs);
+  const expenseState = expenseMetricState(financialInputs);
+  // Expected profit is built from orders alone, so it stays available to a
+  // viewer who cannot read the expense ledger.
+  const orderProfitState = orderMetricState(financialInputs);
 
   // Metrics Calculations
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 
-  const bookingsThisMonth = orders.filter((o) => {
-    const d = new Date(o.bookingDate || o.createdAt);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  }).length;
+  // Date-only values are compared as calendar days. Parsing them as instants
+  // pushed a first-of-the-month record into the previous month for every
+  // viewer west of Greenwich.
+  const bookingsThisMonth = orders.filter((o) => isInFinancialMonth(o.bookingDate || o.createdAt, currentYear, currentMonth)).length;
 
-  const eventsThisMonth = orders.filter((o) => {
-    const d = new Date(o.eventDate || o.weddingDate);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  }).length;
+  const eventsThisMonth = orders.filter((o) => isInFinancialMonth(o.eventDate || o.weddingDate, currentYear, currentMonth)).length;
 
-  const monthlyOrders = orders.filter((o) => {
-    const d = new Date(o.createdAt || o.weddingDate);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  });
-
-  const monthlyRevenue = monthlyOrders.reduce((sum, order) => sum + recordedOrderPayment(order), 0);
-
-  const monthlyOrderExpenses = monthlyOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
-
-  // Order profitability stays independent from the company capital/expense ledger.
-  const netProfit = monthlyRevenue - monthlyOrderExpenses;
+  /**
+   * The dashboard's money cards come from the same calculation Finance and
+   * Reports publish, over the same complete accounting dataset. They used to
+   * be derived here instead - totalling whatever each order had ever been paid,
+   * grouped by the month the order was created - which answered a different
+   * question every time and disagreed with the other two screens.
+   */
+  const monthSummary = useMemo(
+    () => calculateMonthlyCash(accountingOrders, expenses, currentYear, currentMonth),
+    [accountingOrders, currentMonth, currentYear, expenses],
+  );
+  // Actual money the month's orders produced, after the costs recognized in it.
+  const netOrderCash = monthSummary.netOrderCash;
+  // The cost side of that same figure, so the two cards cannot contradict.
+  const recognizedOrderCosts = monthSummary.collections.reduce((total, collection) => total + collection.amount, 0) - netOrderCash;
+  // Contract margin for the work scheduled this month, whatever has been paid.
+  const expectedOrderProfit = monthSummary.expectedOrderProfit;
   const firstName = profile?.displayName?.trim().split(/\s+/)[0] || (language === 'ar' ? 'مدير' : 'Manager');
 
   const totalOrdersCount = orders.length;
@@ -92,27 +112,18 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
     cancelled: orders.filter((o) => o.orderStatus === 'cancelled' || o.orderStatus === 'cancelled_deposit_retained').length,
   };
 
-  // 6 Month Revenue Chart based on real orders & expenses
-  const monthsData = [5, 4, 3, 2, 1, 0].map((offset) => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - offset);
-    const m = d.getMonth();
-    const y = d.getFullYear();
-    const monthName = d.toLocaleString(language === 'ar' ? 'ar' : 'en-US', { month: 'short' });
-
-    const monthOrders = orders.filter((o) => {
-      const od = new Date(o.createdAt || o.weddingDate);
-      return od.getMonth() === m && od.getFullYear() === y;
-    });
-
-    const rev = monthOrders.reduce((acc, o) => acc + o.totalPrice, 0);
-
-    const orderExp = monthOrders.reduce((sum, order) => sum + completedOrderFulfillmentCosts(order) + (order.otherExpenses || 0), 0);
-
-    const exp = orderExp;
-
-    return { name: monthName, rev, exp };
-  });
+  // 6 Month Revenue Chart based on real orders & expenses.
+  // The window is built by shifting a day-1 anchor: subtracting a month from
+  // today's date would ask for 31 February on the 31st of March and land back
+  // in March, reporting one month twice and skipping another entirely.
+  const monthsData = useMemo(() => recentMonthWindows(6).map((window) => {
+    const monthName = window.anchor.toLocaleString(language === 'ar' ? 'ar' : 'en-US', { month: 'short' });
+    const summary = calculateMonthlyCash(accountingOrders, expenses, window.year, window.month);
+    const collected = summary.collections.reduce((total, collection) => total + collection.amount, 0);
+    // The trend plots the same two figures as the cards above it, month by
+    // month, rather than a third definition of its own.
+    return { name: monthName, rev: collected, exp: collected - summary.netOrderCash };
+  }), [accountingOrders, expenses, language]);
 
   const maxVal = Math.max(...monthsData.map((m) => Math.max(m.rev, m.exp)), 1000);
 
@@ -167,13 +178,19 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           </button>
         </div>
 
+        {cashState.available !== true && (
+          <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] font-bold text-amber-300">{cashState.message}</p>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
           {/* Total Capital */}
           <div className="min-w-0 overflow-hidden p-3.5 bg-white/80 dark:bg-slate-800/80 rounded-xl border border-emerald-500/30">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('totalCapital')}
             </span>
-            <MoneyValue amount={totalCapital} className="mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black text-emerald-400" />
+            {expenseState.available === true
+              ? <MoneyValue amount={totalCapital} className="mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black text-emerald-400" />
+              : <span title={expenseState.message} className="mt-1 block text-[11px] font-bold text-slate-400">—</span>}
           </div>
 
           {/* Total General Expenses */}
@@ -181,7 +198,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('totalGeneralExpenses')}
             </span>
-            <MoneyValue amount={totalGeneralExpenses} className="mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black text-rose-400" />
+            {expenseState.available === true
+              ? <MoneyValue amount={totalGeneralExpenses} className="mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black text-rose-400" />
+              : <span title={expenseState.message} className="mt-1 block text-[11px] font-bold text-slate-400">—</span>}
           </div>
 
           {/* Current Cash Balance */}
@@ -189,7 +208,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               {t('currentCashBalance')}
             </span>
-            <MoneyValue amount={currentCashBalance} className={`mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black ${currentCashBalance >= 0 ? 'text-amber-400' : 'text-rose-400'}`} />
+            {cashState.available === true
+              ? <MoneyValue amount={currentCashBalance} className={`mt-1 text-[clamp(0.875rem,2.1vw,1.25rem)] font-black ${currentCashBalance >= 0 ? 'text-amber-400' : 'text-rose-400'}`} />
+              : <span title={cashState.message} className="mt-1 block text-[11px] font-bold text-slate-400">—</span>}
           </div>
         </div>
       </div>
@@ -234,20 +255,22 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           </span>
         </div>
 
-        {/* Monthly Revenue */}
+        {/* Net Order Cash - the same figure Finance publishes */}
         <div className="p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              {t('monthlyRevenue')}
+              {language === 'ar' ? 'صافي فلوس الأوردرات' : 'Net Order Cash'}
             </span>
             <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <MoneyValue amount={monthlyRevenue} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-slate-900 dark:text-white tracking-tight" />
+          {cashState.available === true
+            ? <MoneyValue amount={netOrderCash} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-slate-900 dark:text-white tracking-tight" />
+            : <span title={cashState.message} className="mt-3 block text-sm font-bold text-slate-400">—</span>}
           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1 mt-1.5">
             <ArrowUpRight className="w-3 h-3" />
-            Active month billing
+            {language === 'ar' ? 'المحصَّل فعليًا ناقص تكاليف الشهر' : 'Collected this month, less this month’s order costs'}
           </span>
         </div>
 
@@ -261,9 +284,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
               <TrendingDown className="w-4 h-4" />
             </div>
           </div>
-          <MoneyValue amount={monthlyOrderExpenses} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-slate-900 dark:text-white tracking-tight" />
+          {cashState.available === true
+            ? <MoneyValue amount={recognizedOrderCosts} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black text-slate-900 dark:text-white tracking-tight" />
+            : <span title={cashState.message} className="mt-3 block text-sm font-bold text-slate-400">—</span>}
           <span className="text-[10px] text-rose-500 font-bold uppercase tracking-wider block mt-1.5">
-            {language === 'ar' ? 'تكاليف مرتبطة بالأوردرات فقط' : 'Direct order costs only'}
+            {language === 'ar' ? 'التكاليف المحتسبة على الشهر فقط' : 'Order costs recognized in this month'}
           </span>
         </div>
 
@@ -271,15 +296,17 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
         <div className="p-5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              {t('netProfit')}
+              {language === 'ar' ? 'الربح المتوقع خلال الشهر' : 'Expected Order Profit'}
             </span>
             <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <MoneyValue amount={netProfit} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black premium-gold tracking-tight" />
+          {orderProfitState.available === true
+            ? <MoneyValue amount={expectedOrderProfit} className="mt-3 text-[clamp(1.25rem,5vw,1.5rem)] font-black premium-gold tracking-tight" />
+            : <span title={orderProfitState.message} className="mt-3 block text-sm font-bold text-slate-400">—</span>}
           <span className="text-[10px] premium-gold font-bold uppercase tracking-wider block mt-1.5">
-            {language === 'ar' ? 'ربح الأوردرات فقط' : 'Orders profit only'}
+            {language === 'ar' ? 'كامل قيمة أوردرات الشهر ناقص تكاليفها' : 'Full contract value of this month’s orders, less their costs'}
           </span>
         </div>
 
@@ -318,7 +345,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <div className="flex items-center gap-4 text-xs font-semibold uppercase text-slate-500">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>
-                <span className="text-[10px]">{t('monthlyRevenue')}</span>
+                <span className="text-[10px]">{language === 'ar' ? 'المحصَّل' : 'Collected'}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-rose-500"></span>

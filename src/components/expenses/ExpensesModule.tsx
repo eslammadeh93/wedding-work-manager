@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import {
   Wallet,
   Plus,
@@ -19,10 +18,10 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { Expense, FinanceType } from '../../types';
+import { expenseMetricState } from '../../utils/financialAvailability';
 import { ExpenseModal } from './ExpenseModal';
 import { MoneyValue } from '../ui/MoneyValue';
 import { calculateFinancePeriodCash } from '../../utils/monthlyCash';
-import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { USE_MULTI_TENANT_DATA } from '../../multiTenant/featureFlags';
 
@@ -55,7 +54,7 @@ const CashBalanceDetailsModal: React.FC<{
 
 export const ExpensesModule: React.FC = () => {
   const { t, language } = useLanguage();
-  const { orders, expenses, deleteExpense } = useData();
+  const { orders, expenses, deleteExpense, accountingOrders, financialData } = useData();
   const { authSession, profile, isDemo } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -64,11 +63,6 @@ export const ExpensesModule: React.FC = () => {
   const [defaultModalType, setDefaultModalType] = useState<FinanceType>('expense');
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showCashBalanceDetails, setShowCashBalanceDetails] = useState(false);
-  // The live operational order list intentionally contains only recent orders.
-  // A carried safe balance, however, must include every historical collection
-  // and execution cost, so tenant companies load that history on demand here.
-  const [financeOrders, setFinanceOrders] = useState<typeof orders | null>(null);
-  const [isLoadingFinanceHistory, setIsLoadingFinanceHistory] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -84,40 +78,18 @@ export const ExpensesModule: React.FC = () => {
   }, [authSession, isDemo, profile?.role]);
   const usesFinanceHistory = USE_MULTI_TENANT_DATA && Boolean(companyId);
 
-  useEffect(() => {
-    if (!usesFinanceHistory || !companyId) {
-      setFinanceOrders(null);
-      setIsLoadingFinanceHistory(false);
-      return;
-    }
-    let cancelled = false;
-    setFinanceOrders(null);
-    setIsLoadingFinanceHistory(true);
-    void (async () => {
-      const collected: typeof orders = [];
-      let cursor: QueryDocumentSnapshot<DocumentData> | null = null;
-      let completed = true;
-      // Cash includes deposits and booking expenses for future events,
-      // so this deliberately has no event-date filter.
-      for (let page = 0; page < 50; page += 1) {
-        const result = await companyDataService.getOrderPage<typeof orders[number]>(companyId, {
-          scope: 'all', pageSize: 100, cursor,
-        });
-        if (!result.success || !result.data) { completed = false; break; }
-        collected.push(...result.data.records);
-        if (!result.data.hasMore || !result.data.cursor) break;
-        cursor = result.data.cursor;
-        if (page === 49) completed = false;
-      }
-      if (!cancelled) {
-        // Keep the operational list as a safe fallback only if loading failed.
-        if (completed) setFinanceOrders(collected);
-        setIsLoadingFinanceHistory(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [companyId, usesFinanceHistory]);
-  const accountingOrders = usesFinanceHistory && financeOrders ? financeOrders : orders;
+  // The provider owns the one financial dataset. On failure the figures are
+  // withheld rather than recomputed from the operational list, which would
+  // silently report a smaller safe balance as if it were the real one.
+  const financialInputs = {
+    historyStatus: financialData.status,
+    historyLoading: financialData.loading,
+    historyMessage: financialData.message,
+    expenseAccess: financialData.expenseAccess,
+  };
+  const financialState = expenseMetricState(financialInputs);
+  const isLoadingFinanceHistory = financialData.loading;
+
   const periodBounds = useMemo(() => {
     if (periodMode === 'all') return { start: '', end: '9999-12' };
     if (periodMode === 'year') return { start: `${periodYear}-01`, end: `${periodYear}-12` };
@@ -149,13 +121,17 @@ export const ExpensesModule: React.FC = () => {
 
   const cashBalanceDetails = useMemo<CashBalanceDetailItem[]>(() => {
     return [
-      { id: 'remaining-carry', title: language === 'ar' ? 'الباقي من الرصيد المرحل' : 'Remaining carried balance', subtitle: language === 'ar' ? 'الرصيد المرحّل في بداية الفترة ناقص المصروفات العامة خلالها' : 'Opening carry less general expenses in this period', amount: remainingCarriedBalance },
+      { id: 'remaining-carry', title: language === 'ar' ? 'الباقي من الرصيد المرحل' : 'Remaining carried balance', subtitle: language === 'ar' ? 'الرصيد المرحّل في بداية الفترة زائد رأس المال المضاف ناقص المصروفات العامة خلالها' : 'Opening carry plus capital added, less general expenses in this period', amount: remainingCarriedBalance },
       { id: 'capital', title: language === 'ar' ? 'رأس المال المضاف' : 'Capital added', subtitle: language === 'ar' ? 'إضافات رأس المال خلال الفترة المختارة' : 'Capital additions in the selected period', amount: monthlyCapital },
       { id: 'order-cash', title: language === 'ar' ? 'صافي فلوس الأوردرات' : 'Net order cash', subtitle: language === 'ar' ? 'تحصيلات الفترة بعد مصاريف الأوردرات فقط' : 'Period collections after order costs only', amount: periodCash.netOrderCash },
     ].filter((item) => item.amount !== 0);
   }, [language, monthlyCapital, periodCash.netOrderCash, remainingCarriedBalance]);
 
   const filteredExpenses = [...expenses, ...(carriedBalanceEntry ? [carriedBalanceEntry] : [])].filter((e) => {
+    // A voided entry and the reversal that cancels it stay in the data as
+    // accounting evidence and still net out in the totals above; the
+    // operational ledger below lists only entries that are still in force.
+    if (e.voidedAt || e.isReversal) return false;
     const isCap = e.type === 'capital' || e.category === 'رأس مال';
     if (filterType === 'capital' && !isCap) return false;
     if (filterType === 'expense' && isCap) return false;
@@ -211,6 +187,9 @@ export const ExpensesModule: React.FC = () => {
               : 'Management of company capital & general operating expenses'}
           </p>
           {isLoadingFinanceHistory && <p className="mt-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">{language === 'ar' ? 'جارٍ تحميل سجل الأوردرات الكامل لحساب الرصيد المرحّل…' : 'Loading complete order history for the carried balance…'}</p>}
+          {!isLoadingFinanceHistory && financialState.available !== true && (
+            <p role="alert" className="mt-1 text-[11px] font-bold text-rose-700 dark:text-rose-300">{financialState.message}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto">

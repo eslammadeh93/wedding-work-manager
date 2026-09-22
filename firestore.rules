@@ -117,6 +117,48 @@ service cloud.firestore {
       return !('workerCanContactCustomer' in request.resource.data)
         || request.resource.data.workerCanContactCustomer is bool;
     }
+    // Money must be a usable number: NaN and Infinity never arrive as a number
+    // value, and a negative amount is not a valid order or expense figure.
+    // These helpers stay deliberately small; rules evaluation is metered.
+    function validAmount(value) { return value is number && value >= 0; }
+    function validFinancialDate(value) {
+      return value is string && (value == '' || value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}.*'));
+    }
+    // The remaining balance is derived and may never contradict the amounts it
+    // is derived from.
+    function derivedOrderTotalsAgree() {
+      return !('remainingBalance' in request.resource.data) || !('totalPrice' in request.resource.data) || !('totalPaid' in request.resource.data)
+        || (request.resource.data.totalPaid >= request.resource.data.totalPrice
+          ? request.resource.data.remainingBalance <= 0.01
+          : request.resource.data.remainingBalance >= request.resource.data.totalPrice - request.resource.data.totalPaid - 0.01
+            && request.resource.data.remainingBalance <= request.resource.data.totalPrice - request.resource.data.totalPaid + 0.01);
+    }
+    function validOrderFinancials() {
+      return (!('totalPrice' in request.resource.data) || validAmount(request.resource.data.totalPrice))
+        && (!('deposit' in request.resource.data) || validAmount(request.resource.data.deposit))
+        && (!('totalPaid' in request.resource.data) || validAmount(request.resource.data.totalPaid))
+        && (!('remainingBalance' in request.resource.data) || validAmount(request.resource.data.remainingBalance))
+        && (!('bookingDate' in request.resource.data) || validFinancialDate(request.resource.data.bookingDate))
+        && (!('eventDate' in request.resource.data) || validFinancialDate(request.resource.data.eventDate))
+        && (!('paymentStatus' in request.resource.data) || request.resource.data.paymentStatus in ['unpaid', 'partially_paid', 'fully_paid'])
+        && (!('paymentHistory' in request.resource.data) || request.resource.data.paymentHistory is list)
+        && derivedOrderTotalsAgree();
+    }
+    // Records written before these guards existed stay editable: the checks
+    // apply only to a write that actually touches a financial field.
+    function orderFinancialsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'totalPrice', 'deposit', 'totalPaid', 'remainingBalance', 'paymentStatus', 'paymentHistory', 'bookingDate', 'eventDate']);
+    }
+    function validExpense() {
+      return (!('amount' in request.resource.data) || (request.resource.data.amount is number && request.resource.data.amount > 0))
+        && (!('date' in request.resource.data) || validFinancialDate(request.resource.data.date))
+        && (!('linkedOrderId' in request.resource.data) || request.resource.data.linkedOrderId == null
+          || request.resource.data.linkedOrderId is string);
+    }
+    function expenseFinancialsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount', 'date', 'linkedOrderId']);
+    }
     function validOrderSource() {
       return !('orderSource' in request.resource.data)
         || request.resource.data.orderSource in ['organic', 'campaign', 'other'];
@@ -203,10 +245,12 @@ service cloud.firestore {
         // Workers use the field-safe projection below; rules cannot redact customerPhone here.
         allow read: if hasCompanyPermission(companyId, 'orders:read');
         allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
-          && companyIdMatchesPath(companyId) && workerContactCreateAllowed(companyId) && validOrderSource();
+          && companyIdMatchesPath(companyId) && workerContactCreateAllowed(companyId) && validOrderSource()
+          && validOrderFinancials();
         allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'orders:write')
           && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged()
-          && workerContactUpdateAllowed(companyId) && validOrderSource();
+          && workerContactUpdateAllowed(companyId) && validOrderSource()
+          && (orderFinancialsUnchanged() || validOrderFinancials());
         // Orders remain recoverable for 30 days; only the scheduled backend may permanently purge them.
         allow delete: if false;
       }
@@ -279,9 +323,11 @@ service cloud.firestore {
       }
       match /expenses/{expenseId} {
         allow read: if hasCompanyPermission(companyId, 'expenses:read');
-        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && (!('linkedOrderId' in request.resource.data) || request.resource.data.linkedOrderId is string || request.resource.data.linkedOrderId == null);
-        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && (!('linkedOrderId' in request.resource.data) || request.resource.data.linkedOrderId is string || request.resource.data.linkedOrderId == null);
-        allow delete: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write');
+        allow create: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && validExpense();
+        allow update: if canWriteOperations(companyId) && hasCompanyPermission(companyId, 'expenses:write') && companyIdMatchesPath(companyId) && protectedOperationalFieldsUnchanged() && (expenseFinancialsUnchanged() || validExpense());
+        // Financial entries are voided, never destroyed: the original stays as
+        // evidence and a dated reversal entry cancels its effect.
+        allow delete: if false;
       }
       match /categories/{categoryId} {
         allow read: if hasCompanyPermission(companyId, 'categories:read');

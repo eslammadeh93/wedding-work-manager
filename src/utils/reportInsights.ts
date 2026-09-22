@@ -1,6 +1,7 @@
 import type { Expense, Order } from '../types';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from './orderPayments';
-import { orderCashCollections } from './monthlyCash';
+import { netOrderCashContribution } from './monthlyCash';
+import { isInFinancialMonth } from './financialCalendar';
 
 export interface MonthlyComparisonItem {
   month: number;
@@ -48,15 +49,12 @@ export const serviceTypesOf = (order: Order, language: 'ar' | 'en') => {
 
 export function buildMonthlyComparison(orders: Order[], expenses: Expense[], year: number): MonthlyComparisonItem[] {
   return Array.from({ length: 12 }, (_, month) => {
-    const monthOrders = orders.filter((order) => {
-      const date = new Date(eventDateOf(order));
-      return date.getFullYear() === year && date.getMonth() === month;
-    });
+    // Date-only values are compared as calendar days. Parsing them as instants
+    // pushed a first-of-the-month record into the previous month, and a first
+    // of January into the previous year, for every viewer west of Greenwich.
+    const monthOrders = orders.filter((order) => isInFinancialMonth(eventDateOf(order), year, month));
     const operatingExpenses = expenses
-      .filter((expense) => {
-        const date = new Date(expense.date);
-        return date.getFullYear() === year && date.getMonth() === month && expense.type !== 'capital';
-      })
+      .filter((expense) => isInFinancialMonth(expense.date, year, month) && expense.type !== 'capital')
       .reduce((total, expense) => total + Number(expense.amount || 0), 0);
     const revenue = monthOrders.reduce((total, order) => total + Number(order.totalPrice || 0), 0);
     const directCosts = monthOrders.reduce((total, order) => total + comparisonOrderCostsOf(order), 0);
@@ -106,33 +104,10 @@ export function buildCustomerSourceBreakdown(orders: Order[]): CustomerSourceIte
  */
 export function buildMonthlySourceCashNet(orders: Order[], year: number, month: number): Record<CustomerSourceItem['source'], number> {
   const result: Record<CustomerSourceItem['source'], number> = { organic: 0, campaign: 0, other: 0 };
-  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-  const isInMonth = (value?: string) => Boolean(value?.startsWith(monthPrefix));
-
+  // The per-source split uses the one net-order-cash definition, so the parts
+  // always add up to the month's published figure.
   orders.forEach((order) => {
-    const source = sourceOf(order.orderSource);
-    const status = order.orderStatus;
-    const eventIsInMonth = isInMonth(eventDateOf(order));
-    const completedThisMonth = status === 'completed' && eventIsInMonth;
-    const collectionsThisMonth = orderCashCollections(order)
-      .filter((collection) => isInMonth(collection.date));
-
-    if (completedThisMonth) {
-      result[source] += collectionsThisMonth.reduce((total, collection) => total + collection.amount, 0) - completedOrderFulfillmentCosts(order);
-    }
-
-    // A completed order is represented by its execution-month result only.
-    // When it completes later, its current-month deposit remains an advance.
-    if (!completedThisMonth && status !== 'cancelled') {
-      result[source] += collectionsThisMonth.reduce((total, collection) => total + collection.amount, 0);
-    }
-
-    // Other expenses stay in the booking month, even after completion.
-    // Retained cancellations do not have a future-order expense deduction.
-    if (status !== 'cancelled' && status !== 'cancelled_deposit_retained' && isInMonth(order.bookingDate || order.createdAt)) {
-      result[source] -= Number(order.otherExpenses || 0);
-    }
+    result[sourceOf(order.orderSource)] += netOrderCashContribution(order, [], year, month);
   });
-
   return result;
 }

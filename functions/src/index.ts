@@ -238,10 +238,18 @@ export const purgeExpiredRecycleBinItems = onSchedule({ schedule: '15 2 * * *', 
   for (const collectionName of ['orders', 'customers', 'inventory']) {
     const expired = await db.collectionGroup(collectionName).where('purgeAt', '<=', now).limit(400).get();
     if (expired.empty) continue;
+    const { destroy, retain } = partitionPurgeCandidates(
+      expired.docs.map((snapshot) => ({ snapshot, data: snapshot.data() })),
+      collectionName,
+    );
     const batch = db.batch();
-    expired.docs.forEach((snapshot) => batch.delete(snapshot.ref));
+    destroy.forEach(({ snapshot }) => batch.delete(snapshot.ref));
+    // A record that still carries posted financial history is never destroyed.
+    // Clearing purgeAt takes it out of this query for good while it stays
+    // available to accounting; deletedAt keeps it off the operational screens.
+    retain.forEach(({ snapshot }) => batch.update(snapshot.ref, { purgeAt: null, financiallyRetained: true, updatedAt: now }));
     await batch.commit();
-    logger.info('Purged expired recycle-bin records', { collectionName, count: expired.size });
+    logger.info('Purged expired recycle-bin records', { collectionName, count: destroy.length, retainedForAccounting: retain.length });
   }
 });
 
@@ -317,6 +325,129 @@ export const backfillLegacyOrderArchiveFields = onSchedule({ schedule: '50 2 * *
   batch.set(maintenanceRef, { lastEventDate: String(last.data().eventDate || last.data().weddingDate || ''), lastOrderPath: last.ref.path, updatedAt: now, complete: false }, { merge: true });
   await batch.commit();
   logger.info('Backfilled legacy order archive fields', { count: records.size });
+});
+
+const FULFILLMENT_RECOGNITION_BACKFILL_DOC = 'systemMaintenance/fulfillmentRecognitionBackfill';
+
+export interface FulfillmentRecognitionBackfillRun {
+  complete: boolean;
+  scanned: number;
+  stamped: number;
+  /** Records that must be dated by hand; they are listed in the logs. */
+  skippedNoDate: number;
+}
+
+/**
+ * One pass of the recognition backfill. The scheduled job and the manual
+ * admin trigger both call this, so there is exactly one implementation of the
+ * decision and the write.
+ *
+ * It is resumable and idempotent: the cursor lives in a single maintenance
+ * document that both callers share, and the only thing written is the stamp
+ * that `recognitionBackfillDecision` itself checks for, so a second pass over
+ * the same records does nothing.
+ */
+const runFulfillmentRecognitionBackfillBatch = async (batchSize: number): Promise<FulfillmentRecognitionBackfillRun> => {
+  const maintenanceRef = db.doc(FULFILLMENT_RECOGNITION_BACKFILL_DOC);
+  const maintenance = await maintenanceRef.get();
+  if (maintenance.data()?.complete === true) return { complete: true, scanned: 0, stamped: 0, skippedNoDate: 0 };
+
+  const cursorDate = typeof maintenance.data()?.lastEventDate === 'string' ? maintenance.data()?.lastEventDate : '';
+  const cursorPath = typeof maintenance.data()?.lastOrderPath === 'string' ? maintenance.data()?.lastOrderPath : '';
+  let source = db.collectionGroup('orders')
+    .where('orderStatus', 'in', ['completed', 'returned'])
+    .orderBy('eventDate', 'asc')
+    .orderBy(FieldPath.documentId(), 'asc')
+    .limit(batchSize);
+  if (cursorDate && cursorPath) source = source.startAfter(cursorDate, db.doc(cursorPath));
+  const records = await source.get();
+  if (records.empty) {
+    await maintenanceRef.set({ complete: true, completedAt: new Date().toISOString() }, { merge: true });
+    return { complete: true, scanned: 0, stamped: 0, skippedNoDate: 0 };
+  }
+
+  const now = new Date().toISOString();
+  const batch = db.batch();
+  let stamped = 0;
+  const undatable: Array<Record<string, string>> = [];
+  records.docs.forEach((snapshot) => {
+    const decision = recognitionBackfillDecision(snapshot.data());
+    if (decision.action === 'skip') {
+      // No date on the record can be trusted, so none is invented. Carry
+      // enough identifiers to find the order and date it by hand.
+      if (decision.reason === 'no-trustworthy-date') {
+        undatable.push({
+          path: snapshot.ref.path,
+          orderId: snapshot.id,
+          orderNumber: String(snapshot.data()?.orderNumber || ''),
+          companyId: String(snapshot.data()?.companyId || snapshot.ref.parent.parent?.id || ''),
+          orderStatus: String(snapshot.data()?.orderStatus || ''),
+        });
+      }
+      return;
+    }
+    // `updatedAt` is deliberately left alone: this is a repair of missing
+    // bookkeeping metadata, not an edit anyone made to the order, and bumping
+    // the version would invalidate every open editor.
+    batch.update(snapshot.ref, decision.updates);
+    stamped += 1;
+  });
+  const last = records.docs[records.docs.length - 1];
+  batch.set(maintenanceRef, {
+    lastEventDate: String(last.data().eventDate || last.data().weddingDate || ''),
+    lastOrderPath: last.ref.path,
+    updatedAt: now,
+    complete: false,
+    lastSkippedNoDate: undatable.length,
+  }, { merge: true });
+  await batch.commit();
+
+  if (undatable.length) {
+    logger.warn('Fulfillment recognition backfill could not date these orders; they need manual review', {
+      count: undatable.length,
+      orders: undatable.slice(0, 50),
+    });
+  }
+  logger.info('Backfilled legacy fulfillment recognition', { scanned: records.size, stamped, skippedNoDate: undatable.length });
+  return { complete: false, scanned: records.size, stamped, skippedNoDate: undatable.length };
+};
+
+/**
+ * One-time, resumable recognition backfill for orders created before
+ * `fulfillmentRecognizedAt` existed.
+ *
+ * Without it, an order completed before this deployment loses its worker and
+ * transportation costs the moment somebody moves it to `returned`, which makes
+ * an already-reported month's cash go back up. It stamps only orders that must
+ * have been completed (`completed` or `returned`) and that actually carry a
+ * fulfillment cost, never overwrites an existing stamp, and writes no payment,
+ * expense or other movement.
+ */
+export const backfillLegacyFulfillmentRecognition = onSchedule({ schedule: '5 3 * * *', timeZone: 'UTC', region: 'us-central1' }, async () => {
+  await runFulfillmentRecognitionBackfillBatch(350);
+});
+
+/**
+ * Platform-owner trigger for the same backfill, for running it now instead of
+ * waiting for the nightly batch. It shares the cursor and the maintenance
+ * document with the scheduled job, so the two can be used interchangeably and
+ * neither repeats the other's work. Company users - including company owners -
+ * cannot reach it.
+ */
+export const runLegacyFulfillmentRecognitionBackfill = onCall({ region: 'us-central1', timeoutSeconds: 300, enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
+  const actorUid = await isActivePlatformOwner(request);
+  if (!actorUid) return { success: false, message: '\u063a\u064a\u0631 \u0645\u0635\u0631\u062d \u0628\u062a\u0634\u063a\u064a\u0644 \u0647\u0630\u0647 \u0627\u0644\u0639\u0645\u0644\u064a\u0629.' };
+  const requested = Number((request.data as Record<string, unknown> | undefined)?.batchSize);
+  // Bounded so a manual run can never turn into an unbounded scan.
+  const batchSize = Number.isFinite(requested) ? Math.min(500, Math.max(25, Math.floor(requested))) : 350;
+
+  const result = await runFulfillmentRecognitionBackfillBatch(batchSize);
+  await db.collection('platformAuditLogs').add({
+    action: 'fulfillment_recognition_backfill_run', createdBy: actorUid, batchSize,
+    scanned: result.scanned, stamped: result.stamped, skippedNoDate: result.skippedNoDate, complete: result.complete,
+    timestamp: FieldValue.serverTimestamp(),
+  });
+  return { success: true, message: result.complete ? '\u0627\u0643\u062a\u0645\u0644\u062a \u0627\u0644\u0645\u0639\u0627\u0644\u062c\u0629.' : '\u062a\u0645\u062a \u0645\u0639\u0627\u0644\u062c\u0629 \u062f\u0641\u0639\u0629.', ...result };
 });
 
 /** Reminds each assigned worker every morning about today's and tomorrow's active orders. */
@@ -1058,6 +1189,8 @@ type PlatformOrderAnalyticsRecord = {
   bookingDate: string; eventDate: string; deliveryDate: string; returnDate: string; eventLocation: string;
   totalPrice: number; deposit: number; totalPaid: number; remainingBalance: number;
   workerCost: number; transportationCost: number; otherExpenses: number; orderStatus: string; notes: string;
+  /** Optimistic-concurrency version the correction form must echo back. */
+  version: string;
 };
 const platformNumber = (value: unknown) => {
   const number = Number(value);
@@ -1095,6 +1228,7 @@ const platformOrderRecord = (id: string, data: Record<string, unknown>): Platfor
     otherExpenses: platformNumber(data.otherExpenses),
     orderStatus: String(data.orderStatus || 'new'),
     notes: String(data.notes || ''),
+    version: platformOrderVersion(data.updatedAt),
   };
 };
 type PlatformCashOrder = {
@@ -1183,6 +1317,10 @@ export const getPlatformCompanyContacts = onCall({ region: 'us-central1', timeou
   return { success: true, message: 'تم تحميل جهات التواصل.', contacts };
 });
 
+import { partitionPurgeCandidates, recognitionBackfillDecision } from './financialRetention.js';
+import { platformFinancialMonths } from './platformFinancialMonths.js';
+import { PlatformCorrectionError, platformOrderVersion, platformVersionsMatch, resolvePlatformOrderCorrection } from './platformOrderCorrection.js';
+
 /** Cross-company orders are deliberately exposed only to the platform owner. */
 export const getPlatformCompanyOrderAnalytics = onCall({ region: 'us-central1', timeoutSeconds: 120, memory: '512MiB', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
   const actorUid = await isActivePlatformOwner(request);
@@ -1199,9 +1337,14 @@ export const getPlatformCompanyOrderAnalytics = onCall({ region: 'us-central1', 
   const orders = rawOrders.map(order => platformOrderRecord(order.id, order.data));
   const cashOrders = rawOrders.map(order => platformCashOrder(order.id, order.data));
   const expenseRecords = expensesSnapshot.docs.map(expense => expense.data());
-  const monthly = [...new Set(orders.map(order => order.month).filter(Boolean))]
-    .map(month => ({ month, orderCount: orders.filter(order => order.month === month).length }))
-    .sort((a, b) => b.month.localeCompare(a.month));
+  // Periods come from every financial date the calculation below reads, not
+  // from event dates alone, so a month holding only a deposit, a refund, a
+  // late settlement or an expense is still calculated instead of vanishing.
+  const monthly = platformFinancialMonths(
+    rawOrders.map(order => order.data),
+    orders.map(order => order.month).filter(Boolean),
+    expenseRecords,
+  );
   const latest = monthly[0];
   const previous = monthly[1];
   const growthRate = latest && previous && previous.orderCount > 0 ? ((latest.orderCount - previous.orderCount) / previous.orderCount) * 100 : null;
@@ -1233,28 +1376,59 @@ export const updatePlatformCompanyOrder = onCall({ region: 'us-central1', enforc
     const value = clean(key, 10);
     return (optional && !value) || /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
   };
+  // Trusted server path: whole Egyptian pounds only, and never rounded. A
+  // fractional correction is refused so it can be re-entered correctly.
   const number = (key: string) => {
+    if (typeof data[key] === 'string') return null;
     const value = Number(data[key]);
-    return Number.isFinite(value) && value >= 0 && value <= 1000000000 ? value : null;
+    return Number.isInteger(value) && value >= 0 && value <= 1000000000 ? value : null;
   };
   const orderStatus = clean('orderStatus', 40);
   const statuses = new Set(['new', 'confirmed', 'preparing', 'out_for_delivery', 'completed', 'returned', 'cancelled', 'cancelled_deposit_retained', 'pending', 'in_progress']);
   const bookingDate = date('bookingDate'); const eventDate = date('eventDate', false); const deliveryDate = date('deliveryDate'); const returnDate = date('returnDate');
-  const totalPrice = number('totalPrice'); const deposit = number('deposit'); const requestedPaid = number('totalPaid'); const workerCost = number('workerCost'); const transportationCost = number('transportationCost'); const otherExpenses = number('otherExpenses');
-  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !/^[A-Za-z0-9_-]{1,128}$/.test(orderId) || !clean('orderNumber', 120) || !clean('customerName', 200) || !eventDate || !statuses.has(orderStatus) || [totalPrice, deposit, requestedPaid, workerCost, transportationCost, otherExpenses].some(value => value === null)) return { success: false, message: 'بيانات الأوردر غير صالحة.' };
+  const totalPrice = number('totalPrice'); const deposit = number('deposit'); const workerCost = number('workerCost'); const transportationCost = number('transportationCost'); const otherExpenses = number('otherExpenses');
+  if (!actorUid || !/^[A-Za-z0-9_-]{1,128}$/.test(companyId) || !/^[A-Za-z0-9_-]{1,128}$/.test(orderId) || !clean('orderNumber', 120) || !clean('customerName', 200) || !eventDate || !statuses.has(orderStatus) || [totalPrice, deposit, workerCost, transportationCost, otherExpenses].some(value => value === null) || !Number.isInteger(Number(data.paymentAdjustment ?? 0))) return { success: false, message: 'بيانات الأوردر غير صالحة.' };
+  const expectedVersion = clean('expectedVersion', 64);
+  if (!expectedVersion) return { success: false, message: 'يجب إرسال نسخة الأوردر التي تم فتحها للتعديل.' };
   const orderRef = db.doc(`companies/${companyId}/orders/${orderId}`);
-  const current = await orderRef.get();
-  if (!current.exists || current.data()?.deletedAt) return { success: false, message: 'الأوردر غير موجود.' };
-  const historyTotal = Array.isArray(current.data()?.paymentHistory) ? current.data()!.paymentHistory.reduce((sum: number, payment: unknown) => sum + platformNumber((payment as Record<string, unknown>)?.amount), 0) : 0;
-  const totalPaid = Math.max(deposit!, requestedPaid!, historyTotal);
-  const paymentStatus = totalPaid >= totalPrice! && totalPrice! > 0 ? 'fully_paid' : totalPaid > 0 ? 'partially_paid' : 'unpaid';
-  await orderRef.update({
-    orderNumber: clean('orderNumber', 120), customerName: clean('customerName', 200), customerPhone: clean('customerPhone', 60),
-    bookingDate, eventDate, weddingDate: eventDate, deliveryDate, returnDate, eventLocation: clean('eventLocation', 500),
-    totalPrice, deposit, totalPaid, remainingBalance: Math.max(0, totalPrice! - totalPaid), workerCost, transportationCost, otherExpenses,
-    orderStatus, paymentStatus, notes: clean('notes', 4000), updatedAt: FieldValue.serverTimestamp(), updatedByPlatformOwner: actorUid,
-  });
-  await db.collection('platformAuditLogs').add({ action: 'platform_company_order_updated', companyId, orderId, createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
+  const auditRef = db.collection('platformAuditLogs').doc();
+  const now = new Date();
+  try {
+    // The financial change and the audit entry that justifies it commit
+    // together, against the order as it exists inside the transaction.
+    await db.runTransaction(async transaction => {
+      const current = await transaction.get(orderRef);
+      const stored = current.data();
+      if (!current.exists || !stored || stored.deletedAt) throw new PlatformCorrectionError('NOT_FOUND', 'الأوردر غير موجود.');
+      if (!platformVersionsMatch(expectedVersion, stored.updatedAt)) {
+        throw new PlatformCorrectionError('STALE', 'تم تعديل الأوردر من مستخدم آخر. أعد التحميل ثم حاول مرة أخرى.');
+      }
+      const resolved = resolvePlatformOrderCorrection(stored, {
+        totalPrice: totalPrice!,
+        deposit: deposit!,
+        paymentAdjustment: Number(data.paymentAdjustment) || 0,
+        adjustmentReason: typeof data.adjustmentReason === 'string' ? data.adjustmentReason : '',
+      }, actorUid, now);
+      transaction.update(orderRef, {
+        orderNumber: clean('orderNumber', 120), customerName: clean('customerName', 200), customerPhone: clean('customerPhone', 60),
+        bookingDate, eventDate, weddingDate: eventDate, deliveryDate, returnDate, eventLocation: clean('eventLocation', 500),
+        totalPrice, deposit, totalPaid: resolved.totalPaid, remainingBalance: resolved.remainingBalance,
+        ...(resolved.paymentHistory ? { paymentHistory: resolved.paymentHistory } : {}),
+        workerCost, transportationCost, otherExpenses,
+        orderStatus, paymentStatus: resolved.paymentStatus, notes: clean('notes', 4000),
+        updatedAt: now.toISOString(), updatedByPlatformOwner: actorUid,
+      });
+      transaction.set(auditRef, {
+        action: 'platform_company_order_updated', companyId, orderId, createdBy: actorUid,
+        expectedVersion, totalPaid: resolved.totalPaid,
+        ...(resolved.adjustment ? { paymentAdjustment: resolved.adjustment } : {}),
+        timestamp: FieldValue.serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof PlatformCorrectionError) return { success: false, message: error.message };
+    throw error;
+  }
   return { success: true, message: 'تم تحديث الأوردر بنجاح.' };
 });
 

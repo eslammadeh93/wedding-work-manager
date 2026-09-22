@@ -6,13 +6,13 @@ import type { ActivityLogRecord, InventoryItem, Order } from '../src/types';
 const order = (overrides: Partial<Order> = {}): Order => ({
   id: 'order-1', orderNumber: 'WED-1', customerId: 'customer-1', customerName: 'منى', customerPhone: '',
   weddingDate: '2026-08-25', deliveryDate: '2026-08-25', eventLocation: '', totalPrice: 2_000,
-  deposit: 500, totalPaid: 500, remainingBalance: 1_500, paymentStatus: 'partial', paymentHistory: [],
-  orderStatus: 'confirmed', selectedItems: [], createdAt: '2026-08-01', updatedAt: '2026-08-01', ...overrides,
+  deposit: 500, totalPaid: 500, remainingBalance: 1_500, paymentStatus: 'partially_paid', paymentHistory: [],
+  orderStatus: 'confirmed', reservedItems: [], attachments: [], createdAt: '2026-08-01', updatedAt: '2026-08-01', ...overrides,
 });
 
 const inventory = (overrides: Partial<InventoryItem> = {}): InventoryItem => ({
   id: 'item-1', itemCode: 'CHAIR', nameAr: 'كرسي', nameEn: 'Chair', category: 'chairs', quantity: 10,
-  availableQuantity: 1, reservedQuantity: 9, minStockLevel: 3, storageLocation: '', condition: 'excellent',
+  availableQuantity: 1, reservedQuantity: 9, minStockLevel: 3, storageLocation: '', condition: 'good',
   createdAt: '', updatedAt: '', ...overrides,
 });
 

@@ -31,6 +31,17 @@ import {
 } from '../types';
 import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../utils/recycleBin';
 import { resolveOrderCustomers } from '../utils/orderCustomer';
+import { appendPaymentEntry } from '../utils/orderPaymentState';
+import type { FinancialHistoryStatus } from '../multiTenant/data/financialHistory';
+import type { ExpenseAccess } from '../utils/financialAvailability';
+
+export interface FinancialDataState {
+  status: FinancialHistoryStatus | undefined;
+  loading: boolean;
+  message?: string;
+  /** `denied` means the expense inputs are unknown, never that they are zero. */
+  expenseAccess: ExpenseAccess;
+}
 import {
   initialCompanySettings,
   initialInventory,
@@ -39,7 +50,7 @@ import {
   initialExpenses,
   initialNotifications,
 } from '../data/sampleData';
-import { USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
+import { PROVIDER_CONFIG_ERROR, USE_MULTI_TENANT_DATA } from '../multiTenant/featureFlags';
 import { MultiTenantDataProvider } from '../multiTenant/data/MultiTenantDataProvider';
 import { DemoDataProvider } from '../demo/DemoDataProvider';
 
@@ -77,6 +88,17 @@ export interface DataContextType {
   loading: boolean;
   recycleBinItems: RecycleBinItem[];
   restoreDeletedItem: (item: RecycleBinItem) => Promise<void>;
+  /**
+   * The complete accounting dataset: every order carrying financial history,
+   * including archived and retained-deleted ones. Deliberately separate from
+   * `orders`, which stays a short operational window for list performance.
+   */
+  accountingOrders: Order[];
+  /** How complete the financial inputs are. Totals must not be presented as authoritative unless this says so. */
+  financialData: FinancialDataState;
+  /** Reloads the financial history after an external change. */
+  refreshFinancialHistory: () => void;
+
   totalCapital: number;
   totalGeneralExpenses: number;
   currentCashBalance: number;
@@ -86,8 +108,12 @@ export interface DataContextType {
   recordWorkerMovement: (orderId: string, action: WorkerMovement['action']) => Promise<string>;
   
   // Orders
-  addOrder: (orderData: NewOrderData, newCustomer?: NewOrderCustomer) => Promise<string>;
-  updateOrder: (id: string, orderData: Partial<Order>) => Promise<void>;
+  /** `submissionId` makes a retried save reuse its own document instead of creating a second order. */
+  addOrder: (orderData: NewOrderData, newCustomer?: NewOrderCustomer, options?: { submissionId?: string }) => Promise<string>;
+  /** `expectedUpdatedAt` is the version the editor was opened with. A stale form fails instead of overwriting newer financial changes. */
+  updateOrder: (id: string, orderData: Partial<Order>, options?: { expectedUpdatedAt?: string }) => Promise<void>;
+  /** Payment mutations run against the order's latest stored record. Returning null means "nothing to do". */
+  updateOrderPayments: (orderId: string, apply: (history: PaymentEntry[]) => PaymentEntry[] | null, options?: { expectedUpdatedAt?: string }) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
   /** The optional id lets the UI safely retry the very same payment request. */
   addPaymentToOrder: (orderId: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => Promise<void>;
@@ -117,8 +143,8 @@ export interface DataContextType {
   deleteInventoryItem: (id: string) => Promise<void>;
   
   // Expenses
-  addExpense: (expenseData: Omit<Expense, 'id' | 'createdAt'>) => Promise<string>;
-  updateExpense: (id: string, expenseData: Partial<Expense>) => Promise<void>;
+  addExpense: (expenseData: Omit<Expense, 'id' | 'createdAt'>, options?: { submissionId?: string }) => Promise<string>;
+  updateExpense: (id: string, expenseData: Partial<Expense>, options?: { expectedUpdatedAt?: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   
   // Categories
@@ -566,18 +592,23 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await syncInventoryItemsToStore(updatedInventory);
   };
 
-  const addPaymentToOrder = async (orderId: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => {
+  const updateOrderPayments = async (orderId: string, apply: (history: PaymentEntry[]) => PaymentEntry[] | null, options?: { expectedUpdatedAt?: string }) => {
     const existing = orders.find((o) => o.id === orderId);
     if (!existing) return;
+    if (options?.expectedUpdatedAt && options.expectedUpdatedAt !== existing.updatedAt) {
+      throw new Error('تم تعديل الأوردر من مكان آخر. أعد فتح الأوردر ثم كرّر التعديل.');
+    }
+    const updatedHistory = apply(existing.paymentHistory || []);
+    if (!updatedHistory) return;
+    await updateOrder(orderId, { paymentHistory: updatedHistory });
+  };
 
+  const addPaymentToOrder = async (orderId: string, payment: Omit<PaymentEntry, 'id'> & { id?: string }) => {
     const newPaymentEntry: PaymentEntry = {
       ...payment,
       id: payment.id || createRecordId('pay'),
     };
-
-    if ((existing.paymentHistory || []).some((entry) => entry.id === newPaymentEntry.id)) return;
-    const updatedHistory = [...(existing.paymentHistory || []), newPaymentEntry];
-    await updateOrder(orderId, { paymentHistory: updatedHistory });
+    await updateOrderPayments(orderId, (history) => appendPaymentEntry(history, newPaymentEntry));
   };
 
   const deleteOrder = async (id: string) => {
@@ -1004,6 +1035,13 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loading,
         recycleBinItems: deletedItems,
         restoreDeletedItem,
+        // The legacy provider keeps its whole dataset in memory, so accounting
+        // reads the same orders and is always complete.
+        accountingOrders: activeOrders,
+        financialData: { status: 'complete' as const, loading: false, expenseAccess: 'granted' as const },
+        refreshFinancialHistory: () => undefined,
+        // The legacy provider is not reachable in production and owns no
+        // repair path; it reports nothing to do rather than pretending.
         totalCapital,
         totalGeneralExpenses,
         currentCashBalance,
@@ -1011,6 +1049,7 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordWorkerMovement,
         addOrder,
         updateOrder,
+        updateOrderPayments,
         deleteOrder,
         addPaymentToOrder,
         addWorkTask,
@@ -1050,6 +1089,20 @@ const LegacyDataProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 /** The mode choice is intentionally centralized; legacy code is never mounted in tenant mode. */
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isDemo } = useAuth();
+  // A misconfigured production build must not quietly run on the legacy
+  // provider, whose financial writes can report success after Firestore has
+  // rejected them. It refuses to start, and says why.
+  if (PROVIDER_CONFIG_ERROR) {
+    return (
+      <div role="alert" dir="ltr" className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950 p-6 text-center">
+        <div className="max-w-md rounded-2xl border border-rose-500/40 bg-slate-900 p-6">
+          <h1 className="text-lg font-black text-rose-400">Configuration error</h1>
+          <p className="mt-2 text-sm text-slate-300">{PROVIDER_CONFIG_ERROR}</p>
+          <p className="mt-3 text-xs text-slate-500">The application will not start until this is corrected.</p>
+        </div>
+      </div>
+    );
+  }
   if (isDemo) return <DemoDataProvider>{children}</DemoDataProvider>;
   return USE_MULTI_TENANT_DATA ? <MultiTenantDataProvider>{children}</MultiTenantDataProvider> : <LegacyDataProvider>{children}</LegacyDataProvider>;
 };

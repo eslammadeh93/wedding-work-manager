@@ -1086,16 +1086,23 @@ function CompanyMonthlyAccountsModal({ month, accounts, close }: { month: string
 }
 
 function PlatformCompanyOrderEditor({ companyId, order, close, saved }: { companyId: string; order: PlatformCompanyOrder; close: () => void; saved: () => void }) {
-  const [form, setForm] = useState<UpdatePlatformCompanyOrderRequest>({ ...order, companyId, orderId: order.id });
+  // `expectedVersion` is the version this editor opened with: a correction
+  // saved after somebody else touched the order is rejected, not merged.
+  const formFor = (source: PlatformCompanyOrder): UpdatePlatformCompanyOrderRequest => ({
+    ...source, companyId, orderId: source.id, expectedVersion: source.version || '', paymentAdjustment: 0, adjustmentReason: '',
+  });
+  const [form, setForm] = useState<UpdatePlatformCompanyOrderRequest>(formFor(order));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const update = <K extends keyof UpdatePlatformCompanyOrderRequest>(key: K, value: UpdatePlatformCompanyOrderRequest[K]) => setForm((current) => ({ ...current, [key]: value }));
-  useEffect(() => setForm({ ...order, companyId, orderId: order.id }), [companyId, order]);
+  useEffect(() => setForm(formFor(order)), [companyId, order]);
   return <div className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/60 p-4"><form onSubmit={(event) => { event.preventDefault(); setSaving(true); setError(""); void companyManagementService.updateCompanyOrder(form).then(saved).catch((failure) => setError(failure instanceof Error ? failure.message : "تعذر تحديث الأوردر.")).finally(() => setSaving(false)); }} className="mx-auto my-5 max-w-3xl rounded-2xl bg-white p-5 shadow-xl dark:bg-slate-900">
-    <div className="mb-4 flex justify-between"><div><h2 className="font-black">تعديل أوردر {order.orderNumber}</h2><p className="mt-1 text-xs text-slate-500">أي إجمالي مدفوع لن يقل عن الدفعات المسجلة بالفعل.</p></div><button type="button" onClick={close}><X /></button></div>
+    <div className="mb-4 flex justify-between"><div><h2 className="font-black">تعديل أوردر {order.orderNumber}</h2><p className="mt-1 text-xs text-slate-500">إجمالي المدفوع مشتق من الدفعات المسجلة. لتعديله سجّل تسوية بسبب واضح.</p></div><button type="button" onClick={close}><X /></button></div>
     <div className="grid gap-3 sm:grid-cols-2">
       {([['orderNumber','رقم الأوردر','text'],['customerName','اسم العميل','text'],['customerPhone','هاتف العميل','text'],['eventLocation','موقع التنفيذ','text'],['bookingDate','تاريخ الحجز','date'],['eventDate','تاريخ التنفيذ','date'],['deliveryDate','تاريخ التسليم','date'],['returnDate','تاريخ الإرجاع','date']] as const).map(([key,label,type]) => <label key={key} className="text-sm font-bold">{label}<input type={type} className={`${fieldClass} mt-1`} value={form[key]} onChange={(event) => update(key, event.target.value)} required={key === 'orderNumber' || key === 'customerName' || key === 'eventDate'} /></label>)}
-      {([['totalPrice','إجمالي سعر الأوردر'],['deposit','العربون'],['totalPaid','إجمالي المدفوع'],['workerCost','أجرة العامل'],['transportationCost','تكلفة النقل'],['otherExpenses','مصاريف أخرى']] as const).map(([key,label]) => <label key={key} className="text-sm font-bold">{label}<input type="number" min="0" step="0.01" className={`${fieldClass} mt-1`} value={form[key]} onChange={(event) => update(key, Number(event.target.value))} /></label>)}
+      {([['totalPrice','إجمالي سعر الأوردر'],['deposit','العربون'],['workerCost','أجرة العامل'],['transportationCost','تكلفة النقل'],['otherExpenses','مصاريف أخرى']] as const).map(([key,label]) => <label key={key} className="text-sm font-bold">{label}<input type="number" min="0" step="0.01" className={`${fieldClass} mt-1`} value={form[key]} onChange={(event) => update(key, Number(event.target.value))} /></label>)}
+      <label className="text-sm font-bold">تسوية المبلغ المحصل (+/-)<input type="number" step="0.01" className={`${fieldClass} mt-1`} value={form.paymentAdjustment ?? 0} onChange={(event) => update('paymentAdjustment', Number(event.target.value))} /></label>
+      <label className="text-sm font-bold">سبب التسوية<input type="text" className={`${fieldClass} mt-1`} value={form.adjustmentReason ?? ''} onChange={(event) => update('adjustmentReason', event.target.value)} required={Number(form.paymentAdjustment || 0) !== 0} /></label>
       <label className="text-sm font-bold">الحالة<select className={`${fieldClass} mt-1`} value={form.orderStatus} onChange={(event) => update('orderStatus', event.target.value)}>{[['new','جديد'],['confirmed','مؤكد'],['preparing','قيد التجهيز'],['out_for_delivery','خرج للتنفيذ'],['completed','مكتمل'],['returned','تم الإرجاع'],['cancelled','ملغي'],['cancelled_deposit_retained','ملغي مع احتفاظ بالعربون']].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="sm:col-span-2 text-sm font-bold">ملاحظات<textarea className={`${fieldClass} mt-1 min-h-24`} value={form.notes} onChange={(event) => update('notes', event.target.value)} /></label>
     </div>

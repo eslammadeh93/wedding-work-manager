@@ -1,0 +1,12 @@
+{
+  // Type-checks the test suite, which the production tsconfig deliberately
+  // excludes. Without this a test could reference a field that no longer
+  // exists and still run, so a regression test could quietly stop testing.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["tests/**/*.ts", "src/**/*.ts", "src/**/*.tsx"],
+  // The emulator-bound rules suite uses `async () => assertSucceeds(...)`,
+  // whose return value node:test's types reject. It runs under its own
+  // command against the emulator; converting it is a separate change.
+  "exclude": ["node_modules", "dist", "build", "functions", "tests/firestore-rules"]
+}

@@ -107,7 +107,27 @@ export interface OrderAttachment {
   type: 'contract' | 'image' | 'file' | 'pdf' | 'other';
 }
 
-export type PaymentType = 'deposit' | 'settlement';
+/**
+ * `refund` is money returned to the customer. It is a dated movement in its
+ * own right: the original receipt is never edited or removed when money goes
+ * back, so past periods stay as they were recorded.
+ */
+export type PaymentType = 'deposit' | 'settlement' | 'refund' | 'security_deposit' | 'security_refund';
+
+/**
+ * Legacy security-deposit movement types. They are still part of the union so
+ * records written before the rule changed stay readable and keep their
+ * entries in history and backups, but they now carry no financial meaning at
+ * all: every calculation ignores them, and nothing writes new ones.
+ */
+export const SECURITY_PAYMENT_TYPES = ['security_deposit', 'security_refund'] as const;
+
+/** One step in a booking's cancellation lifecycle. */
+export interface CancellationEvent {
+  kind: 'cancelled' | 'cancelled_deposit_retained' | 'reinstated';
+  /** ISO instant the event actually happened. */
+  at: string;
+}
 
 export interface PaymentEntry {
   id: string;
@@ -200,7 +220,14 @@ export interface Order {
   workerCanContactCustomer?: boolean;
   totalPrice: number;
   deposit: number;
+  /** Informational only: the agreed security amount. It has no financial effect. */
   securityDeposit?: number; // التأمين / Security Deposit
+  /**
+   * Free text describing a discount the user worked out themselves, such as
+   * "10%" or "12,000 → 10,500". `totalPrice` is already the final agreed
+   * price, so this is informational only and enters no calculation.
+   */
+  discountInfo?: string;
   workerCost?: number; // أجرة العامل
   transportationCost?: number; // الانتقالات
   otherExpenses?: number; // مصاريف أخرى
@@ -220,6 +247,43 @@ export interface Order {
   activityLogs?: OrderActivityLog[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Stamped the first time the order reached `completed`. Worker and transport
+   * costs stay financially recognized from that moment, so moving the order to
+   * `returned` later cannot make a past month's cash go back up.
+   */
+  fulfillmentRecognizedAt?: string | null;
+  /**
+   * `completion` when stamped as the order completed, in which case
+   * `fulfillmentRecognizedAt` is an observed ISO instant. `backfill` when
+   * inferred for a record that predates the stamp, in which case it is a plain
+   * `YYYY-MM-DD` day taken from the execution date and must not be read as an
+   * event time. Only the presence of the field affects any calculation.
+   */
+  fulfillmentRecognizedSource?: 'completion' | 'backfill';
+  /**
+   * The current cancellation date, kept in step with the last entry of
+   * `cancellationHistory` and cleared on reinstatement. Records cancelled
+   * before this existed have neither.
+   */
+  cancelledAt?: string | null;
+  /**
+   * Every cancellation and reinstatement this booking has been through, in the
+   * order they happened.
+   *
+   * A single date cannot describe a booking that was cancelled, reinstated and
+   * cancelled again: overwriting it would drag the profit recognized under the
+   * first cancellation out of its month and into the second, rewriting a month
+   * that had already been reported. Each event is therefore kept with its own
+   * real date, and recognition is derived from the sequence.
+   */
+  cancellationHistory?: CancellationEvent[];
+  /**
+   * Set when an order carrying posted financial history is deleted. The record
+   * leaves operational screens but stays in accounting datasets and is never
+   * purged.
+   */
+  financiallyRetained?: boolean;
   /** Set by the archive job after a finished order has been inactive for six months. */
   archivedAt?: string | null;
   /** Precomputed at write time so the archive job can query without scanning all orders. */
@@ -334,6 +398,18 @@ export interface CompanyFinanceEntry {
   linkedOrderId?: string;
   linkedOrderNumber?: string;
   createdAt: string;
+  /** Optimistic-concurrency version. Absent on records written before it existed. */
+  updatedAt?: string;
+  /**
+   * Set when the entry is voided. The entry itself is kept as evidence and a
+   * separate dated reversal entry cancels its effect from the void date, so
+   * the month it was originally recorded in never changes.
+   */
+  voidedAt?: string | null;
+  /** On a reversal entry: the id of the entry it cancels. */
+  reversalOfId?: string;
+  /** Marks this entry as the reversal of another; its amount is an inflow. */
+  isReversal?: boolean;
 }
 
 export type Expense = CompanyFinanceEntry;

@@ -156,3 +156,48 @@ test('49 company users cannot permanently delete orders, customers, or inventory
   await assertFails(deleteDoc(path('companyASuperAdmin', 'customers', 'customerA')));
   await assertFails(deleteDoc(path('companyASuperAdmin', 'inventory', 'itemA')));
 });
+
+// Financial write validation. These guard the order and expense rules against
+// values that would corrupt the accounts, while leaving records written before
+// the guards existed editable.
+test('50 order financial writes reject invalid amounts and dates', async () => {
+  const orders = `${company('companyA')}/orders`;
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${orders}/badPrice`), { companyId: 'companyA', totalPrice: -1 }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${orders}/badPaid`), { companyId: 'companyA', totalPaid: 'many' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${orders}/badDate`), { companyId: 'companyA', eventDate: '01/09/2026' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${orders}/badStatus`), { companyId: 'companyA', paymentStatus: 'settled' }));
+  await assertSucceeds(setDoc(doc(db('companyASuperAdmin'), `${orders}/goodFinancials`), { companyId: 'companyA', totalPrice: 5000, deposit: 1000, totalPaid: 1000, remainingBalance: 4000, paymentStatus: 'partially_paid', eventDate: '2026-10-01', returnDate: '', paymentHistory: [] }));
+});
+
+test('51 order writes reject a remaining balance that contradicts the paid total', async () => {
+  const orders = `${company('companyA')}/orders`;
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${orders}/badBalance`), { companyId: 'companyA', totalPrice: 5000, totalPaid: 1000, remainingBalance: 9999 }));
+  await assertSucceeds(setDoc(doc(db('companyASuperAdmin'), `${orders}/overpaid`), { companyId: 'companyA', totalPrice: 5000, totalPaid: 6000, remainingBalance: 0, paymentStatus: 'fully_paid' }));
+});
+
+test('52 an order untouched financially stays editable even with legacy figures', async () => {
+  const legacy = doc(db('companyASuperAdmin'), `${company('companyA')}/orders/legacyFinancials`);
+  await assertSucceeds(setDoc(legacy, { companyId: 'companyA', totalPrice: 5000, totalPaid: 1000, remainingBalance: 4000, eventLocation: 'Hall' }));
+  // A later non-financial edit must not be blocked by the guards.
+  await assertSucceeds(updateDoc(legacy, { eventLocation: 'Other hall' }));
+});
+
+test('53 expense writes reject non-positive amounts and malformed dates', async () => {
+  const expenses = `${company('companyA')}/expenses`;
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${expenses}/zero`), { companyId: 'companyA', amount: 0, date: '2026-09-01' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${expenses}/negative`), { companyId: 'companyA', amount: -50, date: '2026-09-01' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${expenses}/text`), { companyId: 'companyA', amount: '50', date: '2026-09-01' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${expenses}/badDate`), { companyId: 'companyA', amount: 50, date: 'yesterday' }));
+  await assertFails(setDoc(doc(db('companyASuperAdmin'), `${expenses}/badLink`), { companyId: 'companyA', amount: 50, date: '2026-09-01', linkedOrderId: 12 }));
+  await assertSucceeds(setDoc(doc(db('companyASuperAdmin'), `${expenses}/valid`), { companyId: 'companyA', amount: 50, date: '2026-09-01', linkedOrderId: 'orderA' }));
+});
+
+test('54 financial entries are voided, never destroyed', async () => {
+  const expense = doc(db('companyASuperAdmin'), `${company('companyA')}/expenses/voidable`);
+  await assertSucceeds(setDoc(expense, { companyId: 'companyA', amount: 250, date: '2026-08-09', type: 'expense', category: 'إيجار' }));
+  // A hard delete would destroy accounting evidence.
+  await assertFails(deleteDoc(expense));
+  // Marking the entry voided and writing its dated reversal are both allowed.
+  await assertSucceeds(updateDoc(expense, { voidedAt: '2026-09-12T00:00:00.000Z', reversedByEntryId: 'exp_reversal', updatedAt: '2026-09-12T00:00:00.000Z' }));
+  await assertSucceeds(setDoc(doc(db('companyASuperAdmin'), `${company('companyA')}/expenses/exp_reversal`), { companyId: 'companyA', amount: 250, date: '2026-09-12', type: 'expense', category: 'إيجار', isReversal: true, reversalOfId: 'voidable' }));
+});
