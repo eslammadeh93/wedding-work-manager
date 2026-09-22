@@ -220,6 +220,24 @@ const inferredPaymentType = (order: Order, payment: PaymentEntry, index: number)
 };
 
 /**
+ * Whether a booking was cancelled with its money kept.
+ *
+ * The stored status is normalised before it is compared. A record written by
+ * an older version, an import or a hand edit can carry the same status with
+ * different spacing, casing or separators, and a strict string comparison
+ * silently dropped it out of every retained rule: it then fell through to the
+ * execution-date branches, where an order that was never executed has no event
+ * date and so recognized no profit at all, while its retained cash still
+ * counted. Retained money is profit whatever the record's spelling.
+ *
+ * This reads the stored value tolerantly and never rewrites it. Every retained
+ * rule goes through here - recognition and the presentation buckets alike - so
+ * one legacy record can never be retained for one rule and active for another.
+ */
+export const isRetainedCancellation = (order: Pick<Order, 'orderStatus'>): boolean =>
+  String(order.orderStatus || '').trim().toLowerCase().replace(/[\s-]+/g, '_') === 'cancelled_deposit_retained';
+
+/**
  * Gets individual collections. Legacy orders that only contain `deposit` or a
  * stored total get one clearly marked estimated entry on their booking date.
  */
@@ -243,7 +261,7 @@ export const orderCashCollections = (order: Order): CashCollection[] => {
     orderNumber: order.orderNumber,
     customerName: order.customerName,
     isCompletedOrder: order.orderStatus === 'completed',
-    isRetainedDeposit: order.orderStatus === 'cancelled_deposit_retained',
+    isRetainedDeposit: isRetainedCancellation(order),
   };
 
   const entries: CashCollection[] = history.map((payment: PaymentEntry, index) => ({
@@ -353,13 +371,13 @@ export const netOrderCashContribution = (
  * A cancelled order is not going to happen, so it contributes nothing.
  */
 /**
- * Retained cancellations that predate `cancelledAt`. Their profit is still
- * recognized on the payment date rather than the cancellation date, so the
- * figure is defensible but not strictly correct. They are reported rather than
- * silently assigned a date nobody recorded.
+ * Retained cancellations carrying no cancellation date at all. Their profit is
+ * unaffected - it follows the payment dates like every other retained
+ * cancellation - so this reports a gap in the record's history, not a gap in
+ * its accounting.
  */
 export const retainedCancellationsMissingDate = (orders: readonly Order[]): Order[] =>
-  orders.filter((order) => order.orderStatus === 'cancelled_deposit_retained'
+  orders.filter((order) => isRetainedCancellation(order)
     && !order.deletedAt
     && !order.cancelledAt
     && !(order.cancellationHistory || []).length);
@@ -381,8 +399,10 @@ const monthKey = (year: number, month: number) => `${year}-${String(month + 1).p
  * transport costs are not deducted yet because they are not owed until
  * fulfillment, and its margin belongs to the month it is executed in.
  *
- * A booking cancelled with its deposit kept is a third case: the retained
- * money is profit the business has earned, recognized where the cash landed.
+ * A booking cancelled with its deposit kept is a third case: the money the
+ * business keeps is profit, recognized in the month it was actually received.
+ * Its execution date is irrelevant - it may have none - and so is the date it
+ * was cancelled, because cancelling moves no money.
  *
  * Each order falls in exactly one section, so no amount is counted twice
  * within a month.
@@ -394,136 +414,47 @@ export const expectedOrderProfitContribution = (order: Order, year: number, mont
   if (order.deletedAt) return 0;
 
   const collections = orderCashCollections(order);
-  const retainedAsAt = (asOf: string) => Math.max(0, collections
-    .filter((collection) => (dateKey(collection.date) || '') <= asOf)
-    .reduce((total, collection) => total + collection.amount, 0));
-  const movedInMonthAfter = (from: string) => collections
-    .filter((collection) => (dateKey(collection.date) || '') > from && inMonth(dateKey(collection.date), year, month))
+  /** Net contract money that moved in the selected month, by its own date. */
+  const collectedInMonth = () => collections
+    .filter((collection) => inMonth(dateKey(collection.date), year, month))
     .reduce((total, collection) => total + collection.amount, 0);
 
   /**
-   * What the cancellation lifecycle recognizes in this month.
+   * A booking cancelled with its money kept.
    *
-   * The sequence is walked in order and each event recognizes only the change
-   * it makes, in the month it happened: a cancellation with the deposit kept
-   * recognizes what had actually been kept by then, and a reinstatement or a
-   * plain cancellation reverses what was recognized, in its own month. An
-   * earlier month therefore keeps the figure it reported no matter what
-   * happens to the booking later.
+   * The money the business keeps is profit, and it is recognized in the month
+   * it was actually received - the same month its cash landed in - so the two
+   * figures agree there instead of the profit appearing in a later month on
+   * its own. A refund is the same movement in reverse, recognized in the month
+   * the money went back; the month that originally reported the receipt keeps
+   * its figure.
    *
-   * This runs whatever the order's current status is. If it only ran while the
-   * order was still cancelled, reinstating it would make the original
-   * recognition disappear from its month instead of being reversed in the
-   * month the reinstatement happened.
+   * `cancelledAt` and `cancellationHistory` stay stored and are still read for
+   * lifecycle and history, but they no longer place this profit in a month: a
+   * cancellation moves no money, so it can create none. Nothing here depends
+   * on an event date either, because a retained booking may never have been
+   * executed, or even scheduled, at all.
    */
-  const lifecycleContribution = (): number => {
-    const history = [...(order.cancellationHistory || [])]
-      .filter((event) => dateKey(event.at))
-      .sort((a, b) => String(a.at).localeCompare(String(b.at)));
-    if (history.length === 0) return 0;
+  if (isRetainedCancellation(order)) return collectedInMonth();
 
-    // A history that does not open with the booking's own cancellation means it
-    // was already cancelled before any of this was recorded. Whatever the
-    // receipt-date fallback had recognized for it is reversed by the first
-    // event rather than left dangling - and the months before that event keep
-    // reporting it, which `legacyRecognizedBefore` below preserves.
-    const firstEventDate = dateKey(history[0].at) as string;
-    const openedMidLifecycle = history[0].kind === 'reinstated' || (history[0].kind === 'cancelled' && !order.cancelledAt);
-    let recognized = openedMidLifecycle
-      ? Math.max(0, collections
-        .filter((collection) => (dateKey(collection.date) || '') < `${firstEventDate.slice(0, 7)}-01`)
-        .reduce((total, collection) => total + collection.amount, 0))
-      : 0;
-    let contribution = 0;
-    let retainedSince: string | null = null;
-    let boundary = '';
+  // A booking cancelled outright keeps nothing, so it forecasts no margin in
+  // any month. What it collected and refunded stays on its real dates in
+  // `netOrderCashContribution`, untouched.
+  if (order.orderStatus === 'cancelled') return 0;
 
-    for (const event of history) {
-      const eventDate = dateKey(event.at) as string;
-
-      // Money that moved while the deposit was being held is recognized in the
-      // month it moved, before the next decision is measured. Without this a
-      // refund sitting between two events would be swept into the later one's
-      // figure and reported in the wrong month.
-      if (retainedSince) {
-        for (const collection of collections) {
-          const collectionDate = dateKey(collection.date) || '';
-          if (collectionDate <= boundary || collectionDate > eventDate) continue;
-          if (inMonth(collectionDate, year, month)) contribution += collection.amount;
-          recognized += collection.amount;
-        }
-      }
-
-      const target = event.kind === 'cancelled_deposit_retained' ? retainedAsAt(eventDate) : 0;
-      // The event recognizes only what is left to recognize, so an earlier
-      // refund already accounted for above is never counted a second time.
-      if (inMonth(eventDate, year, month)) contribution += target - recognized;
-      recognized = target;
-      retainedSince = event.kind === 'cancelled_deposit_retained' ? eventDate : null;
-      boundary = eventDate;
-    }
-    // Money returned after the last cancellation belongs to the month it went
-    // back, not to the month that cancellation was recognized in.
-    if (retainedSince) contribution += movedInMonthAfter(retainedSince);
-    return contribution;
-  };
-
-  const lifecycle = lifecycleContribution();
-  const history = order.cancellationHistory || [];
-  const hasHistory = history.length > 0;
-
-  // The receipt-date fallback still governs the months before a legacy record
-  // gained any history, so a month that had already reported an amount keeps
-  // reporting it instead of emptying the moment the booking is touched again.
-  const legacyMonthsBeforeHistory = (): number | null => {
-    if (!hasHistory || order.cancelledAt) return null;
-    const firstEventMonth = (dateKey(history[0].at) || '').slice(0, 7);
-    if (!firstEventMonth || monthKey(year, month) >= firstEventMonth) return null;
-    return collections
-      .filter((collection) => inMonth(dateKey(collection.date), year, month))
-      .reduce((total, collection) => total + collection.amount, 0);
-  };
-
-  const beforeHistory = legacyMonthsBeforeHistory();
-  if (beforeHistory !== null) return beforeHistory;
-
-  if (order.orderStatus === 'cancelled_deposit_retained') {
-    if (hasHistory) return lifecycle;
-
-    const cancelledOn = dateKey(order.cancelledAt);
-    if (cancelledOn) {
-      // Cancelled once, before the lifecycle history existed.
-      if (inMonth(cancelledOn, year, month)) return retainedAsAt(cancelledOn) + movedInMonthAfter(cancelledOn);
-      return monthKey(year, month) > cancelledOn.slice(0, 7) ? movedInMonthAfter(cancelledOn) : 0;
-    }
-
-    // Cancelled before any date was recorded. Guessing when it happened would
-    // move money into a month on no evidence, so these keep the behaviour they
-    // have always had - recognized where the cash landed - and are listed by
-    // `retainedCancellationsMissingDate` so they can be dated deliberately.
-    return collections
-      .filter((collection) => inMonth(dateKey(collection.date), year, month))
-      .reduce((total, collection) => total + collection.amount, 0);
-  }
-
-  // A booking cancelled outright keeps nothing. Any recognition an earlier
-  // retention made is still reversed on its own date by the lifecycle above.
-  if (order.orderStatus === 'cancelled') return lifecycle;
-
-  // Live again: it earns its margin or advances as usual, and the lifecycle
-  // reversal sits alongside that in the month it happened.
   const eventDate = dateKey(order.eventDate || order.weddingDate);
 
   // (A) Executed this month: the whole contract margin, collected or not.
   if (inMonth(eventDate, year, month)) {
-    return lifecycle + positiveAmount(order.totalPrice)
+    return positiveAmount(order.totalPrice)
       - positiveAmount(order.otherExpenses)
       - positiveAmount(order.workerCost)
       - positiveAmount(order.transportationCost);
   }
 
-  // (B) Executed later: only the cash that came in this month.
-  if ((eventDate || '').slice(0, 7) <= monthKey(year, month)) return lifecycle;
+  // (B) Executed earlier: its margin was recognized in its own month, so a
+  // payment arriving now is cash only.
+  if ((eventDate || '').slice(0, 7) <= monthKey(year, month)) return 0;
 
   const selectedMonthStart = `${monthKey(year, month)}-01`;
   // Refunds net off naturally because their collections are already negative.
@@ -546,7 +477,7 @@ export const expectedOrderProfitContribution = (order: Order, year: number, mont
     ? positiveAmount(order.otherExpenses)
     : 0;
 
-  return lifecycle + countedAdvance - bookedCosts;
+  return countedAdvance - bookedCosts;
 };
 
 export const calculateMonthlyCash = (
@@ -569,7 +500,7 @@ export const calculateMonthlyCash = (
   // cancellation - retained deposits have their own bucket. Cancelled orders
   // stay here deliberately: the money they received was really received, and a
   // cancellation must not delete it out of a month that was already reported.
-  const isUpcomingForSelectedMonth = (order: Order) => order.orderStatus !== 'cancelled_deposit_retained'
+  const isUpcomingForSelectedMonth = (order: Order) => !isRetainedCancellation(order)
     && !completedInSelectedMonth(order);
   const allCollections = orders.flatMap(orderCashCollections);
   const collections = allCollections
@@ -592,7 +523,7 @@ export const calculateMonthlyCash = (
   // The remaining amount is expected on the execution date. This is a forecast,
   // so it uses the outstanding balance rather than payments already collected.
   const expectedSettlementPayments = orders
-    .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
+    .filter((order) => order.orderStatus !== 'cancelled' && !isRetainedCancellation(order)
       && inMonth(dateKey(order.eventDate || order.weddingDate), year, month))
     .reduce((total, order) => total + Math.max(0, positiveAmount(order.totalPrice) - recordedOrderPayment(order)), 0);
   const upcomingOrderDeposits = sum(collections.filter((collection) => {
@@ -725,7 +656,7 @@ export const calculateMonthlyCash = (
       })
       .filter((item): item is NonNullable<typeof item> => item !== null),
     ...orders
-      .filter((order) => order.orderStatus === 'cancelled_deposit_retained')
+      .filter((order) => isRetainedCancellation(order))
       .map((order) => {
         const amount = sum(collections.filter((collection) => collection.orderId === order.id && collection.isRetainedDeposit));
         return amount > 0 ? {

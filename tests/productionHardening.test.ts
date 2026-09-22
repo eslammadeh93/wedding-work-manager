@@ -230,10 +230,10 @@ test('no legacy repair workflow is exposed anywhere in the application', () => {
 });
 
 test('the monthly reconciliation survives the panel removal, with no repair action', () => {
+  // What is left on the screen is the summary and the orders causing the gap.
   const reports = fs.readFileSync('src/components/reports/ReportsModule.tsx', 'utf8');
   assert.ok(reports.includes('reconcileMonthlyCash'), 'the reconciliation still runs');
-  assert.ok(reports.includes('cashReconciliation.globalIssues'), 'global issues still render');
-  assert.ok(reports.includes('مشاكل بيانات عامة — كل الفترات'), 'under their own heading');
+  assert.ok(reports.includes('cashReconciliation.items'), 'the per-order cards still render');
   assert.ok(reports.includes('reasonText[item.reason]'), 'and each order still explains its own difference');
 });
 

@@ -4,11 +4,14 @@ import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
 import type { Order, Worker } from '../../types';
 import { localDateString } from '../../utils/localDate';
+import { isRetainedCancellation } from '../../utils/monthlyCash';
 
 type Period = 'all' | 'month' | 'week';
 type WorkerPerformance = { id: string; name: string; assigned: number; completed: number; active: number; overdue: number; completionRate: number; orders: Order[] };
 const doneStatuses = new Set(['completed', 'returned']);
 const cancelledStatuses = new Set(['cancelled', 'cancelled_deposit_retained']);
+/** Cancelled either way, including a retained cancellation stored oddly. */
+const isCancelledOrder = (order: Order) => cancelledStatuses.has(order.orderStatus) || isRetainedCancellation(order);
 const orderDate = (order: Order) => order.weddingDate || order.eventDate || order.createdAt?.slice(0, 10) || '';
 
 export function WorkerPerformanceModule() {
@@ -34,8 +37,8 @@ export function WorkerPerformanceModule() {
     if (isWorker && ownWorkerId && !byWorker.has(ownWorkerId)) byWorker.set(ownWorkerId, []);
     return [...byWorker.entries()].map(([id, assignedOrders]) => {
       const completed = assignedOrders.filter(order => doneStatuses.has(order.orderStatus)).length;
-      const active = assignedOrders.filter(order => !doneStatuses.has(order.orderStatus) && !cancelledStatuses.has(order.orderStatus)).length;
-      const overdue = assignedOrders.filter(order => orderDate(order) < today && !doneStatuses.has(order.orderStatus) && !cancelledStatuses.has(order.orderStatus)).length;
+      const active = assignedOrders.filter(order => !doneStatuses.has(order.orderStatus) && !isCancelledOrder(order)).length;
+      const overdue = assignedOrders.filter(order => orderDate(order) < today && !doneStatuses.has(order.orderStatus) && !isCancelledOrder(order)).length;
       const fallbackName = assignedOrders.find(order => order.workerName)?.workerName || (id === ownWorkerId ? (authSession?.displayName || profile?.workerName || 'العامل الحالي') : 'عامل غير مسجل');
       return { id, name: knownWorkers.get(id)?.fullName || fallbackName, assigned: assignedOrders.length, completed, active, overdue, completionRate: assignedOrders.length ? Math.round((completed / assignedOrders.length) * 100) : 0, orders: assignedOrders };
     }).sort((a, b) => b.completionRate - a.completionRate || b.completed - a.completed || a.name.localeCompare(b.name));

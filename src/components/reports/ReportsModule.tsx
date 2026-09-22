@@ -26,7 +26,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { completedOrderFulfillmentCosts, recordedOrderPayment } from '../../utils/orderPayments';
-import { calculateMonthlyCash, orderCashCollections } from '../../utils/monthlyCash';
+import { calculateMonthlyCash, isRetainedCancellation, orderCashCollections } from '../../utils/monthlyCash';
 import { expenseMetricState, financialExportBlockedReason, orderMetricState } from '../../utils/financialAvailability';
 import { availableFinancialYears, isInFinancialMonth } from '../../utils/financialCalendar';
 import { reconcileMonthlyCash, type ReconciliationReason } from '../../utils/monthlyCashReconciliation';
@@ -165,8 +165,8 @@ export const ReportsModule: React.FC = () => {
       en: 'Cancelled with nothing retained: no margin is recognized, the collected cash stays in its own month, and any refund shows in its month.',
     },
     'retained-cancellation': {
-      ar: 'إلغاء مع احتجاز العربون: الربح يُعترف به في شهر حدث الإلغاء، وقد يختلف عن شهر دخول الفلوس.',
-      en: 'Cancelled with the deposit retained: profit is recognized in the month the cancellation happened, which can differ from the month the cash arrived.',
+      ar: 'إلغاء مع احتجاز العربون: العربون المحتفظ به يُحتسب كربح في شهر استلامه، وأي مبلغ مسترد يُخصم في شهر رده. تاريخ المناسبة وتاريخ الإلغاء لا يؤثران.',
+      en: 'Cancelled with the deposit retained: the kept money counts as profit in the month it was received, and any refund is deducted in the month it went back. The event and cancellation dates do not matter.',
     },
     'collection-after-event-month': {
       ar: 'موعد التنفيذ في شهر سابق: ربح الأوردر اتحسب في شهر تنفيذه، والمبلغ الذي وصل هذا الشهر فلوس فقط وليس ربحًا جديدًا.',
@@ -242,7 +242,7 @@ export const ReportsModule: React.FC = () => {
     const orderById = new Map(sourceOrders.map((order) => [order.id, order]));
     const isCompletedThisMonth = (order: typeof sourceOrders[number]) => order.orderStatus === 'completed' && inSelectedMonth(order.eventDate || order.weddingDate);
     const isUpcoming = (order: typeof sourceOrders[number]) => order.orderStatus !== 'cancelled'
-      && order.orderStatus !== 'cancelled_deposit_retained' && !isCompletedThisMonth(order);
+      && !isRetainedCancellation(order) && !isCompletedThisMonth(order);
     const collectionDetail = (collection: typeof cashSummary.collections[number]): CashCardDetailItem => ({
       id: collection.id,
       orderNumber: collection.orderNumber,
@@ -258,7 +258,7 @@ export const ReportsModule: React.FC = () => {
       .filter((item) => item.kind === 'upcoming-expense')
       .map((item) => ({ id: item.id, orderNumber: item.orderNumber, customerName: item.customerName, type: 'upcoming-expense' as const, amount: item.amount }));
     const expectedSettlements = sourceOrders
-      .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inSelectedMonth(order.eventDate || order.weddingDate))
+      .filter((order) => order.orderStatus !== 'cancelled' && !isRetainedCancellation(order) && inSelectedMonth(order.eventDate || order.weddingDate))
       .map((order) => ({
         id: `${order.id}-expected-settlement`, orderNumber: order.orderNumber, customerName: order.customerName,
         type: 'expected-settlement' as const, amount: Math.max(0, amount(order.totalPrice) - recordedOrderPayment(order)),
@@ -266,7 +266,7 @@ export const ReportsModule: React.FC = () => {
       .filter((item) => item.amount > 0);
     const expectedProfitItems = [
       ...sourceOrders
-        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && inSelectedMonth(order.eventDate || order.weddingDate))
+        .filter((order) => order.orderStatus !== 'cancelled' && !isRetainedCancellation(order) && inSelectedMonth(order.eventDate || order.weddingDate))
         .map((order) => ({
           id: `${order.id}-expected-profit`, orderNumber: order.orderNumber, customerName: order.customerName,
           type: 'expected-profit' as const, amount: amount(order.totalPrice) - amount(order.otherExpenses) - amount(order.workerCost) - amount(order.transportationCost),
@@ -275,7 +275,7 @@ export const ReportsModule: React.FC = () => {
         .filter((collection) => collection.isRetainedDeposit)
         .map((collection) => ({ ...collectionDetail(collection), id: `${collection.id}-expected-profit` })),
       ...sourceOrders
-        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained'
+        .filter((order) => order.orderStatus !== 'cancelled' && !isRetainedCancellation(order)
           && inSelectedMonth(order.bookingDate || order.createdAt) && (order.eventDate || order.weddingDate || '') > monthEnd)
         .flatMap((order) => orderCashCollections(order)
           .filter((collection) => inSelectedMonth(collection.date) && collection.paymentType === 'deposit')
@@ -323,7 +323,7 @@ export const ReportsModule: React.FC = () => {
         .map((order) => ({ id: `safe-completed-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'completed-order-cost' as const, amount: -completedOrderFulfillmentCosts(order) }))
         .filter((item) => item.amount < 0),
       ...sourceOrders
-        .filter((order) => order.orderStatus !== 'cancelled' && order.orderStatus !== 'cancelled_deposit_retained' && isOnOrBeforeMonthEnd(order.bookingDate || order.createdAt) && amount(order.otherExpenses) > 0)
+        .filter((order) => order.orderStatus !== 'cancelled' && !isRetainedCancellation(order) && isOnOrBeforeMonthEnd(order.bookingDate || order.createdAt) && amount(order.otherExpenses) > 0)
         .map((order) => ({ id: `safe-upcoming-cost-${order.id}`, orderNumber: order.orderNumber, customerName: order.customerName, type: 'upcoming-expense' as const, amount: -amount(order.otherExpenses) })),
     ];
   }, [expenses, language, selectedMonth, selectedYear, sourceOrders]);
@@ -637,10 +637,10 @@ export const ReportsModule: React.FC = () => {
           </div>
         </div>
 
-        {showCashReview && <div className={`rounded-2xl border p-4 md:p-5 ${Math.abs(cashReconciliation.difference) < 0.01 && cashReconciliation.issues.length === 0 ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20' : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'}`}>
+        {showCashReview && <div className={`rounded-2xl border p-4 md:p-5 ${Math.abs(cashReconciliation.difference) < 0.01 ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20' : 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'}`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex gap-2.5">
-              {Math.abs(cashReconciliation.difference) < 0.01 && cashReconciliation.issues.length === 0
+              {Math.abs(cashReconciliation.difference) < 0.01
                 ? <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />}
               <div>
@@ -687,35 +687,6 @@ export const ReportsModule: React.FC = () => {
             </div>
           </div>}
 
-          {cashReconciliation.issues.length > 0 && <div className="mt-4 border-t border-amber-200/80 pt-4 dark:border-amber-900/60">
-            <p className="mb-1 text-xs font-black text-slate-800 dark:text-slate-100">{language === 'ar' ? `بيانات تحتاج مراجعة — ${selectedMonthName}` : `Data needing review — ${selectedMonthName}`}</p>
-            <p className="mb-2 text-[11px] leading-5 text-slate-500">{language === 'ar' ? 'أوردرات لها حركة مالية في هذا الشهر فقط: دفعة أو استرداد بتاريخ الشهر، أو موعد تنفيذ فيه، أو حدث إلغاء خلاله.' : 'Only orders with activity in this month: a payment or refund dated in it, an event scheduled in it, or a cancellation event during it.'}</p>
-            <ul className="space-y-1.5 text-xs leading-5 text-rose-700 dark:text-rose-300">
-              {cashReconciliation.issues.slice(0, 8).map(issue => <li key={issue.id}>{language === 'ar' ? issue.messageAr : issue.messageEn}</li>)}
-            </ul>
-          </div>}
-        </div>}
-
-        {/*
-          Faults that are true of the record in every month. They are kept
-          visible whatever month is selected, and deliberately sit outside the
-          month panel: none of them is part of the selected month's difference.
-        */}
-        {showCashReview && cashReconciliation.globalIssues.length > 0 && <div className="rounded-2xl border border-slate-300 bg-slate-50 p-4 md:p-5 dark:border-slate-700 dark:bg-slate-900/40">
-          <div className="flex gap-2.5">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-slate-500 dark:text-slate-400" />
-            <div>
-              <h4 className="font-black text-slate-900 dark:text-white">{language === 'ar' ? 'مشاكل بيانات عامة — كل الفترات' : 'General data problems — all periods'}</h4>
-              <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                {language === 'ar'
-                  ? 'مشاكل في السجل نفسه وليست تابعة لشهر معيّن، ولا تدخل في فرق مراجعة هذا الشهر. تظهر دائمًا مهما كان الشهر المختار.'
-                  : 'Problems with the record itself, belonging to no single month. They are not part of this month’s difference and stay visible whichever month is selected.'}
-              </p>
-            </div>
-          </div>
-          <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-700 dark:text-slate-300">
-            {cashReconciliation.globalIssues.slice(0, 8).map(issue => <li key={issue.id}>{language === 'ar' ? issue.messageAr : issue.messageEn}</li>)}
-          </ul>
         </div>}
 
         {/* The headline mirrors the operational cash formula shown to the user. */}

@@ -575,9 +575,9 @@ test('a same-month order is never counted through more than one section', () => 
   assert.equal(expectedOrderProfitContribution(retainedInstead, ...SEP), 10_000);
 });
 
-// --- Retained cancellation recognized on the cancellation date --------------
+// --- Retained cancellation recognized on the receipt date -------------------
 
-test('cash stays in September while the retained profit lands in October', () => {
+test('cash and the retained profit both land in the month the money arrived', () => {
   // Your example: 5,000 taken on 15 September, cancelled with the deposit
   // kept on 10 October.
   const retained = [order({
@@ -593,9 +593,10 @@ test('cash stays in September while the retained profit lands in October', () =>
   assert.equal(calculateMonthlyCash(retained, [], ...SEP).netOrderCash, 5_000);
   assert.equal(calculateMonthlyCash(retained, [], ...OCT).netOrderCash, 0, 'cancelling creates no cash');
 
-  // Profit is recognized when the business decided to keep the money.
-  assert.equal(expectedOrderProfitContribution(retained[0], ...SEP), 0);
-  assert.equal(expectedOrderProfitContribution(retained[0], ...OCT), 5_000);
+  // Profit is recognized where the money actually arrived, so it agrees with
+  // the cash in that month instead of appearing on its own in a later one.
+  assert.equal(expectedOrderProfitContribution(retained[0], ...SEP), 5_000);
+  assert.equal(expectedOrderProfitContribution(retained[0], ...OCT), 0, 'cancelling recognizes nothing');
 
   // Treasury sees the 5,000 once, in September, and October adds nothing.
   const september = calculateFinancePeriodCash(retained, [], '2026-09', '2026-09');
@@ -628,9 +629,10 @@ test('a refund made before the cancellation reduces what was retained', () => {
     cancelledAt: '2026-10-10T09:30:00.000Z',
   });
 
-  // Only the 2,000 actually kept is ever recognized, and only in October.
-  assert.equal(expectedOrderProfitContribution(partlyReturned, ...OCT), 2_000);
-  assert.equal(expectedOrderProfitContribution(partlyReturned, ...SEP), 0);
+  // Only the 2,000 actually kept is ever recognized: the receipt and the
+  // refund both fall in September, so September nets them.
+  assert.equal(expectedOrderProfitContribution(partlyReturned, ...SEP), 2_000);
+  assert.equal(expectedOrderProfitContribution(partlyReturned, ...OCT), 0);
   // The cash movements stay on their own dates: 5,000 in, 3,000 back out.
   assert.equal(netOrderCashContribution(partlyReturned, [], ...SEP), 2_000);
 });
@@ -646,7 +648,7 @@ test('security-deposit money is never recognized as retained profit', () => {
     cancelledAt: '2026-10-10T09:30:00.000Z',
   });
 
-  assert.equal(expectedOrderProfitContribution(withSecurity, ...OCT), 5_000, 'the legacy 1,500 counts for nothing');
+  assert.equal(expectedOrderProfitContribution(withSecurity, ...SEP), 5_000, 'the legacy 1,500 counts for nothing');
   assert.equal(orderFinancialPosition(withSecurity).totalPaid, 5_000, 'and it is not paid towards the order');
 });
 
@@ -657,8 +659,8 @@ test('a legacy retained cancellation with no date keeps its previous behaviour',
     paymentHistory: [{ id: 'p1', amount: 5_000, date: '2026-09-15', method: 'Cash', type: 'deposit' }],
   });
 
-  // No date was ever recorded, so nothing is invented: it stays where the cash
-  // landed, exactly as it read before this change.
+  // Where the cash landed, like every other retained cancellation. A missing
+  // cancellation date changes nothing about the figure.
   assert.equal(expectedOrderProfitContribution(legacy, ...SEP), 5_000);
   assert.equal(expectedOrderProfitContribution(legacy, ...OCT), 0);
   // And it is listed so the ambiguity can be resolved deliberately.
@@ -747,13 +749,13 @@ const lifecycleOrder = (changes: Partial<Order> = {}) => order({
   ...changes,
 });
 
-test('the October recognition survives a November reinstatement and a December re-cancellation', () => {
+test('the September recognition is unmoved by the whole cancellation lifecycle', () => {
   const full = lifecycleOrder();
 
-  assert.equal(expectedOrderProfitContribution(full, ...SEP), 0, 'profit is recognized at cancellation, not receipt');
-  assert.equal(expectedOrderProfitContribution(full, ...OCT), 5_000, 'October keeps the figure it reported');
-  assert.equal(expectedOrderProfitContribution(full, ...NOV), -5_000, 'the reinstatement reverses it, in its own month');
-  assert.equal(expectedOrderProfitContribution(full, ...DEC), 5_000, 'the second cancellation recognizes it again');
+  assert.equal(expectedOrderProfitContribution(full, ...SEP), 5_000, 'recognized where the money arrived');
+  for (const [y, m] of [OCT, NOV, DEC]) {
+    assert.equal(expectedOrderProfitContribution(full, y, m), 0, 'a lifecycle event recognizes nothing');
+  }
 
   // Only one 5,000 is ever earned across the whole lifecycle.
   assert.equal([SEP, OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(full, y, m), 0), 5_000);
@@ -767,15 +769,16 @@ test('each stage of the lifecycle leaves the earlier months untouched', () => {
   });
   const afterRecancel = lifecycleOrder();
 
-  // October reads 5,000 at every later stage, including while the booking is
-  // live again - the reversal is a November event, not an October rewrite.
-  for (const state of [afterCancel, afterReinstate, afterRecancel]) {
-    assert.equal(expectedOrderProfitContribution(state, ...OCT), 5_000);
+  // September reads 5,000 while the booking is cancelled, and October never
+  // reads anything: no lifecycle event moves the figure.
+  for (const state of [afterCancel, afterRecancel]) {
+    assert.equal(expectedOrderProfitContribution(state, ...SEP), 5_000);
+    assert.equal(expectedOrderProfitContribution(state, ...OCT), 0);
+    assert.equal(expectedOrderProfitContribution(state, ...NOV), 0);
   }
-  assert.equal(expectedOrderProfitContribution(afterCancel, ...NOV), 0, 'nothing had happened yet');
-  assert.equal(expectedOrderProfitContribution(afterReinstate, ...NOV), -5_000);
-  assert.equal(expectedOrderProfitContribution(afterRecancel, ...NOV), -5_000);
-  // Reinstated and live, it forecasts its March margin again as any order would.
+  // Reinstated and live, it is an ordinary booking again: it forecasts its
+  // March margin and its September receipt is an advance, not retained profit.
+  assert.equal(expectedOrderProfitContribution(afterReinstate, ...SEP), 5_000, 'counted as an advance instead');
   assert.equal(expectedOrderProfitContribution(afterReinstate, 2027, 2), 40_000);
 });
 
@@ -800,8 +803,9 @@ test('a refund after either cancellation is recognized in its real refund month'
     ],
   });
 
-  assert.equal(expectedOrderProfitContribution(refundedLate, ...OCT), 5_000, 'October is not rewritten');
-  assert.equal(expectedOrderProfitContribution(refundedLate, ...DEC), 5_000);
+  assert.equal(expectedOrderProfitContribution(refundedLate, ...SEP), 5_000, 'September holds the receipt');
+  assert.equal(expectedOrderProfitContribution(refundedLate, ...OCT), 0);
+  assert.equal(expectedOrderProfitContribution(refundedLate, ...DEC), 0);
   assert.equal(expectedOrderProfitContribution(refundedLate, 2027, 0), -1_000, 'January carries the reduction');
   assert.equal(calculateMonthlyCash([refundedLate], [], 2027, 0).netOrderCash, -1_000, 'and so does the cash');
 
@@ -814,11 +818,12 @@ test('a refund after either cancellation is recognized in its real refund month'
       { id: 'r1', amount: 2_000, date: '2026-11-20', method: 'Cash', type: 'refund' },
     ],
   });
-  assert.equal(expectedOrderProfitContribution(refundedBetween, ...OCT), 5_000, 'October still reports what it reported');
-  assert.equal(expectedOrderProfitContribution(refundedBetween, ...DEC), 3_000, 'only 3,000 was still held in December');
+  assert.equal(expectedOrderProfitContribution(refundedBetween, ...SEP), 5_000, 'September holds the receipt');
+  assert.equal(expectedOrderProfitContribution(refundedBetween, ...NOV), -2_000, 'November holds the refund');
+  assert.equal(expectedOrderProfitContribution(refundedBetween, ...DEC), 0, 'and December recognizes nothing');
 });
 
-test('a plain re-cancellation reverses an earlier retention without earning anything', () => {
+test('a booking that ends plainly cancelled earns nothing in any month', () => {
   const downgraded = lifecycleOrder({
     orderStatus: 'cancelled',
     cancellationHistory: [
@@ -827,9 +832,10 @@ test('a plain re-cancellation reverses an earlier retention without earning anyt
     ],
   });
 
-  assert.equal(expectedOrderProfitContribution(downgraded, ...OCT), 5_000);
-  assert.equal(expectedOrderProfitContribution(downgraded, ...DEC), -5_000, 'keeping nothing after all');
-  assert.equal([OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(downgraded, y, m), 0), 0);
+  for (const [y, m] of [SEP, OCT, NOV, DEC]) {
+    assert.equal(expectedOrderProfitContribution(downgraded, y, m), 0, 'nothing is kept, so nothing is earned');
+  }
+  assert.equal(netOrderCashContribution(downgraded, [], ...SEP), 5_000, 'its real cash is untouched');
 });
 
 // --- changing the decision about the deposit --------------------------------
@@ -849,20 +855,18 @@ const CANCELLED_OCT = { kind: 'cancelled' as const, at: '2026-10-10T09:30:00.000
 const RETAINED_NOV = { kind: 'cancelled_deposit_retained' as const, at: '2026-11-20T14:00:00.000Z' };
 const CANCELLED_DEC = { kind: 'cancelled' as const, at: '2026-12-05T10:00:00.000Z' };
 
-test('deciding to keep the deposit is dated, and recognized in that month', () => {
+test('deciding to keep the deposit recognizes it in the month it was received', () => {
   const decided = decisionOrder([CANCELLED_OCT, RETAINED_NOV], 'cancelled_deposit_retained');
 
-  assert.equal(expectedOrderProfitContribution(decided, ...OCT), 0, 'the plain cancellation kept nothing');
-  assert.equal(expectedOrderProfitContribution(decided, ...NOV), 5_000, 'the decision is recognized when it was made');
-  assert.equal(expectedOrderProfitContribution(decided, ...SEP), 0);
+  assert.equal(expectedOrderProfitContribution(decided, ...SEP), 5_000, 'the month the money arrived');
+  assert.equal(expectedOrderProfitContribution(decided, ...OCT), 0);
+  assert.equal(expectedOrderProfitContribution(decided, ...NOV), 0, 'the decision itself recognizes nothing');
 });
 
-test('deciding to give it back after all reverses it in that month', () => {
+test('ending up plainly cancelled leaves no retained profit anywhere', () => {
   const reversed = decisionOrder([CANCELLED_OCT, RETAINED_NOV, CANCELLED_DEC], 'cancelled');
 
-  assert.equal(expectedOrderProfitContribution(reversed, ...OCT), 0);
-  assert.equal(expectedOrderProfitContribution(reversed, ...NOV), 5_000, 'November keeps what it reported');
-  assert.equal(expectedOrderProfitContribution(reversed, ...DEC), -5_000);
+  for (const [y, m] of [SEP, OCT, NOV, DEC]) assert.equal(expectedOrderProfitContribution(reversed, y, m), 0);
   assert.equal([SEP, OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(reversed, y, m), 0), 0);
 });
 
@@ -872,9 +876,10 @@ test('switching back again is recognized once more, leaving earlier months alone
     'cancelled_deposit_retained',
   );
 
-  assert.equal(expectedOrderProfitContribution(backAgain, ...NOV), 5_000);
-  assert.equal(expectedOrderProfitContribution(backAgain, ...DEC), -5_000);
-  assert.equal(expectedOrderProfitContribution(backAgain, 2027, 0), 5_000);
+  assert.equal(expectedOrderProfitContribution(backAgain, ...SEP), 5_000, 'still the receipt month');
+  for (const [y, m] of [OCT, NOV, DEC, [2027, 0] as const]) {
+    assert.equal(expectedOrderProfitContribution(backAgain, y, m), 0);
+  }
   // Only one 5,000 is earned in the end, however many times the decision moved.
   assert.equal(
     [SEP, OCT, NOV, DEC, [2027, 0] as const].reduce((t, [y, m]) => t + expectedOrderProfitContribution(backAgain, y, m), 0),
@@ -909,19 +914,15 @@ test('a decision change moves no cash and leaves treasury alone', () => {
   assert.equal(decisionOrder([CANCELLED_OCT, RETAINED_NOV], 'cancelled_deposit_retained').paymentHistory[0].date, '2026-09-15');
 });
 
-test('a legacy record that changes its decision keeps the month it already reported', () => {
-  // Retained before any of this existed, so September carried it through the
-  // receipt-date fallback. Deciding in November to give it back must reverse
-  // it in November, not empty September.
+test('a legacy record that ends up giving the money back retains no profit', () => {
   const legacyReversed = decisionOrder(
     [{ kind: 'cancelled', at: '2026-11-20T14:00:00.000Z' }],
     'cancelled',
     { cancelledAt: null },
   );
 
-  assert.equal(expectedOrderProfitContribution(legacyReversed, ...SEP), 5_000, 'September is not rewritten');
-  assert.equal(expectedOrderProfitContribution(legacyReversed, ...NOV), -5_000, 'the reversal lands where it happened');
-  assert.equal([SEP, OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(legacyReversed, y, m), 0), 0);
+  for (const [y, m] of [SEP, OCT, NOV, DEC]) assert.equal(expectedOrderProfitContribution(legacyReversed, y, m), 0);
+  assert.equal(netOrderCashContribution(legacyReversed, [], ...SEP), 5_000, 'the cash it took is untouched');
 });
 
 // --- a refund between two cancellation events -------------------------------
@@ -956,8 +957,8 @@ test('a refund between two cancellation events is reported in the refund month',
 test('the earlier cancellation month is not rewritten by the refund', () => {
   const between = refundBetweenEvents();
 
-  assert.equal(expectedOrderProfitContribution(between, ...OCT), 5_000, 'October still reports what it reported');
-  assert.equal(expectedOrderProfitContribution(between, ...SEP), 0, 'profit is recognized at cancellation, not receipt');
+  assert.equal(expectedOrderProfitContribution(between, ...SEP), 5_000, 'September holds the receipt');
+  assert.equal(expectedOrderProfitContribution(between, ...OCT), 0, 'a cancellation recognizes nothing');
 });
 
 test('the later cancellation recognizes only what is still held, and never the refund again', () => {
@@ -986,7 +987,7 @@ test('a refund between events moves treasury only on its own date', () => {
   assert.equal(refundBetweenEvents().paymentHistory[0].date, '2026-09-15', 'the receipt is never moved');
 });
 
-test('the same holds when the refund and the later event cross a year boundary', () => {
+test('the same holds when the receipt and the refund cross a year boundary', () => {
   const acrossYears = order({
     orderStatus: 'cancelled_deposit_retained',
     eventDate: '2027-08-20', weddingDate: '2027-08-20',
@@ -1003,8 +1004,8 @@ test('the same holds when the refund and the later event cross a year boundary',
     ],
   });
 
-  assert.equal(expectedOrderProfitContribution(acrossYears, ...NOV), 0, 'the receipt month earns nothing');
-  assert.equal(expectedOrderProfitContribution(acrossYears, ...DEC), 5_000, 'recognized at the December cancellation');
+  assert.equal(expectedOrderProfitContribution(acrossYears, ...NOV), 5_000, 'the receipt month earns it');
+  assert.equal(expectedOrderProfitContribution(acrossYears, ...DEC), 0, 'the December cancellation recognizes nothing');
   assert.equal(expectedOrderProfitContribution(acrossYears, ...JAN27), -1_500, 'the January refund lands in January');
   assert.equal(expectedOrderProfitContribution(acrossYears, ...FEB27), 0);
   assert.equal(expectedOrderProfitContribution(acrossYears, ...MAR27), 0, 'nothing left to recognize in March');
@@ -1019,10 +1020,10 @@ test('the same holds when the refund and the later event cross a year boundary',
   assert.equal(calculateSafeBalanceToDate([acrossYears], [], new Date(2027, 2, 31)), 3_500);
 });
 
-test('a refund while the booking is not retained is not a reversal of anything', () => {
+test('a refund is recognized in its own month whatever the lifecycle was doing', () => {
   // Retained in October, reinstated in November, refunded later that month,
-  // retained again in December: the refund reduces what can be re-retained
-  // rather than reversing a recognition, because none was open at the time.
+  // retained again in December: the money moved twice and each movement is
+  // recognized on its own date, whatever the booking's state was at the time.
   const whileLive = order({
     orderStatus: 'cancelled_deposit_retained',
     eventDate: '2027-06-20', weddingDate: '2027-06-20',
@@ -1040,9 +1041,10 @@ test('a refund while the booking is not retained is not a reversal of anything',
     ],
   });
 
-  assert.equal(expectedOrderProfitContribution(whileLive, ...OCT), 5_000);
-  assert.equal(expectedOrderProfitContribution(whileLive, ...NOV), -5_000, 'the reinstatement reversal, not the refund');
-  assert.equal(expectedOrderProfitContribution(whileLive, ...DEC), 3_000, 'only what was still held could be re-retained');
+  assert.equal(expectedOrderProfitContribution(whileLive, ...SEP), 5_000, 'the receipt');
+  assert.equal(expectedOrderProfitContribution(whileLive, ...OCT), 0);
+  assert.equal(expectedOrderProfitContribution(whileLive, ...NOV), -2_000, 'the refund, on its own date');
+  assert.equal(expectedOrderProfitContribution(whileLive, ...DEC), 0);
   assert.equal([SEP, OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(whileLive, y, m), 0), 3_000);
 });
 
@@ -1058,11 +1060,11 @@ const withLateRefund = () => order({
   cancelledAt: '2026-10-10T09:30:00.000Z',
 });
 
-test('a December refund does not rewrite the October retained profit', () => {
+test('a December refund does not rewrite the September retained profit', () => {
   const late = withLateRefund();
 
-  assert.equal(expectedOrderProfitContribution(late, ...SEP), 0, 'profit is recognized at cancellation, not receipt');
-  assert.equal(expectedOrderProfitContribution(late, ...OCT), 5_000, 'October keeps the figure it reported');
+  assert.equal(expectedOrderProfitContribution(late, ...SEP), 5_000, 'September holds the receipt');
+  assert.equal(expectedOrderProfitContribution(late, ...OCT), 0, 'the cancellation recognizes nothing');
   assert.equal(expectedOrderProfitContribution(late, ...DEC), -1_000, 'the reduction belongs to December');
 
   // Across the order's life only the 4,000 actually kept is ever earned.
@@ -1099,8 +1101,10 @@ test('a refund in the cancellation month is counted once, not twice', () => {
     cancelledAt: '2026-10-10T09:30:00.000Z',
   });
 
-  // Refunded after the cancellation but inside the same month: 5,000 retained
-  // less the 2,000 handed back, recognized once.
-  assert.equal(expectedOrderProfitContribution(sameMonth, ...OCT), 3_000);
+  // The receipt is September's and the refund is October's, each recognized
+  // once, on its own date.
+  assert.equal(expectedOrderProfitContribution(sameMonth, ...SEP), 5_000);
+  assert.equal(expectedOrderProfitContribution(sameMonth, ...OCT), -2_000);
   assert.equal(expectedOrderProfitContribution(sameMonth, ...DEC), 0);
+  assert.equal([SEP, OCT, NOV, DEC].reduce((t, [y, m]) => t + expectedOrderProfitContribution(sameMonth, y, m), 0), 3_000);
 });

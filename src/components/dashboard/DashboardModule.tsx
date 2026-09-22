@@ -18,7 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ActiveTab } from '../Sidebar';
 import { MobileManagerNav } from '../MobileManagerNav';
 import { expenseMetricState, orderMetricState } from '../../utils/financialAvailability';
-import { calculateMonthlyCash } from '../../utils/monthlyCash';
+import { calculateMonthlyCash, isRetainedCancellation } from '../../utils/monthlyCash';
 import { isInFinancialMonth, recentMonthWindows } from '../../utils/financialCalendar';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
 import { OrderSourceBadge } from '../orders/OrderSourceBadge';
@@ -97,7 +97,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   const completedOrdersCount = orders.filter((o) => o.orderStatus === 'completed').length;
 
   const upcomingWeddings = orders
-    .filter((o) => o.orderStatus !== 'completed' && o.orderStatus !== 'cancelled' && o.orderStatus !== 'cancelled_deposit_retained')
+    .filter((o) => o.orderStatus !== 'completed' && o.orderStatus !== 'cancelled' && !isRetainedCancellation(o))
     .sort((a, b) => new Date(a.weddingDate).getTime() - new Date(b.weddingDate).getTime());
 
   const lowInventoryItems = inventory.filter((i) => i.availableQuantity <= i.minStockLevel);
@@ -109,7 +109,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
     confirmed: orders.filter((o) => o.orderStatus === 'confirmed').length,
     in_progress: orders.filter((o) => o.orderStatus === 'in_progress').length,
     completed: orders.filter((o) => o.orderStatus === 'completed').length,
-    cancelled: orders.filter((o) => o.orderStatus === 'cancelled' || o.orderStatus === 'cancelled_deposit_retained').length,
+    cancelled: orders.filter((o) => o.orderStatus === 'cancelled' || isRetainedCancellation(o)).length,
   };
 
   // 6 Month Revenue Chart based on real orders & expenses.

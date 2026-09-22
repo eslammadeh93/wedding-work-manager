@@ -32,6 +32,7 @@ import { OrderDetailModal } from './OrderDetailModal';
 import { OrderInvoicePrint } from './OrderInvoicePrint';
 import { localDateString } from '../../utils/localDate';
 import { getOrderStatusLabel } from '../../utils/orderStatus';
+import { isRetainedCancellation } from '../../utils/monthlyCash';
 import { companyDataService } from '../../multiTenant/data/companyDataService';
 import { trustedCompanyIdFromSession } from '../../multiTenant/data/useTrustedCompanyId';
 import { getOrderSource, OrderSourceBadge } from './OrderSourceBadge';
@@ -60,6 +61,14 @@ const finishedOrderStatuses = new Set<OrderStatus>([
   'cancelled',
   'cancelled_deposit_retained',
 ]);
+
+/**
+ * An order that is over. The retained-cancellation status is matched through
+ * the shared predicate, so a legacy record stored with a different spelling
+ * lands in the finished list with the others instead of looking active.
+ */
+const isFinishedOrder = (order: Pick<Order, 'orderStatus'>) =>
+  finishedOrderStatuses.has(order.orderStatus) || isRetainedCancellation(order);
 
 interface OrdersModuleProps {
   createOrderRequest?: number;
@@ -301,7 +310,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
     // Remove it optimistically so a second delete is never offered meanwhile.
     if (useServerPagination) {
       setPagedOrders((current) => current.filter((item) => item.id !== order.id));
-      setOrderScopeCounts((current) => !current ? current : finishedOrderStatuses.has(order.orderStatus)
+      setOrderScopeCounts((current) => !current ? current : isFinishedOrder(order)
         ? { ...current, finished: Math.max(0, current.finished - 1) }
         : { ...current, active: Math.max(0, current.active - 1) });
     }
@@ -321,12 +330,12 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   };
 
   const activeOrdersCount = useMemo(
-    () => useServerPagination && orderScopeCounts ? orderScopeCounts.active : scopedOrders.filter(order => !finishedOrderStatuses.has(order.orderStatus)).length,
+    () => useServerPagination && orderScopeCounts ? orderScopeCounts.active : scopedOrders.filter(order => !isFinishedOrder(order)).length,
     [orderScopeCounts, scopedOrders, useServerPagination],
   );
 
   const finishedOrdersCount = useMemo(
-    () => useServerPagination && orderScopeCounts ? orderScopeCounts.finished : scopedOrders.filter(order => finishedOrderStatuses.has(order.orderStatus)).length,
+    () => useServerPagination && orderScopeCounts ? orderScopeCounts.finished : scopedOrders.filter(order => isFinishedOrder(order)).length,
     [orderScopeCounts, scopedOrders, useServerPagination],
   );
 
@@ -349,7 +358,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
       .filter((ord) => {
         // 0. Keep terminal orders in the dedicated completed section.
         if (ord.archivedAt) return false;
-        const isFinished = finishedOrderStatuses.has(ord.orderStatus);
+        const isFinished = isFinishedOrder(ord);
         if (orderListScope === 'finished' ? !isFinished : isFinished) return false;
 
         const bDate = getBookingDate(ord);
@@ -403,7 +412,7 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
           }
 
           if (quickFilter === 'upcoming_events') {
-            if (ord.orderStatus === 'cancelled_deposit_retained') return false;
+            if (isRetainedCancellation(ord)) return false;
             if (eDate < todayStr || ord.orderStatus === 'cancelled') return false;
           }
 
@@ -492,6 +501,8 @@ export const OrdersModule: React.FC<OrdersModuleProps> = ({ createOrderRequest =
   };
 
   const getStatusBadge = (status: OrderStatus) => {
+    // Matched before the switch so a legacy spelling still reads as retained.
+    if (isRetainedCancellation({ orderStatus: status })) return 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300';
     switch (status) {
       case 'pending':
       case 'preparing':

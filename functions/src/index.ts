@@ -1231,64 +1231,15 @@ const platformOrderRecord = (id: string, data: Record<string, unknown>): Platfor
     version: platformOrderVersion(data.updatedAt),
   };
 };
-type PlatformCashOrder = {
-  id: string; orderNumber: string; customerName: string; orderStatus: string; totalPrice: number; deposit: number; totalPaid: number;
-  bookingDate: string; eventDate: string; weddingDate: string; createdAt: string; workerCost: number; transportationCost: number; otherExpenses: number;
-  paymentMethod: string; paymentHistory: Array<Record<string, unknown>>;
-};
 const platformCashOrder = (id: string, data: Record<string, unknown>): PlatformCashOrder => ({
   id, orderNumber: String(data.orderNumber || id), customerName: String(data.customerName || 'بدون اسم'), orderStatus: String(data.orderStatus || 'new'),
   totalPrice: platformNumber(data.totalPrice), deposit: platformNumber(data.deposit), totalPaid: platformNumber(data.totalPaid),
   bookingDate: platformDate(data.bookingDate), eventDate: platformDate(data.eventDate), weddingDate: platformDate(data.weddingDate), createdAt: platformDate(data.createdAt),
   workerCost: platformNumber(data.workerCost), transportationCost: platformNumber(data.transportationCost), otherExpenses: platformNumber(data.otherExpenses),
   paymentMethod: String(data.paymentMethod || 'other'), paymentHistory: Array.isArray(data.paymentHistory) ? data.paymentHistory.filter((payment): payment is Record<string, unknown> => Boolean(payment && typeof payment === 'object')) : [],
+  fulfillmentRecognizedAt: platformDate(data.fulfillmentRecognizedAt),
 });
-const platformMonthMatches = (value: string, month: string) => value.startsWith(`${month}-`);
-const platformCashCollections = (order: PlatformCashOrder) => {
-  const history = order.paymentHistory.filter(payment => platformNumber(payment.amount) > 0);
-  const historyTotal = history.reduce((sum, payment) => sum + platformNumber(payment.amount), 0);
-  const actualPaid = order.totalPaid > 0 ? order.totalPaid : Math.max(order.deposit, historyTotal);
-  const fallbackDate = order.bookingDate || order.createdAt;
-  const entries = history.map((payment, index) => {
-    const amount = platformNumber(payment.amount);
-    const date = platformDate(payment.date) || fallbackDate;
-    const explicitType = payment.type === 'deposit' || payment.type === 'settlement' ? payment.type : '';
-    const paymentType = explicitType || (index === 0 && (date === fallbackDate || amount <= order.deposit) ? 'deposit' : 'settlement');
-    return { orderId: order.id, amount, date, paymentType, retained: order.orderStatus === 'cancelled_deposit_retained' };
-  });
-  if (actualPaid > historyTotal) entries.push({ orderId: order.id, amount: actualPaid - historyTotal, date: order.orderStatus === 'completed' ? (order.eventDate || order.weddingDate || fallbackDate) : fallbackDate, paymentType: history.length === 0 && order.deposit > 0 ? 'deposit' : 'settlement', retained: order.orderStatus === 'cancelled_deposit_retained' });
-  return entries;
-};
-const platformMonthlyAccounts = (orders: PlatformCashOrder[], expenses: Array<Record<string, unknown>>, month: string) => {
-  const monthEnd = `${month}-31`;
-  const eventDate = (order: PlatformCashOrder) => order.eventDate || order.weddingDate;
-  const completedInMonth = (order: PlatformCashOrder) => order.orderStatus === 'completed' && platformMonthMatches(eventDate(order), month);
-  const upcoming = (order: PlatformCashOrder) => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && !completedInMonth(order);
-  const allCollections = orders.filter(order => order.orderStatus !== 'cancelled').flatMap(platformCashCollections);
-  const collections = allCollections.filter(collection => platformMonthMatches(collection.date, month));
-  const sum = (items: Array<{ amount: number }>) => items.reduce((total, item) => total + item.amount, 0);
-  const byId = new Map(orders.map(order => [order.id, order]));
-  const collectedFromCompletedOrders = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && completedInMonth(order)); }));
-  const retainedCancelledDeposits = sum(collections.filter(collection => collection.retained));
-  const advancesFromUpcomingOrders = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && upcoming(order) && !collection.retained); }));
-  const standardCollections = collections.filter(collection => !collection.retained);
-  const totalDepositsPaid = sum(standardCollections.filter(collection => collection.paymentType === 'deposit')) + retainedCancelledDeposits;
-  const totalSettlementPayments = sum(standardCollections.filter(collection => collection.paymentType === 'settlement'));
-  const grossMonthlyIncome = totalDepositsPaid + totalSettlementPayments;
-  const expectedSettlementPayments = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + Math.max(0, order.totalPrice - (order.totalPaid > 0 ? order.totalPaid : order.deposit)), 0);
-  const upcomingOrderDeposits = sum(collections.filter(collection => { const order = byId.get(collection.orderId); return Boolean(order && upcoming(order) && !collection.retained && collection.paymentType === 'deposit'); }));
-  const operatingExpenses = expenses.filter(expense => platformMonthMatches(platformDate(expense.date), month) && expense.type !== 'capital' && String(expense.category || '') !== 'رأس مال' && !expense.deletedAt).reduce((total, expense) => total + platformNumber(expense.amount), 0);
-  const bookedInMonth = (order: PlatformCashOrder) => platformMonthMatches(order.bookingDate || order.createdAt, month);
-  // Booking expenses are spent before fulfillment and must not be charged again
-  // when an order booked in an earlier month is completed.
-  const completedOrderCosts = orders.filter(completedInMonth).reduce((total, order) => total + order.workerCost + order.transportationCost + (bookedInMonth(order) ? order.otherExpenses : 0), 0);
-  const upcomingOrderOtherExpenses = orders.filter(order => upcoming(order) && bookedInMonth(order)).reduce((total, order) => total + order.otherExpenses, 0);
-  const completedOrdersNetProfit = collectedFromCompletedOrders - completedOrderCosts;
-  const netMonthlyCash = completedOrdersNetProfit + advancesFromUpcomingOrders + retainedCancelledDeposits - upcomingOrderOtherExpenses;
-  const executedOrdersNetProfit = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(eventDate(order), month)).reduce((total, order) => total + order.totalPrice - order.otherExpenses - order.workerCost - order.transportationCost, 0);
-  const futureExecutionBookingDeposits = orders.filter(order => !['cancelled', 'cancelled_deposit_retained'].includes(order.orderStatus) && platformMonthMatches(order.bookingDate || order.createdAt, month) && eventDate(order) > monthEnd).flatMap(platformCashCollections).filter(collection => platformMonthMatches(collection.date, month) && collection.paymentType === 'deposit').reduce((total, collection) => total + collection.amount, 0);
-  return { month, netMonthlyCash, grossMonthlyIncome, completedOrdersNetProfit, retainedCancelledDeposits, upcomingOrderDepositsNet: upcomingOrderDeposits - upcomingOrderOtherExpenses, upcomingOrderOtherExpenses, netMonthlyOrderProfit: executedOrdersNetProfit + retainedCancelledDeposits + futureExecutionBookingDeposits, expectedSettlementPayments, operatingExpenses };
-};
+
 
 /** Owner-only directory of company owners; this cross-tenant contact data is never exposed through Firestore rules. */
 export const getPlatformCompanyContacts = onCall({ region: 'us-central1', timeoutSeconds: 120, enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
@@ -1320,6 +1271,7 @@ export const getPlatformCompanyContacts = onCall({ region: 'us-central1', timeou
 import { partitionPurgeCandidates, recognitionBackfillDecision } from './financialRetention.js';
 import { platformFinancialMonths } from './platformFinancialMonths.js';
 import { PlatformCorrectionError, platformOrderVersion, platformVersionsMatch, resolvePlatformOrderCorrection } from './platformOrderCorrection.js';
+import { platformMonthlyAccounts, type PlatformCashOrder } from './platformRetainedCancellation.js';
 
 /** Cross-company orders are deliberately exposed only to the platform owner. */
 export const getPlatformCompanyOrderAnalytics = onCall({ region: 'us-central1', timeoutSeconds: 120, memory: '512MiB', enforceAppCheck: false, invoker: 'public' }, async (request: PlatformOwnerRequest) => {
@@ -1348,7 +1300,7 @@ export const getPlatformCompanyOrderAnalytics = onCall({ region: 'us-central1', 
   const latest = monthly[0];
   const previous = monthly[1];
   const growthRate = latest && previous && previous.orderCount > 0 ? ((latest.orderCount - previous.orderCount) / previous.orderCount) * 100 : null;
-  const monthlyAccounts = monthly.map(month => platformMonthlyAccounts(cashOrders, expenseRecords, month.month));
+  const monthlyAccounts = monthly.map(month => platformMonthlyAccounts(cashOrders, expenseRecords, month.month, platformDate));
   await db.collection('platformAuditLogs').add({ action: 'platform_company_orders_analytics_viewed', companyId, createdBy: actorUid, timestamp: FieldValue.serverTimestamp() });
   return {
     success: true,

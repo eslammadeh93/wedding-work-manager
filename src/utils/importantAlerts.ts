@@ -1,4 +1,5 @@
 import type { ActivityLogRecord, InventoryItem, Order } from '../types';
+import { isRetainedCancellation } from './monthlyCash';
 
 export type ImportantAlertType = 'upcoming_order' | 'overdue_payment' | 'low_inventory' | 'missing_worker_arrival';
 
@@ -24,6 +25,8 @@ interface ImportantAlertsInput {
 }
 
 const inactiveStatuses = new Set(['completed', 'returned', 'cancelled', 'cancelled_deposit_retained']);
+/** Over, and therefore silent - including a retained cancellation stored oddly. */
+const isInactiveOrder = (order: Order) => inactiveStatuses.has(order.orderStatus) || isRetainedCancellation(order);
 
 function toLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -65,7 +68,7 @@ export function getImportantAlerts({ orders, inventory, activityLogs, now = new 
   );
 
   orders.forEach((order) => {
-    if (inactiveStatuses.has(order.orderStatus)) return;
+    if (isInactiveOrder(order)) return;
 
     const eventDate = eventDateOf(order);
     const orderLabel = order.orderNumber || order.id;

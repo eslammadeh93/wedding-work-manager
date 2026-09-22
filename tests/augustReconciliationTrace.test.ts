@@ -142,3 +142,90 @@ test('the same 1,000 collected for an August event is margin, not a gap', () => 
   assert.equal(cash, 1_000);
   assert.equal(reconcileMonthlyCash([augustEvent], noEntries, ...AUG).difference, 0);
 });
+
+// --- retained cancellations recognise their kept money as profit -------------
+
+/**
+ * A booking cancelled with its money kept is profit the business has earned,
+ * whether or not the event was ever scheduled, dated or executed. These cases
+ * used to fall through to the execution-date branches whenever the stored
+ * status was not byte-identical to the canonical one, where an order with no
+ * event date recognized nothing at all while its retained cash still counted.
+ */
+const retained = (changes: Partial<Order> = {}, status = 'cancelled_deposit_retained'): Order => order({
+  orderStatus: status as Order['orderStatus'],
+  eventDate: '', weddingDate: '', bookingDate: '', createdAt: '2026-08-01',
+  totalPrice: 0, deposit: 1_000, totalPaid: 1_000, remainingBalance: 0, paymentStatus: 'fully_paid',
+  paymentHistory: [{ id: 'p1', amount: 1_000, date: '2026-08-10', method: 'Cash', type: 'deposit' }],
+  ...changes,
+});
+
+test('a retained cancellation with no event date still recognises its retained profit', () => {
+  const subject = retained();
+  const { expected, cash } = trace(subject);
+
+  assert.equal(expected, 1_000, 'the kept money is profit, event date or not');
+  assert.equal(cash, 1_000, 'and the cash it really took is unchanged');
+  assert.equal(reconcileMonthlyCash([subject], noEntries, ...AUG).difference, 0, 'so the month reconciles exactly');
+});
+
+test('a retained cancellation is never explained by a missing event date', () => {
+  for (const status of [
+    'cancelled_deposit_retained',
+    'cancelled_deposit_retained ',
+    'CANCELLED_DEPOSIT_RETAINED',
+    'cancelled-deposit-retained',
+  ]) {
+    const subject = retained({}, status);
+    assert.equal(
+      reconcileMonthlyCash([subject], noEntries, ...AUG).items[0]?.reason ?? 'retained-cancellation',
+      'retained-cancellation',
+      `${JSON.stringify(status)} must read as a retained cancellation`,
+    );
+    assert.equal(expectedOrderProfitContribution(subject, ...AUG), 1_000, JSON.stringify(status));
+  }
+});
+
+test('retained recognition follows the receipt date, and adds no cash', () => {
+  // Cancelled in August, with the money taken in August: both land together.
+  const augustCancel = retained({ cancelledAt: '2026-08-20T00:00:00.000Z' });
+  assert.equal(expectedOrderProfitContribution(augustCancel, ...AUG), 1_000);
+  assert.equal(netOrderCashContribution(augustCancel, [], ...AUG), 1_000, 'cancelling adds no second 1,000');
+
+  // A lifecycle history does not move it either.
+  const withHistory = retained({
+    cancellationHistory: [{ kind: 'cancelled_deposit_retained', at: '2026-09-22T00:00:00.000Z' }],
+  });
+  assert.equal(expectedOrderProfitContribution(withHistory, ...AUG), 1_000, 'still the month the money arrived');
+  assert.equal(expectedOrderProfitContribution(withHistory, 2026, 8), 0);
+
+  // Cancelling a month later recognizes nothing in that later month.
+  const septemberCancel = retained({ cancelledAt: '2026-09-05T00:00:00.000Z' });
+  assert.equal(expectedOrderProfitContribution(septemberCancel, ...AUG), 1_000, 'August owns both figures');
+  assert.equal(expectedOrderProfitContribution(septemberCancel, 2026, 8), 0, 'September recognizes nothing');
+  assert.equal(netOrderCashContribution(septemberCancel, [], 2026, 8), 0, 'and no cash moves in September');
+});
+
+test('a refund reduces the retained profit on the date the money went back', () => {
+  const partlyReturned = retained({
+    cancelledAt: '2026-08-20T00:00:00.000Z',
+    // The stored total is what the resolver writes after the refund, so no
+    // legacy-gap estimate is invented on top of the entries.
+    totalPaid: 600,
+    paymentHistory: [
+      { id: 'p1', amount: 1_000, date: '2026-08-10', method: 'Cash', type: 'deposit' },
+      { id: 'r1', amount: 400, date: '2026-09-03', method: 'Cash', type: 'refund' },
+    ],
+  });
+
+  assert.equal(expectedOrderProfitContribution(partlyReturned, ...AUG), 1_000, 'August kept what it recognised');
+  assert.equal(expectedOrderProfitContribution(partlyReturned, 2026, 8), -400, 'September reverses only what went back');
+  assert.equal(netOrderCashContribution(partlyReturned, [], 2026, 8), -400, 'matching the cash that actually left');
+});
+
+test('a plainly cancelled order still retains no profit at all', () => {
+  const plain = retained({}, 'cancelled');
+  assert.equal(expectedOrderProfitContribution(plain, ...AUG), 0, 'nothing is kept');
+  assert.equal(netOrderCashContribution(plain, [], ...AUG), 1_000, 'though the money was really received');
+  assert.equal(reconcileMonthlyCash([plain], noEntries, ...AUG).items[0].reason, 'cancelled-no-retention');
+});
