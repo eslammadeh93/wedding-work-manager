@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CompanyFinanceEntry, Order } from '../src/types';
 import { calculateFinancePeriodCash, calculateMonthlyCash } from '../src/utils/monthlyCash';
+import { initialOrderPaymentState } from '../src/utils/orderPaymentState';
 
 /**
  * The dashboard, Finance and Reports each show money for the same month. They
@@ -56,6 +57,25 @@ const assertAgreement = (orders: Order[], entries: CompanyFinanceEntry[], label:
   assert.equal(collected - dashboard.recognizedOrderCosts, dashboard.netOrderCash, `${label}: cost card is consistent with the cash card`);
   return dashboard;
 };
+
+test('creating an incomplete order counts its opening deposit once in monthly cash', () => {
+  for (const deposit of [0, 2_000, 5_000, 10_000]) {
+    const paymentHistory: Order['paymentHistory'] = deposit > 0
+      ? [{ id: 'initial', amount: deposit, date: '2026-08-02', method: 'Cash', type: 'deposit' }]
+      : [];
+    const financial = initialOrderPaymentState({ totalPrice: 10_000, deposit, paymentHistory });
+    const created = order({ deposit, paymentHistory, ...financial });
+    const summary = calculateMonthlyCash([created], [], YEAR, MONTH);
+
+    assert.equal(created.totalPaid, deposit);
+    assert.equal(created.remainingBalance, 10_000 - deposit);
+    assert.equal(created.paymentStatus, deposit === 10_000 ? 'fully_paid' : deposit > 0 ? 'partially_paid' : 'unpaid');
+    assert.equal(summary.netMonthlyCash, deposit, 'Reports headline includes only money received');
+    assert.equal(summary.netMonthlyCashBreakdown.reduce((sum, item) => sum + item.amount, 0), deposit);
+    assert.equal(summary.collections.some((entry) => entry.isLegacyEstimate), false);
+    assert.equal(assertAgreement([created], [], 'new booking').netOrderCash, deposit);
+  }
+});
 
 test('an incomplete order agrees across dashboard, Finance and Reports', () => {
   const incomplete = [order({

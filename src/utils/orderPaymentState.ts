@@ -187,6 +187,14 @@ export const resolveOrderPaymentState = (
   return finalize(priorPaid);
 };
 
+/** Opening history already includes the deposit; there is no prior legacy payment. */
+export const initialOrderPaymentState = (
+  record: Pick<StoredPaymentRecord, 'deposit' | 'totalPrice' | 'paymentHistory'>,
+): ResolvedOrderPaymentState => resolveOrderPaymentState(
+  { ...record, totalPaid: 0 },
+  { totalPrice: record.totalPrice },
+);
+
 /**
  * Everything a screen needs to describe where an order stands financially.
  * Only contract money appears here; the informational security amount is not

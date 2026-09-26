@@ -12,7 +12,7 @@ import { companyMembersService } from '../companyMembersService';
 import { calculateSafeBalanceToDate } from '../../utils/monthlyCash';
 import { deletionMetadata, isSoftDeleted, recycleBinItems as buildRecycleBinItems } from '../../utils/recycleBin';
 import { resolveOrderCustomers } from '../../utils/orderCustomer';
-import { resolveOrderPaymentState, appendPaymentEntry, type OrderPaymentIntent } from '../../utils/orderPaymentState';
+import { initialOrderPaymentState, resolveOrderPaymentState, appendPaymentEntry, type OrderPaymentIntent } from '../../utils/orderPaymentState';
 import { assertValidExpense, assertValidOrderFinancials } from '../../utils/financialValidation';
 import { expenseReversalEntry, expenseVoidMetadata, financialHistoryOrders } from '../../utils/financialRetention';
 import { loadFinancialOrderHistory, type FinancialHistoryStatus } from './financialHistory';
@@ -223,9 +223,9 @@ export function MultiTenantDataProvider({ children }: { children: React.ReactNod
     const now = new Date().toISOString(); const companyId = company();
     const history = (data.paymentHistory || []).filter((entry) => Number(entry.amount) > 0);
     const totalPrice = data.totalPrice || 0;
-    // A new order has no stored history yet, so the canonical resolver simply
-    // totals the entries the form supplied.
-    const financial = resolveOrderPaymentState({ deposit: data.deposit || 0, totalPaid: 0, paymentHistory: [], totalPrice }, { paymentHistory: history, totalPrice });
+    // The deposit field and opening history describe the same payment.
+    // Do not treat the deposit as legacy money before adding that history.
+    const financial = initialOrderPaymentState({ deposit: data.deposit || 0, paymentHistory: history, totalPrice });
     assertValidOrderFinancials({ ...data, ...financial });
     const totalPaid = financial.totalPaid;
     const eventDate = data.eventDate || data.weddingDate;
